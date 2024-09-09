@@ -1,5 +1,6 @@
 
-import collections, functools, numpy as np, tempfile as tf, os
+import functools, numpy as np, tempfile as tf, os
+import collections, weakref
 
 import ase
 from rdkit import Chem
@@ -55,14 +56,22 @@ def find_conversion(from_type, to_type):
 
     return convert
 
-def convert(mol, target_type:type) -> 'target_type':
-    from_type = type(mol).__qualname__
-    to_type = target_type.__qualname__
 
+_conversion_cache = weakref.WeakKeyDictionary() # convert cost should only be paid once
+def convert(mol, target_type:type) -> 'target_type':
+    to_type = target_type.__qualname__
+    # if mol in _conversion_cache and to_type in _conversion_cache[mol]:
+    #     return _conversion_cache[mol][to_type]
+
+    from_type = type(mol).__qualname__
     if from_type == to_type:
         return mol
 
     converter = find_conversion(from_type, to_type)
+
+    # if mol not in _conversion_cache:
+    #     _conversion_cache[mol] = {}
+    # _conversion_cache[mol][to_type] = mol
     return converter(mol)
 
 
