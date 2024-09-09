@@ -56,21 +56,14 @@ class ReactionComponent:
 
 class ReactionComponentSet:
 
-    def __init__(self, reactants, products):
+    def __init__(self, reactants, unified=None):
         self.reactant_set = reactants
-        self.product_set = products
-        self._unified_reactant = None
-        self._unified_product = None
-
-    @property
-    def reactant(self):
-        ...
+        if unified is None:
+            self.unified_reactant = self.combine_mols(reactants)
 
     @classmethod
     def combine_mols(cls,
                      reactant_mols,
-                     energy_evaluator=None,
-                     model=None, charge=None,
                      displacement_scaling=2,
                      displacement_direction=(1, 0, 0)
                      ):
@@ -82,6 +75,18 @@ class ReactionComponentSet:
             mol.mol.get_positions()
             for mol in ase_mols
         ]
+        all_charges = [
+            mol.mol.get_charges()
+            for mol in reactant_mols
+        ]
+        all_syms = [
+            mol.mol.symbols
+            for mol in reactant_mols
+        ]
+        all_bonds = [
+            mol.bonds
+            for mol in reactant_mols
+        ]
         all_reactant_coms = [
             mol.mol.get_center_of_mass()
             for mol in reactant_mols
@@ -89,9 +94,6 @@ class ReactionComponentSet:
         com_shifted_structs = [
             struct - com[np.newaxis]
             for struct, com in zip(all_reactant_structs, all_reactant_coms)
-        ]
-        all_charges = [
-            mol
         ]
         # diplace each mol so that it's shifted from the others by more than its molecular radius
         molecular_radii = [
@@ -106,13 +108,27 @@ class ReactionComponentSet:
             if i > 0:
                 total_disp += rad  # add my radius
             struct = struct + displacement_direction * total_disp
+            final_structs.append(struct)
             total_disp += rad  # pad to avoid next neighbor
-
         full_struct = np.concatenate(final_structs, axis=0)
+
+        full_bonds = []
+        num_shift = 0
+        for struct, bonds in zip(com_shifted_structs, all_bonds):
+            new_bonds = [
+                [b[0]+num_shift, b[1]+num_shift, b[2]]
+                for b in bonds
+            ]
+            full_bonds.append(new_bonds)
+            num_shift += len(struct)
+        full_bonds = sum(full_bonds, [])
+
+        full_syms = sum([list(syms) for syms in all_syms], [])
+        full_charges = np.concatenate(all_charges)
+
         return GenericMol(
-
+            full_syms,
+            full_struct,
+            charges=full_charges,
+            bonds=full_bonds
         )
-        mol = Atoms(symbols=sum([mol.symbols for mol in reactant_mols], []), positions=full_struct)
-        mol.calc = setup_AIMNET(model, charge)
-
-        return mol
