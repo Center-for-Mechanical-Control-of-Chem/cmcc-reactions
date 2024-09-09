@@ -3,39 +3,56 @@ import ase
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
+from .conversions import convert
+from .energy_evaluators import AIMNetEnergyEvaluator, MMFFEnergyEvaluator
 class ReactionComponent:
     """
     A wrapper for handling reactants that uses `rdkit` and `ase`
     to implement chemical transformations
     """
-    def __init__(self, ase_mol: ase.Atoms, charge):
-        self.ase_mol = ase_mol
-        self.total_charge = charge
+    def __init__(self, mol):
+        self.mol = mol
 
     @classmethod
     def from_smiles(cls, smiles,
                     num_conformers=1,
-                    energy_evaluator=None
+                    energy_evaluator:EnergyEvaluator=None,
+                    optimize=False,
+                    add_implicit_hydrogens=True,
+                    mmff_params=None
                     ):
-        ...
+        rdkit_mol = Chem.MolFromSmiles(smiles)
+        if add_implicit_hydrogens:
+            rdkit_mol = Chem.AddHs(rdkit_mol)
+
+        if mmff_params is None:
+            mmff_params = MMFFEnergyEvaluator.get_default_params()
+
+        if energy_evaluator is None:
+            num_conformers = 1
+
+        conformer_set = AllChem.EmbedMultipleConfs(rdkit_mol, numConfs=1, params=mmff_params)
+        conformers = [
+            conformer_set.GetConformer(conf_id)
+            for conf_id in range(num_conformers)
+        ]
+        if energy_evaluator is not None:
+            if optimize:
+                for i, conf in enumerate(conformers):
+                    conformers[i] = energy_evaluator.optimize(conf)
+            energies = [
+                energy_evaluator.
+            ]
+
+
+
+        return mol
 
     @classmethod
     def from_rdkit(cls, rdkit_conformer):
-        ...
 
-    @classmethod
-    def get_rdkit_positions(cls, mol):
-        atom_positions = []
-        for atom in mol.GetAtoms():
-            atom_map_num = atom.GetAtomMapNum()
-            symbol = atom.GetSymbol()
-            pos = mol.GetAtomPosition(atom.GetIdx())
-            atom_positions.append((atom_map_num, symbol, pos))
+        return cls(ase_mol, Chem.GetFormalCharge(rdkit_conformer))
 
-        # Sort by atom map number to ensure consistent atom order
-        atom_positions.sort(key=lambda x: x[0])
-
-        return [x[1:] for x in atom_positions]
 
     @property
     def atom_positions(self):
