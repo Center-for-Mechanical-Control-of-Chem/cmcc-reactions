@@ -9,6 +9,11 @@ from .energy_evaluators import *
 from .conversions import *
 from .mol_types import *
 
+__all__ = [
+    "ReactionComponent",
+    "ReactionComponentSet"
+]
+
 class ReactionComponent:
     """
     A wrapper for handling reactants that uses `rdkit` and `ase`
@@ -37,8 +42,8 @@ class ReactionComponent:
 
         conformer_set = AllChem.EmbedMultipleConfs(rdkit_mol, numConfs=1, params=mmff_params)
         conformers = [
-            conformer_set.GetConformer(conf_id)
-            for conf_id in range(num_conformers)
+            rdkit_mol.GetConformer(conf_id)
+            for conf_id in conformer_set
         ]
         if energy_evaluator is not None:
             if optimize:
@@ -56,10 +61,35 @@ class ReactionComponent:
 
 class ReactionComponentSet:
 
-    def __init__(self, reactants, unified=None):
-        self.reactant_set = reactants
+    def __init__(self,
+                 components:'list[ReactionComponent]',
+                 unified=None,
+                 **kw
+                 ):
+        self.component_set = components
         if unified is None:
-            self.unified_reactant = self.combine_mols(reactants)
+            self.unified_component = self.combine_mols([r.mol for r in components], **kw)
+
+    @classmethod
+    def from_smiles(cls, smiles,
+                    num_conformers=1,
+                    energy_evaluator: EnergyEvaluator = None,
+                    optimize=False,
+                    add_implicit_hydrogens=True,
+                    mmff_params=None
+                    ):
+        component_smiles = smiles.split(".")
+        components = [
+            ReactionComponent.from_smiles(smiles,
+                                          num_conformers=num_conformers,
+                                          energy_evaluator=energy_evaluator,
+                                          optimize=optimize,
+                                          add_implicit_hydrogens=add_implicit_hydrogens,
+                                          mmff_params=mmff_params
+                                          )
+            for smiles in component_smiles
+        ]
+        return cls(components)
 
     @classmethod
     def combine_mols(cls,
@@ -76,20 +106,20 @@ class ReactionComponentSet:
             for mol in ase_mols
         ]
         all_charges = [
-            mol.mol.get_charges()
-            for mol in reactant_mols
+            mol.charges
+            for mol in ase_mols
         ]
         all_syms = [
             mol.mol.symbols
-            for mol in reactant_mols
+            for mol in ase_mols
         ]
         all_bonds = [
             mol.bonds
-            for mol in reactant_mols
+            for mol in ase_mols
         ]
         all_reactant_coms = [
             mol.mol.get_center_of_mass()
-            for mol in reactant_mols
+            for mol in ase_mols
         ]
         com_shifted_structs = [
             struct - com[np.newaxis]

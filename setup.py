@@ -24,6 +24,10 @@ setuptools.setup(
         "ase",
         "rdkit",
         "torch",
-        "matplotlib"
+        "torch_geometric",
+        "matplotlib",
+        "git+https://github.com/isayevlab/AIMNet2",
+        "mccoygroup-mcutils",
+        "nglview"
     ]
 )

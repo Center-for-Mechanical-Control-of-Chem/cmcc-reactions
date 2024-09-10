@@ -4,6 +4,7 @@ import collections, weakref
 
 import ase
 from rdkit import Chem
+from McUtils.Data import AtomData
 from .mol_types import *
 
 __all__ = [
@@ -20,16 +21,20 @@ def register(from_type, to_type, conversion=None):
             register(from_type, to_type, conv)
         return register_conversion
     else:
+        if not isinstance(from_type, str):
+            from_type = from_type.__qualname__
+        if not isinstance(to_type, str):
+            to_type = to_type.__qualname__
         if from_type not in converters: converters[from_type] = {}
         converters[from_type][to_type] = conversion
 
 def bfs_search(converter_graph, from_type, target_type):
     bfs_queue = collections.deque()
-    bfs_queue.append([[from_type]])
+    bfs_queue.append([from_type])
     visited = set()
 
     while bfs_queue:
-        path, keys = bfs_queue.popleft()
+        path = bfs_queue.popleft()
         from_type = path[-1]
         visited.add(from_type)
         subgraph = converter_graph[from_type]
@@ -130,7 +135,7 @@ def _format_counts_line(npos, nbond):
 def mol_to_str(mol:GenericMol):
     block = []
     block.append("MOL_NAME") # tbd
-    block.append("     MOL NOTE") # tbd
+    block.append("     RDKit          3D") # tbd
     block.append("")
 
     npos = len(mol.positions)
@@ -142,21 +147,21 @@ def mol_to_str(mol:GenericMol):
         mol.symbols
     ):
         block.append(
-            " {:10.4f}{:10.4f}{:10.4f} {:<2}  0  0  0  0  0  0  0  0  0  0  0  0".format(
+            "{:10.5f}{:10.5f}{:10.5f} {:<3} 0  0  0  0  0  0  0  0  0  0  0  0".format(
                 x, y, z, sym
             )
         )
     for i,j,t in mol.bonds:
-        block.append("{:3}{:3}{:3}  0  0  0  0".format(i,j,t))
+        block.append("{:3}{:3}{:3}  0  0  0  0".format(i+1,j+1,t))
     for i,charge in enumerate(mol.charges):
         if charge != 0:
             block.append(" M CHG 1 {} {}".format(i+1, charge))
     block.append("M  END")
-    return "\n".join(block)
+    return SDFString("\n".join(block))
 
 @register(SDFString, Chem.Conformer)
 def str_to_rdkit(sdf:SDFString) -> Chem.Conformer:
-    with tf.NamedTemporaryFile(delete=False) as file:
+    with tf.NamedTemporaryFile("w+", delete=False) as file:
         file.write(sdf.string)
 
     with Chem.SDMolSupplier(file.name) as suppl:
@@ -173,9 +178,9 @@ def aps_to_ase(mol:GenericMol):
     return ASEMol(
         ase.Atoms(
             mol.symbols,
-            mol.positions,
-            charges=mol.charges
+            mol.positions
         ),
+        mol.charges,
         bonds=mol.bonds
     )
 
@@ -184,6 +189,50 @@ def ase_to_aps(mol:ASEMol):
     return GenericMol(
         mol.mol.symbols,
         mol.mol.positions,
-        mol.mol.get_charges(),
+        mol.charges,
+        bonds=mol.bonds
+    )
+
+@register(GenericMol, MassWeightedMol)
+def aps_to_mw(mol:GenericMol):
+    masses = [AtomData[s]["Mass"] for s in mol.symbols]
+    struct = np.asarray(mol.positions)
+    mw = struct * np.sqrt(masses)[:, np.newaxis]
+    return MassWeightedMol(
+        mol.symbols,
+        mw,
+        mol.charges,
+        bonds=mol.bonds
+    )
+
+@register(MassWeightedMol, GenericMol)
+def aps_to_mw(mol:MassWeightedMol):
+    masses = [AtomData[s]["Mass"] for s in mol.symbols]
+    struct = np.asarray(mol.positions)
+    mw = struct / np.sqrt(masses)[:, np.newaxis]
+    return GenericMol(
+        mol.symbols,
+        mw,
+        mol.charges,
+        bonds=mol.bonds
+    )
+
+@register(MassWeightedMol, ASEMassWeightedMol)
+def aps_to_ase(mol:MassWeightedMol):
+    return ASEMassWeightedMol(
+        ase.Atoms(
+            mol.symbols,
+            mol.positions
+        ),
+        charges=mol.charges,
+        bonds=mol.bonds
+    )
+
+@register(ASEMassWeightedMol, MassWeightedMol)
+def ase_to_aps(mol:ASEMassWeightedMol):
+    return MassWeightedMol(
+        mol.mol.symbols,
+        mol.mol.positions,
+        mol.charges,
         bonds=mol.bonds
     )

@@ -1,15 +1,11 @@
 
-import abc
-import ase, torch
+import abc, io
+
+import ase, torch, numpy as np
 from rdkit import Chem
 from rdkit.Chem import AllChem
-
-try:
-    from aimnet2ase import AIMNet2Calculator
-except ImportError:
-    from aimnet2calc import AIMNet2Calculator
-
 from ase.optimize import BFGS
+from McUtils.Data import AtomData
 
 from .mol_types import *
 from .conversions import convert
@@ -28,22 +24,95 @@ class EnergyEvaluator(metaclass=abc.ABCMeta):
     def optimize_structure(self, mol):
         ...
 
+    def get_calculator(self):
+        raise NotImplementedError("`get_calculator` not defined for {}".format(
+            type(self).__name__
+        ))
+
+class MassWeightedCalculator:
+    def __init__(self, core_calc):
+        self.calc = core_calc
+        self.results = None
+
+    all_change = [ # from aimnet2ase
+        'positions',
+        'numbers',
+        'cell',
+        'pbc',
+        'initial_charges',
+        'initial_magmoms',
+    ]
+    default_properties = ['energy']
+    def calculate(self, atoms:ase.Atoms=None, properties=None, system_changes=None):
+        if system_changes is None:
+            system_changes = self.all_change
+        if properties is None:
+            properties = self.default_properties
+
+        masses = [AtomData[s]["Mass"] for s in atoms.symbols]
+        atoms = atoms.copy()
+        sqm = np.sqrt(masses)[:, np.newaxis]
+        atoms.set_positions(atoms.get_positions() / sqm)
+
+        self.calc.calculate(atoms, properties=properties, system_changes=system_changes)
+        res = self.calc.results
+        if 'forces' in res:
+            res['forces'] = res['forces'] / sqm
+        self.results = res
+
+    def copy(self):
+        return type(self)(type(self.calc)(self.calc.base_calc))
+
+    def set_charge(self, charge):
+        return self.calc.set_charge(charge)
+
 class AIMNetEnergyEvaluator(EnergyEvaluator):
-    def __init__(self, model):
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model = torch.jit.load(model, map_location=device)
-        self.calc = AIMNet2Calculator(self.model)
+    def __init__(self, model='aimnet2', mass_weighted=False):
+        self.model = model
+        self.calc = self.load_class()(self.model)
+        self.mass_weighted = mass_weighted
+        if mass_weighted:
+            self.calc = MassWeightedCalculator(self.calc)
 
+    def load_class(self):
+        try:
+            from aimnet2ase import AIMNet2Calculator as calc
+        except ImportError:
+            from aimnet2calc import AIMNet2ASE as calc
+        return calc
+
+    def get_calculator(self):
+        if isinstance(self.calc, MassWeightedCalculator):
+            return self.calc.copy()
+        else:
+            return self.load_class()(self.calc.base_calc)
     def calculate_energy(self, mol):
-        mol = convert(mol, ASEMol).mol # type: ASEMol
-        # charge = sum(mol.charges)
-        # self.calc.set_charge(charge) # TODO: apparently this is no longer necessary?
-        return self.calc(mol)
+        if self.mass_weighted:
+            mol = convert(mol, ASEMassWeightedMol)
+        else:
+            mol = convert(mol, ASEMol) # type: ASEMol
+        mol.mol.calc = self.calc
+        self.calc.set_charge(np.sum(mol.charges))
+        self.calc.calculate(mol.mol, ['energy'])
+        energy = self.calc.results['energy']
+        mol.mol.calc = None
+        return energy
 
-    def optimize_structure(self, mol, fmax=0.001):
-        opt_rea = BFGS(mol)
-        opt_rea.run()
-        return mol
+    convergence_criterion = 0.001
+    def optimize_structure(self, mol):
+        mol = convert(mol, ASEMol) # type: ASEMol
+        bonds = mol.bonds
+        ase_mol = mol.mol
+        self.calc.set_charge(np.sum(mol.charges))
+        ase_mol.calc = self.calc
+
+        opt_rea = BFGS(ase_mol, logfile=io.StringIO())
+        opt_rea.run(fmax=self.convergence_criterion)
+        return ASEMol(
+            ase_mol,
+            charges=mol.charges,
+            bonds=bonds
+        )
 
 class MMFFEnergyEvaluator(EnergyEvaluator):
 
