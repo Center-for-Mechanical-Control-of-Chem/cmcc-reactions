@@ -111,7 +111,8 @@ class AIMNetEnergyEvaluator(EnergyEvaluator):
         return ASEMol(
             ase_mol,
             charges=mol.charges,
-            bonds=bonds
+            bonds=bonds,
+            atom_map=mol.atom_map
         )
 
 class MMFFEnergyEvaluator(EnergyEvaluator):

@@ -1,5 +1,5 @@
 
-import functools, numpy as np, tempfile as tf, os
+import functools, numpy as np, tempfile as tf, os, io
 import collections, weakref
 
 import ase
@@ -98,35 +98,17 @@ def rdkit_to_aps(conf:Chem.Conformer) -> GenericMol:
         for b in mol.GetBonds()
     ]
 
-    atom_map_sorting = [
+    atom_map = [
         atom.GetAtomMapNum()
         for atom in mol.GetAtoms()
     ]
-    ord = np.argsort(atom_map_sorting)
-    inv = np.argsort(ord)
-
-    pos = [pos[i] for i in ord]
-    sym = [sym[i] for i in ord]
-    charges = [charges[i] for i in ord]
-
-    bonds = [
-        [inv[b[0]], inv[b[1]], b[2]]
-        for b in bonds
-    ]
-
-    bond_ord = np.lexsort(
-        [
-            [b[1] for b in bonds],
-            [b[0] for b in bonds]
-        ]
-    )
-    bonds = [bonds[i] for i in bond_ord]
 
     return GenericMol(
         symbols=sym,
         positions=pos,
         charges=charges,
-        bonds=bonds
+        bonds=bonds,
+        atom_map=atom_map
     )
 
 def _format_counts_line(npos, nbond):
@@ -155,23 +137,27 @@ def mol_to_str(mol:GenericMol):
         block.append("{:3}{:3}{:3}  0  0  0  0".format(i+1,j+1,t))
     for i,charge in enumerate(mol.charges):
         if charge != 0:
-            block.append(" M CHG 1 {} {}".format(i+1, charge))
+            block.append("M CHG 1 {} {}".format(i+1, charge))
     block.append("M  END")
+    block.append("> <CMCC_ATOM_MAP>")
+    block.append(" ".join(str(x) for x in mol.atom_map))
+    block.append("")
     return SDFString("\n".join(block))
 
 @register(SDFString, Chem.Conformer)
 def str_to_rdkit(sdf:SDFString) -> Chem.Conformer:
-    with tf.NamedTemporaryFile("w+", delete=False) as file:
-        file.write(sdf.string)
+    # with tf.NamedTemporaryFile("w+", delete=False) as file:
+    #     file.write(sdf.string)
+    sdf = io.BytesIO(sdf.string.encode())
+    mol = next(Chem.ForwardSDMolSupplier(sdf, sanitize=False, removeHs=False))
+    atom_map = mol.GetProp('CMCC_ATOM_MAP')
+    atom_map = [int(i) for i in atom_map.split(" ")]
+    for atom,i in zip(mol.GetAtoms(), atom_map):
+        atom.SetAtomMapNum(i)
 
-    with Chem.SDMolSupplier(file.name) as suppl:
-        for mol in suppl:
-            conf = mol.GetConformer(0)
-            try:
-                os.remove(file.name)
-            except OSError:
-                ...
-            return conf
+    conf = mol.GetConformer(0)
+
+    return conf
 
 @register(GenericMol, ASEMol)
 def aps_to_ase(mol:GenericMol):
@@ -181,7 +167,8 @@ def aps_to_ase(mol:GenericMol):
             mol.positions
         ),
         mol.charges,
-        bonds=mol.bonds
+        bonds=mol.bonds,
+        atom_map=mol.atom_map
     )
 
 @register(ASEMol, GenericMol)
@@ -190,7 +177,8 @@ def ase_to_aps(mol:ASEMol):
         mol.mol.symbols,
         mol.mol.positions,
         mol.charges,
-        bonds=mol.bonds
+        bonds=mol.bonds,
+        atom_map=mol.atom_map
     )
 
 @register(GenericMol, MassWeightedMol)
@@ -202,7 +190,8 @@ def aps_to_mw(mol:GenericMol):
         mol.symbols,
         mw,
         mol.charges,
-        bonds=mol.bonds
+        bonds=mol.bonds,
+        atom_map=mol.atom_map
     )
 
 @register(MassWeightedMol, GenericMol)
@@ -214,7 +203,8 @@ def aps_to_mw(mol:MassWeightedMol):
         mol.symbols,
         mw,
         mol.charges,
-        bonds=mol.bonds
+        bonds=mol.bonds,
+        atom_map=mol.atom_map
     )
 
 @register(MassWeightedMol, ASEMassWeightedMol)
@@ -225,7 +215,8 @@ def aps_to_ase(mol:MassWeightedMol):
             mol.positions
         ),
         charges=mol.charges,
-        bonds=mol.bonds
+        bonds=mol.bonds,
+        atom_map=mol.atom_map
     )
 
 @register(ASEMassWeightedMol, MassWeightedMol)
@@ -234,5 +225,6 @@ def ase_to_aps(mol:ASEMassWeightedMol):
         mol.mol.symbols,
         mol.mol.positions,
         mol.charges,
-        bonds=mol.bonds
+        bonds=mol.bonds,
+        atom_map=mol.atom_map
     )

@@ -13,3 +13,9 @@ from .energy_evaluators import *; from .energy_evaluators import __all__ as expo
 __all__ += exposed
 from . import conversions
 __all__ += ["conversions"]
+from . import util
+__all__ += ["util"]
+from .atom_maps import *; from .atom_maps import __all__ as exposed
+__all__ += exposed
+from .reaction_graphs import *; from .reaction_graphs import __all__ as exposed
+__all__ += exposed

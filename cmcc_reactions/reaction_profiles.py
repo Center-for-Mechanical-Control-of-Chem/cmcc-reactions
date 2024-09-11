@@ -9,6 +9,7 @@ from .energy_evaluators import *
 from .components import *
 from .conversions import *
 from .mol_types import *
+from .atom_maps import *
 
 __all__ = [
     "ReactionProfileGenerator",
@@ -19,21 +20,22 @@ __all__ = [
 class ReactionProfileData:
     initial_profile: 'list[ASEMol]'
     optimized_profile: 'list[ASEMol]'
+    energy_evaluator: 'EnergyEvaluator'
 
 class ReactionProfileGenerator(metaclass=abc.ABCMeta):
     def __init__(self,
-                 reactants:ReactionComponentSet, products:ReactionComponentSet,
+                 reactants,
+                 products,
                  energy_evaluator:EnergyEvaluator,
-                 preoptimize=True,
+                 preoptimize='products',
                  mass_weight=True
                  ):
-
         self.preoptimize = preoptimize
-        reactants = reactants.unified_component
-        products = products.unified_component
         if preoptimize:
-            reactants = energy_evaluator.optimize_structure(reactants)
-            products = energy_evaluator.optimize_structure(products)
+            if preoptimize is True or preoptimize == 'reactants':
+                reactants = energy_evaluator.optimize_structure(reactants)
+            if preoptimize is True or preoptimize == 'products':
+                products = energy_evaluator.optimize_structure(products)
         if mass_weight:
             reactants = convert(reactants, MassWeightedMol)
             products = convert(products, MassWeightedMol)
@@ -48,28 +50,69 @@ class ReactionProfileGenerator(metaclass=abc.ABCMeta):
         ...
 
     @classmethod
-    def from_smiles(cls, rxn_smiles, energy_evaluator, num_conformers=1, **opts):
+    def parse_smiles(cls,
+                     rxn_smiles, energy_evaluator,
+                     num_conformers=1,
+                     atom_mapper='chython',
+                     add_implicit_hydrogens=None,
+                     preoptimize='products'
+                     ):
+        if add_implicit_hydrogens is None:
+            add_implicit_hydrogens = "H" not in rxn_smiles
+        if atom_mapper is not None:
+            if isinstance(atom_mapper, str):
+                if atom_mapper == "chython":
+                    atom_mapper = ChythonAtomMapper(add_implicit_hydrogens=add_implicit_hydrogens)
+                else:
+                    raise ValueError(f"unknown atom mapper '{atom_mapper}'")
+            rxn_smiles = atom_mapper.apply(rxn_smiles)
         reactant_smiles, product_smiles = rxn_smiles.split(">>")
-        reactants = ReactionComponentSet.from_smiles(reactant_smiles,
-                                                     energy_evaluator=energy_evaluator,
-                                                     num_conformers=num_conformers
-                                                     )
         products = ReactionComponentSet.from_smiles(product_smiles,
                                                     energy_evaluator=energy_evaluator,
-                                                    num_conformers=num_conformers
+                                                    num_conformers=num_conformers,
+                                                    add_implicit_hydrogens=add_implicit_hydrogens,
+                                                    optimize=False
                                                     )
-        return cls(reactants, products, energy_evaluator, **opts)
+        if preoptimize is True or preoptimize == 'products':
+            products.unified_component = energy_evaluator.optimize_structure(products.unified_component)
+        reactants = ReactionComponentSet.from_smiles(reactant_smiles,
+                                                     energy_evaluator=energy_evaluator,
+                                                     num_conformers=num_conformers,
+                                                     add_implicit_hydrogens=add_implicit_hydrogens,
+                                                     reference_structure=products.unified_component
+                                                     )
+        if preoptimize is True or preoptimize == 'reactants':
+            reactants.unified_component = energy_evaluator.optimize_structure(reactants.unified_component)
+
+        return reactants, products
+
+    @classmethod
+    def from_smiles(cls,
+                    rxn_smiles, energy_evaluator,
+                    num_conformers=1,
+                    atom_mapper='chython',
+                    add_implicit_hydrogens=None,
+                    **opts
+                    ):
+        reactants, products = cls.parse_smiles(
+            rxn_smiles, energy_evaluator,
+            num_conformers=num_conformers,
+            atom_mapper=atom_mapper,
+            add_implicit_hydrogens=add_implicit_hydrogens
+        )
+        return cls(reactants.unified_component, products.unified_component, energy_evaluator, **opts)
 
 class DyNEBProfileGenerator(ReactionProfileGenerator):
 
     def __init__(self,
                  reactants:ReactionComponentSet, products:ReactionComponentSet,
                  energy_evaluator:EnergyEvaluator,
-                 preoptimize=True,
+                 preoptimize='products',
                  mass_weight=None,
-                 images=5,
+                 images=8,
                  climb=False,
-                 dynamic_relaxation=False
+                 dynamic_relaxation=False,
+                 spring_constant=0.1
                  ):
         if mass_weight is None:
             mass_weight = energy_evaluator.mass_weighted #TODO: add mass_weighted to other evaluators
@@ -82,6 +125,7 @@ class DyNEBProfileGenerator(ReactionProfileGenerator):
         if not isinstance(images, (int, np.integer)):
             self.neb = DyNEB(
                 images,
+                k=spring_constant,
                 climb=climb,
                 fmax=AIMNetEnergyEvaluator.convergence_criterion,
                 dynamic_relaxation=dynamic_relaxation
@@ -124,7 +168,8 @@ class DyNEBProfileGenerator(ReactionProfileGenerator):
         ]
         return ReactionProfileData(
             initial_profile,
-            final_profile
+            final_profile,
+            self.evaluator
         )
 
 
