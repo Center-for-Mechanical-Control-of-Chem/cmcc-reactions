@@ -26,7 +26,7 @@ setuptools.setup(
         "torch",
         "torch_geometric",
         "matplotlib",
-        "git+https://github.com/isayevlab/AIMNet2",
+        # "git+https://github.com/isayevlab/AIMNet2",
         "mccoygroup-mcutils",
         "nglview"
     ]
