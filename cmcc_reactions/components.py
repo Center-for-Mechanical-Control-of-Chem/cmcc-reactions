@@ -102,7 +102,7 @@ class ReactionComponentSet:
     @classmethod
     def combine_mols(cls,
                      reactant_mols,
-                     displacement_scaling=1.2,
+                     displacement_scaling=1,
                      displacement_direction=(1, 0, 0),
                      reference_structure=None,
                      alignment_method="bond_tightening",
