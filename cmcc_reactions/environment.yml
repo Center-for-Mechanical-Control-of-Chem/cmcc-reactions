@@ -1,0 +1,17 @@
+name: cmcc-rxn
+channels:
+  - rdkit
+  - pytorch
+  - openeye
+  - conda-forge
+  - anaconda
+  - defaults
+dependencies:
+  - "ase",
+  - "rdkit",
+  - "torch",
+  -  "torch_geometric",
+  -  "matplotlib",
+  - pip:
+    - "mccoygroup-mcutils"
+    - "git+https://github.com/isayevlab/AIMNet2"
