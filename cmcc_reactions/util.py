@@ -13,7 +13,8 @@ __all__ = ["sort_mol", "view_mol", "export_sdf",  "export_traj",
            "get_charge",
            "get_bonds",
            "get_atom_map",
-           "get_submol"
+           "get_submol",
+           "determine_bonds"
            ]
 
 def sort_mol(mol):
@@ -62,12 +63,25 @@ def sort_mol(mol):
 def view_mol(mol, viewer='x3d'):
     return view(convert(mol, ASEMol).mol, viewer=viewer)
 
-def export_sdf(mol, file):
+def determine_bonds(mol):
+    from rdkit.Chem import rdDetermineBonds
+
+    conf = convert(mol, Chem.Conformer)
+    rdDetermineBonds.DetermineConnectivity(conf)
+    rdDetermineBonds.DetermineBondOrders(conf, charge=np.sum(get_charge(mol)))
+
+    return convert(conf, type(mol))
+
+def export_sdf(mol, file, guess_bonds=False):
+    if guess_bonds:
+        mol = determine_bonds(mol)
     sdf = convert(mol, SDFString).string
     with open(file, 'w+') as dump:
         dump.write(sdf)
 
-def export_traj(traj, file):
+def export_traj(traj, file, guess_bonds=False):
+    if guess_bonds:
+        traj = [determine_bonds(mol) for mol in traj]
     sdf = "\n\n$$$$\n\n".join(convert(mol, SDFString).string for mol in traj)
     with open(file, 'w+') as dump:
         dump.write(sdf)
