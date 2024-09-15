@@ -9,9 +9,10 @@ channels:
 dependencies:
   - "ase",
   - "rdkit",
-  - "torch",
-  -  "torch_geometric",
-  -  "matplotlib",
+  - "matplotlib",
+  - "ipykernel"
   - pip:
+    - "torch==2.3.0"
     - "mccoygroup-mcutils"
-    - "git+https://github.com/isayevlab/AIMNet2"
+#    - "torch_cluster=",
+#    - "git+https://github.com/isayevlab/AIMNet2"
