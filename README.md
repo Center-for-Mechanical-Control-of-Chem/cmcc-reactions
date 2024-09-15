@@ -12,3 +12,4 @@ To do this, we will run
 git clone https://github.com/Center-for-Mechanical-Control-of-Chem/cmcc-reactions.git
 conda create -f cmcc-reactions/environment.yml
 ```
+
