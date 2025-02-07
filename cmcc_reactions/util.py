@@ -66,11 +66,15 @@ def view_mol(mol, viewer='x3d'):
 def determine_bonds(mol):
     from rdkit.Chem import rdDetermineBonds
 
-    conf = convert(mol, Chem.Conformer)
-    rdDetermineBonds.DetermineConnectivity(conf)
-    rdDetermineBonds.DetermineBondOrders(conf, charge=np.sum(get_charge(mol)))
-
-    return convert(conf, type(mol))
+    conf = convert(mol, Chem.Conformer).GetOwningMol()
+    charge = int(sum(get_charge(conf)))
+    try:
+        rdDetermineBonds.DetermineBonds(conf, charge=charge)
+        rdDetermineBonds.DetermineBondOrders(moconfl, charge=charge)
+    except:
+        return mol
+    else:
+        return util.convert(conf, type(mol))
 
 def export_sdf(mol, file, guess_bonds=False):
     if guess_bonds:
@@ -108,7 +112,7 @@ def get_charge(mol):
     if isinstance(mol, Chem.Mol):
         return [atom.GetCharge() for atom in mol.GetAtoms()]
     else:
-        return convert(mol, GenericMol).charge
+        return convert(mol, GenericMol).charges
 
 def get_atom_map(mol):
     if isinstance(mol, Chem.Mol):

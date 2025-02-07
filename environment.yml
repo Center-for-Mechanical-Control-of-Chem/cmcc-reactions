@@ -7,12 +7,17 @@ channels:
   - anaconda
   - defaults
 dependencies:
-  - "ase",
-  - "rdkit",
-  - "matplotlib",
+  - "ase"
+  - "rdkit"
+  - "matplotlib"
   - "ipykernel"
+  - "pip"
   - pip:
-    - "torch==2.3.0"
+    - --find-links https://data.pyg.org/whl/torch-2.3.0+gpu.html
+    - "torch==2.3.0+gpu"
+    - "torch_cluster"
     - "mccoygroup-mcutils"
-#    - "torch_cluster=",
-#    - "git+https://github.com/isayevlab/AIMNet2"
+    - "chython"
+    - "chytorch"
+    - "chytorch-rxnmap"
+    - "git+https://github.com/isayevlab/AIMNet2"
