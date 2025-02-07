@@ -28,6 +28,7 @@ setuptools.setup(
         "matplotlib",
         # "git+https://github.com/isayevlab/AIMNet2",
         "mccoygroup-mcutils",
-        "nglview"
+        "mccoygroup-psience"
+        # "nglview"
     ]
 )

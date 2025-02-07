@@ -1,12 +1,14 @@
 
 import ase, numpy as np
+from Psience.Molecools import Molecule
 
 __all__ = [
     "GenericMol",
     "MassWeightedMol",
     "SDFString",
     "ASEMol",
-    "ASEMassWeightedMol"
+    "ASEMassWeightedMol",
+    "PsiMol"
 ]
 
 class GenericMol:
@@ -56,3 +58,25 @@ class ASEMassWeightedMol(ASEMol):
     """
     A wrapper for ASE to try to track bonds and charge w/ mass weighting
     """
+
+class PsiMol:
+    """
+    A wrapper for ASE to try to track bonds and charge
+    """
+    def __init__(self, psi_mol:Molecule, charges, atom_map=None):
+        self.mol = psi_mol
+        self.charges = charges
+        self.atom_map = 1+np.arange(len(charges)) if atom_map is None else atom_map
+
+    def copy(self):
+        return type(self)(self.mol.copy(), np.asanyarray(self.charges).copy(), atom_map=self.atom_map)
+
+    @property
+    def atoms(self):
+        return self.mol.atoms
+    @property
+    def coords(self):
+        return self.mol.coords # convert to Angstroms?
+    @property
+    def bonds(self):
+        return self.mol.bonds

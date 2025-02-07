@@ -5,6 +5,7 @@ import collections, weakref
 import ase
 from rdkit import Chem
 from McUtils.Data import AtomData
+from Psience.Molecools import Molecule
 from .mol_types import *
 
 __all__ = [
@@ -228,3 +229,39 @@ def ase_to_aps(mol:ASEMassWeightedMol):
         bonds=mol.bonds,
         atom_map=mol.atom_map
     )
+
+@register(Molecule, Chem.Conformer)
+def psi_to_rdkit(mol:Molecule):
+    return mol.rdmol
+
+@register(Chem.Conformer, Molecule)
+def rdkit_to_psie(mol:Chem.Conformer):
+    return Molecule.from_rdmol(mol)
+
+@register(PsiMol, GenericMol)
+def psi_to_aps(mol:PsiMol):
+    return GenericMol(
+        mol.atoms,
+        mol.coords,
+        mol.charges,
+        bonds=mol.bonds,
+        atom_map=mol.atom_map
+    )
+
+@register(ASEMol, GenericMol)
+def ase_to_aps(mol:ASEMol):
+    return GenericMol(
+        mol.mol.symbols,
+        mol.mol.positions,
+        mol.charges,
+        bonds=mol.bonds,
+        atom_map=mol.atom_map
+    )
+
+@register(Molecule, Chem.Conformer)
+def psi_to_rdkit(mol:Molecule):
+    return mol.rdmol
+
+@register(Chem.Conformer, Molecule)
+def rdkit_to_psie(mol:Chem.Conformer):
+    return Molecule.from_rdmol(mol)
