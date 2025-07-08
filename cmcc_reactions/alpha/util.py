@@ -60,8 +60,11 @@ def sort_mol(mol):
         atom_map=atom_map
     )
 
-def view_mol(mol, viewer='x3d'):
-    return view(convert(mol, ASEMol).mol, viewer=viewer)
+def view_mol(mol, viewer='x3d', backend='psience'):
+    if backend == 'ase':
+        return view(convert(mol, ASEMol).mol, viewer=viewer)
+    else:
+        return convert(mol, PsiMol).mol
 
 def determine_bonds(mol):
     from rdkit.Chem import rdDetermineBonds
@@ -70,11 +73,11 @@ def determine_bonds(mol):
     charge = int(sum(get_charge(conf)))
     try:
         rdDetermineBonds.DetermineBonds(conf, charge=charge)
-        rdDetermineBonds.DetermineBondOrders(moconfl, charge=charge)
+        rdDetermineBonds.DetermineBondOrders(conf, charge=charge)
     except:
         return mol
     else:
-        return util.convert(conf, type(mol))
+        return convert(conf, type(mol))
 
 def export_sdf(mol, file, guess_bonds=False):
     if guess_bonds:
