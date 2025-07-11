@@ -7,18 +7,34 @@ import base64
 import numbers
 
 __all__ = [
-    # "write_distortion_data",
-    # "read_distortion_data"
+    "validate_distortion_data",
+    "write_distortion_data",
+    "read_distortion_data"
 ]
 
-def compress_tree(tree_obj, top_level=True):
+def dictify_lists(tree:dict):
+    tree = tree.copy()
+    for k,subtree in tree.items():
+        if isinstance(subtree, (list, tuple)) and all(isinstance(d, dict) for d in subtree):
+            tree[k] = {
+                f'_list_item_{i}':dictify_lists(v)
+                for i,v in enumerate(subtree)
+            }
+            tree[k]['_num_list_items'] = len(subtree)
+        elif isinstance(subtree, dict):
+            tree[k] = dictify_lists(subtree)
+    return tree
+def compress_tree(tree_obj, top_level=True, prep_tree=True):
+    if prep_tree:
+        tree_obj = dictify_lists(tree_obj)
+
     subtrees = {
         'key_map': {}
     }
     for k,(s,v) in enumerate(tree_obj.items()):
         subtrees['key_map'][k] = s
         if isinstance(v, dict):
-            subtrees[k] = compress_tree(v, top_level=False)
+            subtrees[k] = compress_tree(v, top_level=False, prep_tree=False)
         elif isinstance(v, (int, bool, float, str, numbers.Number)):
             subtrees[k] = ((0,-1), np.array([v]))
         else:
@@ -81,7 +97,19 @@ def merge_trees(subtrees, top_level=True):
 
     return key_lists
 
-def decompress_tree(serial_tree):
+def undictify_lists(tree:dict):
+    tree = tree.copy()
+    for k,subtree in tree.items():
+        if isinstance(subtree, dict):
+            if '_num_list_items' in subtree:
+                tree[k] = [
+                    subtree[f'_list_item_{i}']
+                    for i in range(subtree['_num_list_items'])
+                ]
+            else:
+                tree[k] = undictify_lists(subtree)
+    return tree
+def decompress_tree(serial_tree, unprep_tree=True):
     tree = {}
     tree_stack = collections.deque()
     key_map = serial_tree.pop('key_map')
@@ -113,6 +141,8 @@ def decompress_tree(serial_tree):
                 tree = tree[s]
         else:
             tree = tree_stack.pop()
+    if unprep_tree:
+        tree = undictify_lists(tree)
     return tree
 
 class BaseEncoder(json.JSONEncoder):
@@ -231,11 +261,16 @@ def read_tree(file, decompress=True, mode='npz'):
         else:
             return compressed
 
-def write_distortion_data(file, data, validate=True):
+def write_distortion_data(file, data, validate=True, mode='npz'):
     if validate:
-        validate_distortion_data(data)
+        data = validate_distortion_data(data)
+    return write_tree(file, data, mode=mode)
 
-    return write_tree(file, data)
+def read_distortion_data(file, validate=True, mode='npz'):
+    data = read_tree(file, mode=mode)
+    if validate:
+        data = validate_distortion_data(data)
+    return data
 
 
 schemas = {}
@@ -245,28 +280,46 @@ class DistortionDataValidationError(ValueError):
 def validate_instance_type(value, type, validate_instances=False):
     if isinstance(type, str):
         if validate_instances:
-            try:
-                validate_base_schema(type, schemas[type], value)
-            except DistortionDataValidationError:
-                return False
+            # try:
+            value = validate_base_schema(type, schemas[type], value)
+            # except DistortionDataValidationError:
+            #     return False, value
+            # else:
+            return True, value
         else:
-            return type
+            return type, value
     elif isinstance(type, list):
         try:
             viter = iter(value)
         except TypeError:
-            return False
+            return False, value
         else:
-            return all(
+            value = [
                 validate_instance_type(v, type[0], validate_instances=True)
                 for v in viter
-            )
+            ]
+            check = all(v[0] for v in value)
+            value = [v[1] for v in value]
+            return check, value
+    elif not isinstance(type, tuple) and issubclass(type, np.ndarray):
+        if isinstance(value, np.ndarray):
+            return True, value
+        else:
+            try:
+                value = np.asanyarray(value)
+            except ValueError:
+                return False, value
+            else:
+                return not any(
+                    np.issubdtype(value.dtype, np.dtype(t))
+                    for t in [bool, str, object]
+                ), value
     else:
-        return isinstance(value, type)
+        return isinstance(value, type), value
 
 def validate_base_schema(name, schema, instance):
     missing_keys = []
-    for k in schema.get('required', []):
+    for k in schema.get('$required', []):
         if isinstance(k, str):
             if k not in instance:
                 missing_keys.append(k)
@@ -280,7 +333,7 @@ def validate_base_schema(name, schema, instance):
     bad_types = []
     extra_keys = []
     delayed_validations = []
-    for k,v in instance:
+    for k,v in instance.items():
         type = schema.get(k)
         if type is None:
             if not schema.get('$allow_extra_keys', False):
@@ -290,22 +343,35 @@ def validate_base_schema(name, schema, instance):
                 type = schema.get('$default')
                 if type is None: continue
 
-        delayed_validations.append([k, v, type])
-
+        res, v = validate_instance_type(v, type)
+        if isinstance(res, str):
+            delayed_validations.append([k, v, res])
+        elif not res:
+            bad_types.append([k,v,type])
+        else:
+            instance[k] = v
 
     if len(extra_keys) > 0:
-        bad_types = "\n".join(f"{k}: expected {t} got {v}" for k,v,t in bad_types)
         raise DistortionDataValidationError(
-            f"instance of schema `{name}` had mis-typed values {bad_types}"
+            f"instance of schema `{name}` had excess keys {extra_keys}"
         )
     if len(bad_types) > 0:
         bad_types = "\n".join(f"{k}: expected {t} got {v}" for k,v,t in bad_types)
         raise DistortionDataValidationError(
             f"instance of schema `{name}` had mis-typed values {bad_types}"
         )
+    if len(delayed_validations) > 0:
+        for k,v,t in delayed_validations:
+            instance[k] = validate_base_schema(t, schemas[t], v)
 
+    validator = schema.get('$validator')
+    if validator is not None:
+        return validator(instance)
+    else:
+        return instance
 
-
+def validate_distortion_data(instance, root='distortion_data'):
+    return validate_base_schema(root, schemas[root], instance)
 
 def validate_structure_schema(instance):
     coords = instance['coordinates']
@@ -318,6 +384,8 @@ def validate_structure_schema(instance):
         if ncrds != hess.shape[0]:
             raise DistortionDataValidationError("Hessian shape does not match coords")
 
+    return instance
+
 
 schemas['structure'] = {
     'coordinates':np.ndarray,
@@ -328,8 +396,8 @@ schemas['structure'] = {
 }
 
 schemas['results'] = {
-    'reactant':'$structure',
-    'transition_state':'$structure',
+    'reactant':'structure',
+    'transition_state':'structure',
 }
 
 class distortion_types:
@@ -338,8 +406,8 @@ class distortion_types:
     MEPSampling = 'mep'
 
 schemas['distortion'] = {
-    'results':['$structure'],
-    'spec':[int],
+    'results':['results'],
+    'spec':[(int, np.integer)],
     'distortion':np.ndarray,
     'magnitudes':np.ndarray,
     'gamma':float,
@@ -348,19 +416,104 @@ schemas['distortion'] = {
     '$required':['results']
 }
 def validate_solvothermal_distortion(instance):
-    ...
-def validate_internal_distortion(instance):
-    ...
-def validate_direction_distortion(instance):
-    ...
+    if len(instance['results']) != 1:
+        raise DistortionDataValidationError(
+            f"`solvothermal` case only takes one results (got {len(instance['results'])})"
+        )
+    if len(instance.keys()) > 1:
+        raise DistortionDataValidationError(
+            f"`solvothermal` only supports 'results' as keys"
+        )
 
+    for r in instance['results']:
+        reactant = r['reactant']
+        if 'hessian' not in reactant:
+            raise DistortionDataValidationError(
+                f"`solvothermal` requires `hessian` for `reactant` and `transition_state`"
+            )
+        transition_state = r['transition_state']
+        if 'hessian' not in transition_state:
+            raise DistortionDataValidationError(
+                f"`solvothermal` requires `hessian` for `transition_state` (and `reactant`)"
+            )
+
+    return instance
+def validate_internal_distortion(instance):
+    if 'spec' not in instance:
+        raise ValueError("internal requires a spec")
+
+    return instance
+def validate_direction_distortion(instance):
+    if 'direction' not in instance:
+        raise ValueError("force requires a direction")
+
+    return instance
+
+def validate_atom_counts(v, nats):
+    for result in v['results']:
+        for k in {'reactant', 'transition_state'}:
+            c = result[k]['coordinates']
+            if len(c) != nats:
+                return False, k, len(c)
+    else:
+        return True, None, nats
 def validate_lot(instance):
-    ...
+    if 'solvothermal' not in instance:
+        raise DistortionDataValidationError("level of theory requires `solvothermal` results")
+    nats = len(instance['atoms'])
+    for k,v in instance.items():
+        if k == "solvothermal":
+            res, ck, c = validate_atom_counts(v, nats)
+            if not res:
+                raise DistortionDataValidationError(
+                    f"`lot`: in key `{k}` mismatch between number of `atoms` ({nats}) and {ck} coordinates ({c})"
+                )
+            instance[k] = validate_solvothermal_distortion(v)
+        elif k.startswith("internal_"):
+            res, ck, c = validate_atom_counts(v, nats)
+            if not res:
+                raise DistortionDataValidationError(
+                    f"`lot`: in key `{k}` mismatch between number of `atoms` ({nats}) and {ck} coordinates ({c})"
+                )
+            instance[k] = validate_internal_distortion(v)
+        elif k.startswith("force_"):
+            res, ck, c = validate_atom_counts(v, nats)
+            if not res:
+                raise DistortionDataValidationError(
+                    f"`lot`: in key `{k}` mismatch between number of `atoms` ({nats}) and {ck} coordinates ({c})"
+                )
+            instance[k] = validate_direction_distortion(v)
+        elif k in {'atoms', 'smiles'}:
+            continue
+        else:
+            raise DistortionDataValidationError(
+                "level of theory only supports `solvothermal`, `internal_{index}`, and `force_{index}` as keys"
+            )
+
+    return instance
+
+
 
 schemas['lot'] = {
-    'atoms':np.ndarray,
-    '$default':'$results',
+    'atoms':[str],
+    'smiles':str,
+    '$default':'distortion',
     '$allow_extra_keys':True,
     "$validator": validate_lot,
-    "$required": ['coordinates']
+    "$required": ['atoms']
+}
+
+schemas['reactant_system'] = {
+    '$default':'lot',
+    '$allow_extra_keys':True
+}
+
+schemas['reaction_class'] = {
+    '$default':'reactant_system',
+    '$allow_extra_keys':True
+}
+
+schemas['distortion_data'] = {
+    '$default':'reaction_class',
+    '$allow_extra_keys':True
 }
