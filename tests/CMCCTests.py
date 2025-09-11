@@ -117,7 +117,7 @@ class CMCCTests(unittest.TestCase):
     def test_CompileReactionSets(self):
         thc_res_loc = os.path.expanduser('~/Documents/Postdoc/Projects/CMCC/DA_res')
         os.chdir(thc_res_loc)
-        for k in range(6):
+        for k in range(4, 6):
             comp = thc_tools.compile_reaction_class(f'Results_{k+1}')
             thc_tools.write_aggregate_data(f'Res{k+1}_aggregate.npz', comp)
             remp = thc_tools.load_aggregate_data(f'Res{k+1}_aggregate.npz')

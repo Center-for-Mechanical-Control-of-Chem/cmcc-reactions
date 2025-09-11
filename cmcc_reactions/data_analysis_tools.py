@@ -272,11 +272,12 @@ def compile_reaction_class(reaction_class):
     geoms = []
     engs = []
     for ind in reaction_index_iter(reaction_class):
-        inds.append([int(x) for x in ind])
         rpd = parse_reaction_path(reaction_class, ind)
-        atom.append(rpd.geometries[0].atoms)
-        geoms.append(np.concatenate([g.coords for g in rpd.geometries], axis=0))
-        engs.append(rpd.energies)
+        if rpd is not None:
+            inds.append([int(x) for x in ind])
+            atom.append(rpd.geometries[0].atoms)
+            geoms.append(np.concatenate([g.coords for g in rpd.geometries], axis=0))
+            engs.append(rpd.energies)
 
     return {
         'inds':inds,
