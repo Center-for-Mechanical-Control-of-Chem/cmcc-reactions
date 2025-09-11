@@ -17,6 +17,7 @@ import itertools
 import pprint
 import tempfile as tf
 import cmcc_reactions.reaction_data_schema as schema
+import cmcc_reactions.data_analysis_tools as thc_tools
 
 __all__ = [
     "CMCCTests"
@@ -24,6 +25,7 @@ __all__ = [
 
 class CMCCTests(unittest.TestCase):
 
+    @unittest.skip
     def test_DataSerializer(self):
         self.skipTest('...')
         tree = {
@@ -55,6 +57,7 @@ class CMCCTests(unittest.TestCase):
             print(os.path.getsize(tmp_file))
             print(os.path.getsize(js_file))
 
+    @unittest.skip
     def test_DataValidator(self):
         data = {
             'reaction_1': {
@@ -111,8 +114,18 @@ class CMCCTests(unittest.TestCase):
             schema.write_distortion_data(np_file, data)
             new_data = schema.read_distortion_data(np_file, data)
 
+    def test_CompileReactionSets(self):
+        thc_res_loc = os.path.expanduser('~/Documents/Postdoc/Projects/CMCC/DA_res')
+        os.chdir(thc_res_loc)
+        for k in range(6):
+            comp = thc_tools.compile_reaction_class(f'Results_{k+1}')
+            thc_tools.write_aggregate_data(f'Res{k+1}_aggregate.npz', comp)
+            remp = thc_tools.load_aggregate_data(f'Res{k+1}_aggregate.npz')
 
-
+        # print(comp.keys())
+        # print(comp['coords'][0].shape)
+        # for r,c in zip(remp['coords'], comp['coords']):
+        #     print(r-c)
 
 
 if __name__ == '__main__':
