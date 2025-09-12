@@ -18,7 +18,7 @@ import McUtils.Plots as plt
 
 def conf_path(reaction_class, idx_spec, *subpaths):
     if len(idx_spec) == 3:
-        idx_spec = list(idx_spec[:2]) + [f'force_{idx_spec[2]}']
+        idx_spec = list(idx_spec[:-1]) + [f'force_{idx_spec[2]}']
     return os.path.join(reaction_class, *[str(x) for x in idx_spec], *subpaths)
 def load_mol(reaction_class, idx_spec, key):
     base_path = conf_path(reaction_class, idx_spec, f'{key}.xyz' if len(idx_spec) == 2 else f'{key}_force.xyz')
@@ -85,13 +85,47 @@ def parse_reaction_trajectory(conv, load_absolute_energies=False,
         else:
             geoms = chunks[1:]
 
-        eng_block = eng_block.split("energy", 1)[1].split("max-force", 1)[0].strip()
+        eng_block, max_force = eng_block.split("energy", 1)[1].split("max-force", 1)
+        eng_block = eng_block.strip()
         engs = np.array(eng_block.splitlines()).astype('float')
         if load_absolute_energies:
             abs_eng = get_absolute_energies(geoms)
         else:
             abs_eng = None
         return ReactionProfileData(engs, geoms, abs_eng)
+
+def parse_reaction_trajectory_forces(conv):
+    with open(conv) as rp_data:
+        rp_string = rp_data.read()
+
+        chunks, eng_block = rp_string.split('[GEOCONV', 1)
+        # chunks = chunks.split('(XYZ)')[1].split("\n\n")
+
+        _, max_force = eng_block.split("energy", 1)[1].split("max-force", 1)
+        # eng_block = eng_block.strip()
+        max_force = max_force.split("max-step", 1)[0].strip()
+        forces = np.array(max_force.splitlines()).astype('float')
+        return forces
+
+def parse_reaction_dimer_forces(dimer_file):
+    with open(dimer_file) as dimer_dump:
+        dimer_dat = dimer_dump.read()
+        rx_opt, dimer_dat = dimer_dat.split("MINMODE:METHOD", 1)
+        try:
+            dimer_dat, prod_dat = dimer_dat.rsplit("MinModeTranslate", 1)
+        except:
+            print(dimer_file)
+            raise
+        eng_dat = dimer_dat.strip().rsplit("\n", 1)[-1]
+        bits = eng_dat.split()
+        curve = bits[-2]
+        force = bits[-4]
+
+        rx_force = rx_opt.rsplit("BFGS", 1)[-1].strip().split("\n", 1)[0].split()[-1]
+        prod_force = prod_dat.rsplit("BFGS", 1)[-1].strip().split("\n", 1)[0].split()[-1]
+
+        return np.array([rx_force, force, curve, prod_force])
+
 
 def parse_dimer_trajectory(dimer_file,
                            reactant_file,
@@ -153,6 +187,15 @@ def parse_reaction_path(reaction_class, idx_spec, load_absolute_energies=False,
                                          load_absolute_energies=load_absolute_energies,
                                          load_mols=load_mols,
                                          parse_struct=parse_struct)
+
+def parse_reaction_forces(reaction_class, idx_spec):
+    conv = conf_path(reaction_class, idx_spec, 'opt_converged_000.xyz')
+    if not os.path.isfile(conv):
+        conv = conf_path(reaction_class, idx_spec, 'dimer.out')
+        if not os.path.isfile(conv): return None
+        return parse_reaction_dimer_forces(conv)
+    else:
+        return parse_reaction_trajectory_forces(conv)
 
 def get_absolute_energies(geometries):
     return geometries[0].calculate_energy(
@@ -242,13 +285,17 @@ def get_diene_embedding(geom, c1, c2):
 def get_diene_atoms(reactant, product):
     graph_edits = reactant.edge_graph.graph_difference(product.edge_graph)
     inds = reactant.fragment_indices
+    if len(inds) == 1:
+        reactant, product = product, reactant
+        inds = reactant.fragment_indices
+        if len(inds) == 1: return None
     i = 0 if len(inds[0]) > len(inds[1]) else 1
     j = 1 if i == 0 else 0
     new_bond_pos = np.intersect1d(inds[i], np.unique(graph_edits[0]))
-    if len(new_bond_pos) > 2:
+    if len(new_bond_pos) != 2:
         new_bond_pos = np.intersect1d(inds[j], np.unique(graph_edits[0]))
 
-    if len(new_bond_pos) > 2:
+    if len(new_bond_pos) != 2:
         return None
     else:
         atoms = get_diene_embedding(reactant, *new_bond_pos)
@@ -284,7 +331,7 @@ def compare_force_geometries(geoms_force, geoms_no_force,
 
 def compare_force_geometries_from_index(reaction_class, idx_spec, embedding_atoms=None, structure_index=0, **opts):
     geom_test = parse_reaction_path(reaction_class, idx_spec, load_absolute_energies=False)
-    geom_test_nf = parse_reaction_path(reaction_class, idx_spec[:2], load_absolute_energies=False)
+    geom_test_nf = parse_reaction_path(reaction_class, idx_spec[:-1], load_absolute_energies=False)
 
     return compare_force_geometries(geom_test.geometries,
                                     geom_test_nf.geometries,
@@ -307,6 +354,19 @@ def calculate_rmsd_reaction_coordiante(coords, rescale=True):
 def get_incremental_RMSD(geometries, rescale=True):
     coords = geometries[0].embed_coords(np.array([g.coords for g in geometries]))
     return calculate_rmsd_reaction_coordiante(coords, rescale=rescale)
+
+def get_reactant_ts_pos(engs):
+    ts_pos = np.argmax(engs)
+    if ts_pos == 0: return 0, 0
+    if ts_pos < len(engs) - 1:
+        p1 = np.argmin(engs[:ts_pos])
+        p2 = ts_pos + 1 + np.argmin(engs[ts_pos + 1:])
+        if engs[p1] < p2:
+            return p2, ts_pos
+        else:
+            return p1, ts_pos
+    else:
+        return np.argmin(engs[:ts_pos]), ts_pos
 
 def calculate_reactant_energy(engs):
     ts_pos = np.argmax(engs)
@@ -369,7 +429,7 @@ def plot_reaction_profiles_from_index(reaction_class, idx_spec,
     geom_test_nf = parse_reaction_path(reaction_class, idx_spec[:2],
                                        load_absolute_energies=load_absolute_energies)
 
-    return plot_reaction_profiles(geom_test, geom_test_nf, **opts)
+    return plot_reaction_profiles(geom_test, geom_test_nf, absolute_energies=absolute_energies, **opts)
 
 def remove_transrot(mol:Molecule, mode):
     transrot_modes = mol.translation_rotation_modes[1]
@@ -426,6 +486,20 @@ def compile_reaction_class(reaction_class, include_toplevel=False, return_conf=F
         'atoms':atom,
         'coords':geoms,
         'energies':engs
+    }
+
+def compile_reaction_forces(reaction_class, include_toplevel=False, return_conf=False):
+    inds = []
+    forces = []
+    for ind in reaction_index_iter(reaction_class, include_toplevel=include_toplevel, return_conf=return_conf):
+        force = parse_reaction_forces(reaction_class, ind)
+        if force is not None:
+            inds.append([int(x) for x in ind])
+            forces.append(force)
+
+    return {
+        'inds':inds,
+        'forces':forces
     }
 
 def write_aggregate_data(file, aggregate_data):
@@ -707,7 +781,7 @@ def compute_comparative_descriptors(
                 force_data['energies']
             )
     ):
-        key = tuple(idx[:2])
+        key = tuple(idx[:-1])
         if key not in baseline_dict:
             if key not in no_force_data['molecule_cache']:
                 comp_pos = find_index_position(no_force_data, key)
@@ -737,6 +811,8 @@ def _compute_com_distance(coords, energies, frag_inds, mass_scaling):
 
 def _prep_topline_data(rx_base):
     frag_inds = rx_base.reactant.fragment_indices
+    if len(frag_inds) == 1:
+        frag_inds = rx_base.product.fragment_indices
     m = np.array(rx_base.reactant.masses)
     scale = m / np.sum(m)
 
@@ -758,6 +834,33 @@ def compute_com_changes(no_force_data, force_data):
         _compare_coms
     )
 
+
+def _compute_cc_distance(coords, energies, ats):
+    r, ts = get_reactant_ts_pos(energies)
+    dists = np.linalg.norm(np.diff(coords[:, ats, :], axis=1), axis=-1)
+    return dists[ts], dists[r]
+
+def _prep_topline_cc_data(rx_base):
+    ats = get_diene_atoms(rx_base.reactant, rx_base.product)
+    if ats is None:
+        return None
+    return rx_base.coords, rx_base.energies, ats
+
+def _prep_cc_coords(og_coords, _, ats, new_coords, energies):
+    coords = np.reshape(new_coords, (-1, og_coords.shape[-2], 3))
+    return coords, energies, ats
+
+def _compare_ccs(og_coms, new_coms):
+    return new_coms[0] - og_coms[0], new_coms[1] - og_coms[1]
+
+def compute_cc_changes(no_force_data, force_data):
+    return compute_comparative_descriptors(
+        no_force_data, force_data,
+        _prep_topline_cc_data,
+        _prep_cc_coords,
+        _compute_cc_distance,
+        _compare_ccs
+    )
 
 def plot_mm_activated_percentages(mm_groups, cutoff=0, **opts):
     masses, barriers = mm_groups
@@ -917,3 +1020,155 @@ def get_absolute_energy_comparisons(no_force_data, force_data):
     e1 = [e[0] for e in energy_lists]
     e2 = [e[1] for e in energy_lists]
     return {'no_force_energies':e1, 'force_energies':e2}
+
+def check_reaction_forces(energy_map, force_data,
+                          force_max=2e-5,
+                          force_max_dimer=5e-4,
+                          curve_max=-2):
+    return [
+        abs(force[np.argmax(engs)]) < force_max
+            if len(force) != 4 else
+        (abs(force[1]) < force_max_dimer and force[2] < curve_max)
+        for engs, force in zip(energy_map["energies"], force_data["forces"])
+    ]
+
+def get_energy_range_mask(engs, min, max, use_abs=False):
+    engs = np.asanyarray(engs)
+    if use_abs: engs = np.abs(engs)
+    return np.logical_and(engs < max, engs > min)
+
+def valid_mask_percent(engs, min, max, use_abs=False):
+    return np.sum(get_energy_range_mask(engs, min, max, use_abs=use_abs)) / len(engs)
+
+def get_ts_diffs(abs_engs):
+    return np.array(
+        [
+            np.max(f) - np.max(nf)
+            for f, nf in zip(abs_engs['force_energies'], abs_engs['no_force_energies'])
+        ]
+    )
+
+def get_gs_diffs(abs_engs):
+    return np.array([
+        calculate_reactant_energy(f) - calculate_reactant_energy(nf)
+        for f, nf in zip(abs_engs['force_energies'], abs_engs['no_force_energies'])
+    ])
+
+def get_valid_reaction_mask(
+        abs_engs,
+        force_data,
+        forces,
+        max_ediff=.5,
+        min_ediff=-5
+):
+    ts_diffs = get_ts_diffs(abs_engs)
+    gs_diffs = get_gs_diffs(abs_engs)
+    force_checks = check_reaction_forces(force_data, forces)
+
+    return np.logical_and(
+        np.logical_and(
+            force_checks,
+            get_energy_range_mask(
+                ts_diffs,
+                min=min_ediff,
+                max=max_ediff
+            )
+        ),
+        get_energy_range_mask(
+            gs_diffs,
+            min=min_ediff,
+            max=max_ediff
+        )
+    )
+
+
+def get_good_barrier_points(no_force_data, force_data, forces, abs_eng, max_ediff=.1, min_ediff=-5,
+                            return_mask=False
+                            ):
+    check_mask_1 = get_valid_reaction_mask(
+        abs_eng,
+        force_data,
+        forces,
+        max_ediff=max_ediff,
+        min_ediff=min_ediff
+    )
+    check_inds1 = np.where(check_mask_1)[0]
+    barr_diffs1 = compute_barrier_changes(no_force_data, force_data)
+    barrs_1 = compute_aggregate_barriers(force_data)
+    barr_diffs1 = barr_diffs1[check_inds1]
+    barrs_1 = barrs_1[check_inds1]
+    xy = (barrs_1 - barr_diffs1, barr_diffs1)
+    if return_mask:
+        return check_inds1, xy
+    else:
+        return xy
+
+def plot_total_scatter(total_og, total_diff,
+                       cutoff=.1,
+                       figure=None,
+                       upper_color=None,
+                       plot_lines=True,
+                       plot_range=None,
+                       **opts):
+    if plot_range is None:
+        plot_range = [[np.min(total_og) - 2, np.max(total_og) + 2], [-5.5, 5.5]]
+    mask1 = total_diff <= cutoff
+    if mask1.any():
+
+        scatter_base = plt.ScatterPlot(
+            total_og[total_diff <= cutoff],
+            total_diff[total_diff <= cutoff],
+            **collections.ChainMap(
+                opts,
+                dict(
+                    axes_labels=["E$_a^{\\text{(solv.)}}$ (kcal mol$^{-1}$)", "$\\Delta$E$_a$ (kcal mol$^{-1}$)"],
+                    image_size=800,
+                    figure=figure,
+                    plot_range=plot_range
+                )
+            )
+        )
+        plt.ScatterPlot(
+            total_og[total_diff > cutoff],
+            total_diff[total_diff > cutoff],
+            # axes_labels=["E$_a^{\\text{(solv.)}}$ (kcal mol$^{-1}$)", "$\\Delta$E$_a$ (kcal mol$^{-1}$)"],
+            # image_size=800,
+            color="#500000" if upper_color is None else upper_color,
+            # plt.ColorPalette.color_lighten(plt.ColorPalette("default")[0], 2),
+            figure=scatter_base
+        )
+    else:
+        scatter_base = plt.ScatterPlot(
+            total_og,
+            total_diff,
+            **collections.ChainMap(
+                dict(color="#500000" if upper_color is None else upper_color),
+                opts,
+                dict(
+                    axes_labels=["E$_a^{\\text{(solv.)}}$ (kcal mol$^{-1}$)", "$\\Delta$E$_a$ (kcal mol$^{-1}$)"],
+                    image_size=800,
+                    figure=figure,
+                    plot_range=[[np.min(total_og) - 2, np.max(total_og) + 2], [-5.5, 5.5]]
+                )
+            )
+        )
+    if plot_lines:
+        plt.HorizontalLinePlot(
+            plot_range[0],
+            [0],
+            figure=scatter_base,
+            linestyle="dashed",
+            color="gray",
+            linewidth=2
+        )
+        plt.HorizontalLinePlot(
+            plot_range[0],
+            [-1.36, -2.72],
+            figure=scatter_base,
+            linestyle="dashed",
+            color="red",
+            linewidth=2
+        )
+        # scatter_base.savefig("scatter_filtered_up_to_6.png")
+
+    return scatter_base
