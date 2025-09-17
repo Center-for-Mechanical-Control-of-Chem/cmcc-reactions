@@ -361,7 +361,7 @@ def get_reactant_ts_pos(engs):
     if ts_pos < len(engs) - 1:
         p1 = np.argmin(engs[:ts_pos])
         p2 = ts_pos + 1 + np.argmin(engs[ts_pos + 1:])
-        if engs[p1] < p2:
+        if engs[p1] < engs[p2]:
             return p2, ts_pos
         else:
             return p1, ts_pos
