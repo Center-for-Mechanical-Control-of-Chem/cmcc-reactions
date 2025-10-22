@@ -18,6 +18,7 @@ import pprint
 import tempfile as tf
 import cmcc_reactions.reaction_data_schema as schema
 import cmcc_reactions.data_analysis_tools as thc_tools
+import cmcc_reactions.generate_reaction_products as gen_prods
 
 __all__ = [
     "CMCCTests"
@@ -114,6 +115,7 @@ class CMCCTests(unittest.TestCase):
             schema.write_distortion_data(np_file, data)
             new_data = schema.read_distortion_data(np_file, data)
 
+    @unittest.skip
     def test_CompileReactionSets(self):
         thc_res_loc = os.path.expanduser('~/Documents/Postdoc/Projects/CMCC/DA_res')
         os.chdir(thc_res_loc)
@@ -127,6 +129,17 @@ class CMCCTests(unittest.TestCase):
         # for r,c in zip(remp['coords'], comp['coords']):
         #     print(r-c)
 
+    def test_GenerateReactionProducts(self):
+
+        woof = gen_prods.test_main()
+        print(woof)
+
+        # mod_smi = gen_prods.modify_template(gen_prods.template_1, {'R':'CCC', 'X':'ONO', "R'":'F'})
+        # mod_smi = gen_prods.modify_template(gen_prods.template_5, {'R':'CCC', 'X':'ONO', "R'":'F'})
+        # print(
+        #     mod_smi,
+        #     gen_prods.bond_breaking_indices(mod_smi)
+        # )
 
 if __name__ == '__main__':
     os.chdir(root)
