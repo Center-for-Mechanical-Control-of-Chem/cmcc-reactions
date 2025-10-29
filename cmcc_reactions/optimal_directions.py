@@ -1,12 +1,15 @@
 import numpy as np
+from scipy.optimize import minimize as scipy_opt
 from McUtils.Data import UnitsData
+import McUtils.Devutils as dev
 import McUtils.Numputils as nput
 from Psience.Molecools import Molecule
 
 __all__ = [
     "find_optimal_displacement_coordinate",
     "construct_force_dirs",
-    "reaction_force_dirs"
+    "reaction_force_dirs",
+    "compute_reaction_gamma"
 ]
 
 def clip_f(f):
@@ -51,20 +54,30 @@ def get_guess_dir(f_proj_r, f_proj_ts):
     guess_pos = np.argmax(1 / g_base_r - 1 / g_base_ts)
     return L_ts[:, guess_pos]
 
+def scipy_optimize_forces(gs_hess, ts_hess, guess_dir, proj_dirs, *, max_iterations, method='nelder-mead'):
+    reduced_basis = nput.find_basis(nput.orthogonal_projection_matrix(proj_dirs))
+    gs_hess = reduced_basis.T @ gs_hess @ reduced_basis
+    ts_hess = reduced_basis.T @ ts_hess @ reduced_basis
 
-def find_optimal_displacement_coordinate(gs_hess, ts_hess, proj_dirs,
-                                         guess_dir=None,
-                                         max_iterations=1000
-                                         ):
-    if guess_dir is None:
-        proj = nput.orthogonal_projection_matrix(proj_dirs)
-        f_proj_r = proj @ gs_hess @ proj
-        f_proj_ts = proj @ ts_hess @ proj
-        guess_dir = get_guess_dir(f_proj_r, f_proj_ts)
+    guess_dir = np.dot(guess_dir, reduced_basis)
 
-    if max_iterations < 0:
-        return guess_dir, -1
+    def fun(guess):
+        guess = nput.vec_normalize(guess)
+        return -np.array([gamma(gs_hess, ts_hess, guess)])
 
+    def jac(guess):
+        guess = nput.vec_normalize(guess)
+        gg = dgamma(gs_hess, ts_hess, guess)
+        return -np.dot(nput.orthogonal_projection_matrix(guess[:, np.newaxis]), gg)
+
+    opts = dict(options={'maxiter':max_iterations})
+    if method in {'cg', 'bfgs'}:
+        opts['jac'] = jac
+
+    min = scipy_opt(fun, guess_dir, method=method, **opts)
+    return np.dot(nput.vec_normalize(min.x), reduced_basis.T), min
+
+def mcutils_optimize_forces(gs_hess, ts_hess, guess_dir, proj_dirs, *, max_iterations, method='cg'):
     def fun(guess, mask):
         return -np.array([gamma(gs_hess, ts_hess, guess[0])])
 
@@ -76,17 +89,17 @@ def find_optimal_displacement_coordinate(gs_hess, ts_hess, proj_dirs,
     def fhess(guess, mask):
         return -dgamma2(gs_hess, ts_hess, guess[0])[np.newaxis]
 
+    if dev.str_is(method, 'cg'):
+        method = nput.ConjugateGradientStepFinder(fun, jac,
+                                                       damping_parameter=.9,
+                                                       restart_interval=20
+                                                       )
+    elif dev.str_is(method, 'quasi-newton'):
+        method = nput.QuasiNewtonStepFinder(fun, jac)
+
     force_dir, is_opt, error = nput.iterative_step_minimize(
         guess_dir,
-        nput.ConjugateGradientStepFinder(fun, jac,
-                                         damping_parameter=.9,
-                                         restart_interval=20
-                                         ),
-        # nput.QuasiNewtonStepFinder(fun, jac),#, damping_parameter=.9, restart_interval=10),
-        # nput.NewtonStepFinder(fun, jac, fhess,
-        #                       line_search=True,
-        #                       damping_parameter=.9
-        #                      ),
+        method,
         unitary=True,
         orthogonal_directions=proj_dirs,
         # generate_rotation=True,
@@ -94,6 +107,34 @@ def find_optimal_displacement_coordinate(gs_hess, ts_hess, proj_dirs,
     )
 
     return force_dir, error
+
+
+DEFAULT_MAX_ITERATIONS = 100
+def find_optimal_displacement_coordinate(gs_hess, ts_hess, proj_dirs,
+                                         guess_dir=None,
+                                         max_iterations=None,
+                                         optimizer='mcutils',
+                                         **opts
+                                         ):
+    if guess_dir is None:
+        proj = nput.orthogonal_projection_matrix(proj_dirs)
+        f_proj_r = proj @ gs_hess @ proj
+        f_proj_ts = proj @ ts_hess @ proj
+        guess_dir = get_guess_dir(f_proj_r, f_proj_ts)
+
+    if max_iterations is None:
+        max_iterations = DEFAULT_MAX_ITERATIONS
+    if max_iterations < 0:
+        return guess_dir, -1
+
+    if dev.str_is(optimizer, 'scipy'):
+        optimizer = scipy_optimize_forces
+    elif dev.str_is(optimizer, 'mcutils'):
+        optimizer = mcutils_optimize_forces
+
+    return optimizer(gs_hess, ts_hess, guess_dir, proj_dirs,
+                     max_iterations=max_iterations,
+                     **opts)
 
 
 def get_force_dirs(hess_gs, hess_ts, initial_dir, k, **opts):
@@ -142,7 +183,7 @@ def construct_force_dirs(modes_gs, modes_ts,
                          *,
                          num_dirs,
                          idx_start,
-                         max_iterations=1500,
+                         max_iterations=None,
                          **opts
                          ):
     nat = len(modes_gs.masses)
@@ -156,11 +197,10 @@ def construct_force_dirs(modes_gs, modes_ts,
                                         max_iterations=max_iterations,
                                         **opts
                                         )
-    # gi12 = nput.fractional_power(reactant.get_gmatrix(use_internals=False), -1/2)
-    cart_force_dirs = modes_ts.matrix @ force_dirs
-    selected_force_dirs = cart_force_dirs.T[idx_start:]
+    cart_force_dirs = force_dirs.T @ modes_ts.coords_by_modes
+    selected_force_dirs = cart_force_dirs[idx_start:]
 
-    return selected_force_dirs
+    return selected_force_dirs, force_dirs
 
 def write_gsm_constraint(nat, selected_force_dirs,
                          file_pattern="force_{i}.txt",
@@ -195,7 +235,9 @@ def write_gsm_constraint(nat, selected_force_dirs,
 def reaction_force_dirs(reactant, transition_state,
                         num_dirs=6,
                         fragment_indices=None,
-                        low_frequency_cutoff=None
+                        low_frequency_cutoff=0.00045, # 100 cm-1
+                        return_modes=True,
+                        **opts
                         ):
     new_modes_ts = transition_state.get_normal_modes()
     new_modes_gs = reactant.get_normal_modes()
@@ -210,48 +252,32 @@ def reaction_force_dirs(reactant, transition_state,
         ts_freqs = new_modes_ts.freqs
         idx_start = int(np.where(ts_freqs >= low_frequency_cutoff)[0][0])
     else:
-        idx_start = 0
+        idx_start = 1
 
-    return construct_force_dirs(new_modes_gs, new_modes_ts,
+    dirs = construct_force_dirs(new_modes_gs, new_modes_ts,
                                 num_dirs=num_dirs,
-                                idx_start=idx_start
+                                idx_start=idx_start,
+                                **opts
                                 )
+    if return_modes:
+        return dirs, (new_modes_gs, new_modes_ts)
+    else:
+        return dirs
 
-#
-# if __name__ == '__main__':
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument('-reactant', help='npz file containing reactant', required=True)
-#     parser.add_argument('-ts', help='npz file containing TS', required=True)
-#     parser.add_argument('--num_dirs',
-#                         help='number of orthogonal force dirs to return',
-#                         type=int,
-#                         default=12,
-#                         )
-#     parser.add_argument('--low_freq',
-#                         help='low frequency mode cutoff',
-#                         type=float,
-#                         default=100)
-#     parser.add_argument('--frag', help='whether or not modes are fragment localized', type=int, default=-1)
-#     args = parser.parse_args()
-#
-#     reactant = setup_mol(np.load(args.reactant))
-#     transition_state = setup_mol(np.load(args.ts))
-#
-#     new_modes_ts = transition_state.get_normal_modes()
-#     new_modes_gs = reactant.get_normal_modes()
-#
-#     if args.frag >= 0:
-#         frag_inds = reactant.fragment_indices[args.frag]
-#         new_modes_gs = new_modes_gs.localize(atoms=frag_inds, allow_mode_mixing=True)
-#         new_modes_ts = new_modes_ts.localize(atoms=frag_inds, allow_mode_mixing=True)
-#
-#     lf = args.low_freq
-#     ts_freqs = new_modes_ts.freqs * 219474.63
-#     idx_start = int(np.where(ts_freqs >= lf)[0][0])
-#
-#     dirs = construct_force_dirs(new_modes_gs, new_modes_ts,
-#                                 num_dirs=args.num_dirs,
-#                                 idx_start=idx_start
-#                                 )
-#
-#     write_force_dirs(dirs)
+def compute_reaction_gamma(reactant, transition_state, direction):
+    new_modes_ts = transition_state.get_normal_modes()
+    new_modes_gs = reactant.get_normal_modes()
+    return gamma(
+        new_modes_gs.compute_hessian('coords'),
+        new_modes_ts.compute_hessian('coords'),
+        direction
+    )
+
+def reorder_force_dirs(rs_solv, ts_solv, dirs):
+    gamma_list = np.array([
+        compute_reaction_gamma(rs_solv, ts_solv, d)
+        for d in dirs
+    ])
+    ord_g = np.argsort(-gamma_list)
+    return gamma_list[ord_g,], dirs[ord_g,]
+
