@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.optimize import minimize as scipy_opt
 from McUtils.Data import UnitsData
+from McUtils.Scaffolding import Logger
 import McUtils.Devutils as dev
 import McUtils.Numputils as nput
 from Psience.Molecools import Molecule
@@ -20,9 +21,11 @@ def clip_f(f):
         f = s * 1e-15
     return f
 
-def gamma(hess_gs, hess_ts, d):
+def gamma(hess_gs, hess_ts, d, d_ts=None):
+    if d_ts is None:
+        d_ts = d
     f_g = np.dot(np.dot(hess_gs, d), d)
-    f_t = np.dot(np.dot(hess_ts, d), d)
+    f_t = np.dot(np.dot(hess_ts, d_ts), d_ts)
     return 1 / f_g - 1 / f_t
 
 def df_inv(hess, d):
@@ -54,7 +57,8 @@ def get_guess_dir(f_proj_r, f_proj_ts):
     guess_pos = np.argmax(1 / g_base_r - 1 / g_base_ts)
     return L_ts[:, guess_pos]
 
-def scipy_optimize_forces(gs_hess, ts_hess, guess_dir, proj_dirs, *, max_iterations, method='nelder-mead'):
+def scipy_optimize_forces(gs_hess, ts_hess, guess_dir, proj_dirs, *, max_iterations, logger=None,
+                          method='nelder-mead'):
     reduced_basis = nput.find_basis(nput.orthogonal_projection_matrix(proj_dirs))
     gs_hess = reduced_basis.T @ gs_hess @ reduced_basis
     ts_hess = reduced_basis.T @ ts_hess @ reduced_basis
@@ -68,16 +72,34 @@ def scipy_optimize_forces(gs_hess, ts_hess, guess_dir, proj_dirs, *, max_iterati
     def jac(guess):
         guess = nput.vec_normalize(guess)
         gg = dgamma(gs_hess, ts_hess, guess)
-        return -np.dot(nput.orthogonal_projection_matrix(guess[:, np.newaxis]), gg)
+        g2 = np.dot(nput.orthogonal_projection_matrix(guess[:, np.newaxis]), gg)
+        return -g2
 
     opts = dict(options={'maxiter':max_iterations})
     if method in {'cg', 'bfgs'}:
         opts['jac'] = jac
 
+    if logger is not None:
+        logger = Logger.lookup(logger)
+        prev_re = [guess_dir]
+        opts['callback'] = lambda intermediate_result, prev_re=prev_re: (
+            logger.log_print(
+                [
+                    "Struct: {intermediate_result}",
+                    "Step: {intermediate_step}"
+                ],
+                intermediate_result=intermediate_result,
+                intermediate_step=intermediate_result - prev_re[-1]
+            ),
+            prev_re.append(intermediate_result)
+        )
+
     min = scipy_opt(fun, guess_dir, method=method, **opts)
     return np.dot(nput.vec_normalize(min.x), reduced_basis.T), min
 
-def mcutils_optimize_forces(gs_hess, ts_hess, guess_dir, proj_dirs, *, max_iterations, method='cg'):
+def mcutils_optimize_forces(gs_hess, ts_hess, guess_dir, proj_dirs, *, max_iterations,
+                            logger=None,
+                            method='cg'):
     def fun(guess, mask):
         return -np.array([gamma(gs_hess, ts_hess, guess[0])])
 
@@ -102,6 +124,7 @@ def mcutils_optimize_forces(gs_hess, ts_hess, guess_dir, proj_dirs, *, max_itera
         method,
         unitary=True,
         orthogonal_directions=proj_dirs,
+        logger=logger,
         # generate_rotation=True,
         max_iterations=max_iterations
     )
@@ -114,6 +137,7 @@ def find_optimal_displacement_coordinate(gs_hess, ts_hess, proj_dirs,
                                          guess_dir=None,
                                          max_iterations=None,
                                          optimizer='mcutils',
+                                         perturbation=0,
                                          **opts
                                          ):
     if guess_dir is None:
@@ -121,6 +145,9 @@ def find_optimal_displacement_coordinate(gs_hess, ts_hess, proj_dirs,
         f_proj_r = proj @ gs_hess @ proj
         f_proj_ts = proj @ ts_hess @ proj
         guess_dir = get_guess_dir(f_proj_r, f_proj_ts)
+
+    dx = perturbation * np.dot(nput.orthogonal_projection_matrix(proj_dirs), np.random.rand(*guess_dir.shape))
+    guess_dir = nput.vec_normalize(guess_dir + dx)
 
     if max_iterations is None:
         max_iterations = DEFAULT_MAX_ITERATIONS
@@ -162,7 +189,6 @@ def nm_hess(modes, L=None):
     freqs2 = np.sign(modes.freqs) * modes.freqs ** 2
     return L @ np.diag(freqs2) @ L.T
 
-
 def setup_mol(reactant_data):
     # reactant_data = np.load(args.reactant)
     nat = len(reactant_data['numbers'])
@@ -186,12 +212,12 @@ def construct_force_dirs(modes_gs, modes_ts,
                          max_iterations=None,
                          **opts
                          ):
-    nat = len(modes_gs.masses)
+    # nat = len(modes_gs.masses)
     hess_ts_nms = nm_hess(modes_ts, L=np.eye(modes_ts.matrix.shape[-1]))
-    hess_gs_nms = nm_hess(modes_gs, L=modes_ts.matrix.T @ modes_gs.matrix)
+    hess_gs_nms = nm_hess(modes_gs, L=modes_ts.inverse @ modes_gs.matrix)
 
     force_dirs, errors = get_force_dirs(hess_gs_nms, hess_ts_nms,
-                                        np.eye(nat * 3 - 6)[:, :idx_start],
+                                        np.eye(len(hess_ts_nms))[:, :idx_start],
                                         # new_modes_ts.matrix[:, (0,)],
                                         num_dirs,
                                         max_iterations=max_iterations,
@@ -264,20 +290,42 @@ def reaction_force_dirs(reactant, transition_state,
     else:
         return dirs
 
-def compute_reaction_gamma(reactant, transition_state, direction):
+def compute_reaction_gamma(reactant, transition_state, direction_gs,
+                           direction_ts=None,
+                           use_mode_space=True
+                           ):
+    direction_gs = np.asanyarray(direction_gs)
+    if direction_ts is None:
+        direction_ts = direction_gs
+    else:
+        direction_ts = np.asanyarray(direction_ts)
     new_modes_ts = transition_state.get_normal_modes()
     new_modes_gs = reactant.get_normal_modes()
-    return gamma(
-        new_modes_gs.compute_hessian('coords'),
-        new_modes_ts.compute_hessian('coords'),
-        direction
-    )
 
-def reorder_force_dirs(rs_solv, ts_solv, dirs):
-    gamma_list = np.array([
-        compute_reaction_gamma(rs_solv, ts_solv, d)
-        for d in dirs
-    ])
+    if use_mode_space:
+        f_ts = nm_hess(new_modes_ts, L=np.eye(new_modes_ts.matrix.shape[-1]))
+        f_gs = nm_hess(new_modes_gs, L=new_modes_ts.inverse @ new_modes_gs.matrix)
+        direction_gs = np.dot(direction_gs, new_modes_ts.modes_by_coords)
+        direction_ts = np.dot(direction_ts, new_modes_ts.modes_by_coords)
+    else:
+        f_gs = new_modes_gs.compute_hessian('coords')
+        f_ts = new_modes_ts.compute_hessian('coords')
+
+    if direction_gs.ndim > 1:
+        return np.array([
+            gamma(f_gs, f_ts, d, dt)
+            for d,dt in zip(direction_gs, direction_ts)
+        ])
+    else:
+        return gamma(
+            f_gs,
+            f_ts,
+            direction_gs,
+            direction_ts
+        )
+
+def reorder_force_dirs(rs_solv, ts_solv, dirs, use_mode_space=True):
+    gamma_list = compute_reaction_gamma(rs_solv, ts_solv, dirs, use_mode_space=use_mode_space)
     ord_g = np.argsort(-gamma_list)
     return gamma_list[ord_g,], dirs[ord_g,]
 
