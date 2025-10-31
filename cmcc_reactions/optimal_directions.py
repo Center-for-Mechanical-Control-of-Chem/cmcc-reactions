@@ -5,6 +5,7 @@ from McUtils.Scaffolding import Logger
 import McUtils.Devutils as dev
 import McUtils.Numputils as nput
 from Psience.Molecools import Molecule
+from Psience.Modes import MixtureModes
 
 __all__ = [
     "find_optimal_displacement_coordinate",
@@ -170,7 +171,7 @@ def get_force_dirs(hess_gs, hess_ts, initial_dir, k, **opts):
         initial_dir = initial_dir[:, np.newaxis]
     proj_dirs = initial_dir
     errors = []
-    for i in range(k):
+    for i in range(min(k, len(hess_gs)-proj_dirs.shape[-1])):
         force_dir, error = find_optimal_displacement_coordinate(
             hess_gs,
             hess_ts,
@@ -324,8 +325,142 @@ def compute_reaction_gamma(reactant, transition_state, direction_gs,
             direction_ts
         )
 
-def reorder_force_dirs(rs_solv, ts_solv, dirs, use_mode_space=True):
-    gamma_list = compute_reaction_gamma(rs_solv, ts_solv, dirs, use_mode_space=use_mode_space)
+def reorder_force_dirs(rs_solv, ts_solv, dirs, direction_ts=None, use_mode_space=True):
+    gamma_list = compute_reaction_gamma(rs_solv, ts_solv, dirs, direction_ts=direction_ts, use_mode_space=use_mode_space)
     ord_g = np.argsort(-gamma_list)
-    return gamma_list[ord_g,], dirs[ord_g,]
+    if direction_ts is not None:
+        dirs = (dirs[ord_g,], direction_ts[ord_g,])
+    else:
+        dirs = dirs[ord_g,]
+    return gamma_list[ord_g,], dirs
+
+def mass_weighted_normalize_displacements(mol, expansion=None):
+    if expansion is None:
+        expansion = mol.get_cartesians_by_internals(1)[0]
+    else:
+        expansion = np.asanyarray(expansion)
+        if expansion.ndim == 3:
+            expansion = expansion[0]
+    return nput.vec_normalize(
+        expansion @ mol.get_gmatrix(power=-1/2, use_internals=False),
+        axis=1
+    ) @ mol.get_gmatrix(power=1/2, use_internals=False)
+
+class ForceOptimizer:
+    default_options = {
+        'num_dirs':50,
+        'optimizer':'scipy',
+        'method':'cg',
+        'max_iterations':100
+    }
+    def __init__(self, reactant_mol, ts_mol, optimal_forces=None, reorder=True, **determination_opts):
+        self.rs = reactant_mol
+        self.ts = ts_mol
+        self.opts = dict(self.default_options, **determination_opts)
+        self.reorder = reorder
+        self._optimal_forces = optimal_forces
+
+    @classmethod
+    def from_displacements(cls, reactant_mol, ts_mol, dirs_gs, dirs_ts=None, reorder=False, modes=None):
+        if modes is None:
+            modes = (None, None)
+        rs_modes, ts_modes = modes
+        if rs_modes is None:
+            if reactant_mol.potential_derivatives is None:
+                reactant_mol.potential_derivatives = reactant_mol.calculate_energy(order=2)[1:]
+            rs_modes = reactant_mol.get_normal_modes()
+        if ts_modes is None:
+            if ts_mol.potential_derivatives is None:
+                ts_mol.potential_derivatives = ts_mol.calculate_energy(order=2)[1:]
+            ts_modes = ts_mol.get_normal_modes()
+
+        dirs_gs = mass_weighted_normalize_displacements(reactant_mol, dirs_gs)
+        if dirs_ts is not None:
+            dirs_ts = mass_weighted_normalize_displacements(reactant_mol, dirs_ts)
+
+        if reorder:
+            gammas, dirs = reorder_force_dirs(reactant_mol, ts_mol, dirs_gs, dirs_ts, use_mode_space=True)
+        else:
+            gammas = compute_reaction_gamma(reactant_mol, ts_mol, dirs_gs, dirs_ts, use_mode_space=True)
+            if dirs_ts is not None:
+                dirs = (dirs_gs, dirs_ts)
+            else:
+                dirs = dirs_gs
+        return cls(reactant_mol, ts_mol, optimal_forces=((gammas, dirs), (rs_modes, ts_modes)))
+
+    @classmethod
+    def from_internals(cls, reactant_mol, ts_mol, internal_spec, active_atoms=None, fixed_atoms=None, **opts):
+        if fixed_atoms is None and active_atoms is not None:
+            fixed_atoms = np.setdiff1d(np.arange(len(reactant_mol.coords)), active_atoms)
+
+        # rs_dist.fragment_indices[1][(4, 5, 6, 7),]
+        _, disp_gs = nput.internal_coordinate_tensors(
+            reactant_mol.coords,
+            internal_spec,
+            fixed_atoms=fixed_atoms,
+            masses=reactant_mol.atomic_masses,
+            return_inverse=True
+        )
+        _, disp_ts = nput.internal_coordinate_tensors(
+            ts_mol.coords,
+            internal_spec,
+            fixed_atoms=fixed_atoms,
+            masses=ts_mol.atomic_masses,
+            return_inverse=True
+        )
+
+        return cls.from_displacements(reactant_mol, ts_mol, disp_gs, disp_ts, **opts)
+
+    def optimize(self):
+        if self.rs.potential_derivatives is None:
+            self.rs.potential_derivatives = self.rs.calculate_energy(order=2)[1:]
+        if self.ts.potential_derivatives is None:
+            self.ts.potential_derivatives = self.ts.calculate_energy(order=2)[1:]
+
+        (dirs, _), modes = reaction_force_dirs(self.rs, self.ts, **self.opts)
+        if self.reorder:
+            gammas, dirs = reorder_force_dirs(self.rs, self.ts, dirs, use_mode_space=True)
+        else:
+            gammas = compute_reaction_gamma(self.rs, self.ts, dirs, use_mode_space=True)
+
+        return (gammas, dirs), modes
+
+    @property
+    def gammas(self):
+        if self._optimal_forces is None:
+            self._optimal_forces = self.optimize()
+        return self._optimal_forces[0][0]
+    @property
+    def force_dirs(self):
+        if self._optimal_forces is None:
+            self._optimal_forces = self.optimize()
+        return self._optimal_forces[0][1]
+    @property
+    def rs_modes(self):
+        if self._optimal_forces is None:
+            self._optimal_forces = self.optimize()
+        return self._optimal_forces[1][0]
+    @property
+    def ts_modes(self):
+        if self._optimal_forces is None:
+            self._optimal_forces = self.optimize()
+        return self._optimal_forces[1][1]
+
+    def animate_normed(self, i, expansion=None, use_internals=False, mag=.5, mol='ts'):
+        if expansion is None and not use_internals:
+            expansion = self.force_dirs
+        if dev.str_is(mol, 'ts'):
+            mol = self.ts
+            if len(expansion) == 2 and expansion[0].ndim == 2:
+                expansion = expansion[1]
+        elif dev.str_is(mol, 'reactant'):
+            mol = self.rs
+            if len(expansion) == 2 and expansion[0].ndim == 2:
+                expansion = expansion[0]
+        exp = mass_weighted_normalize_displacements(mol, expansion=expansion)
+        return mol.animate_coordinate(i, mag,
+                                      coordinate_expansion=[nput.vec_normalize(exp, axis=1)]
+                                      )
+
+
 
