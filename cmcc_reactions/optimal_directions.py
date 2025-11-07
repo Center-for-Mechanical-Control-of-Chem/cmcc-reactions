@@ -293,15 +293,21 @@ def reaction_force_dirs(reactant, transition_state,
 
 def compute_reaction_gamma(reactant, transition_state, direction_gs,
                            direction_ts=None,
-                           use_mode_space=True
+                           use_mode_space=True,
+                           modes=None
                            ):
     direction_gs = np.asanyarray(direction_gs)
     if direction_ts is None:
         direction_ts = direction_gs
     else:
         direction_ts = np.asanyarray(direction_ts)
-    new_modes_ts = transition_state.get_normal_modes()
-    new_modes_gs = reactant.get_normal_modes()
+    if modes is None:
+        modes = (None, None)
+    new_modes_gs, new_modes_ts = modes
+    if new_modes_ts is None:
+        new_modes_ts = transition_state.get_normal_modes()
+    if new_modes_gs is None:
+        new_modes_gs = reactant.get_normal_modes()
 
     if use_mode_space:
         f_ts = nm_hess(new_modes_ts, L=np.eye(new_modes_ts.matrix.shape[-1]))
@@ -325,26 +331,91 @@ def compute_reaction_gamma(reactant, transition_state, direction_gs,
             direction_ts
         )
 
-def reorder_force_dirs(rs_solv, ts_solv, dirs, direction_ts=None, use_mode_space=True):
-    gamma_list = compute_reaction_gamma(rs_solv, ts_solv, dirs, direction_ts=direction_ts, use_mode_space=use_mode_space)
+def reorder_force_dirs(rs_solv, ts_solv, dirs, direction_ts=None,
+                       use_mode_space=True,
+                       modes=None,
+                       return_ordering=False
+                       ):
+    gamma_list = compute_reaction_gamma(rs_solv, ts_solv, dirs, direction_ts=direction_ts,
+                                        use_mode_space=use_mode_space,
+                                        modes=modes)
     ord_g = np.argsort(-gamma_list)
     if direction_ts is not None:
         dirs = (dirs[ord_g,], direction_ts[ord_g,])
     else:
         dirs = dirs[ord_g,]
-    return gamma_list[ord_g,], dirs
-
-def mass_weighted_normalize_displacements(mol, expansion=None):
-    if expansion is None:
-        expansion = mol.get_cartesians_by_internals(1)[0]
+    if return_ordering:
+        return gamma_list[ord_g,], dirs, ord_g
     else:
-        expansion = np.asanyarray(expansion)
-        if expansion.ndim == 3:
-            expansion = expansion[0]
-    return nput.vec_normalize(
-        expansion @ mol.get_gmatrix(power=-1/2, use_internals=False),
-        axis=1
-    ) @ mol.get_gmatrix(power=1/2, use_internals=False)
+        return gamma_list[ord_g,], dirs
+
+def mass_weighted_normalize_displacements(mol, expansion=None, inverse=None, orthogonalize=False, mode='forward'):
+    if mode == 'forward':
+        if expansion is None:
+            expansion = mol.get_cartesians_by_internals(1)[0]
+        else:
+            expansion = np.asanyarray(expansion) #TODO: why?
+            if expansion.ndim == 3:
+                expansion = expansion[0]
+        b = expansion @ mol.get_gmatrix(power=-1/2, use_internals=False)
+        if orthogonalize:
+            b, r = np.linalg.qr(b.T)
+            b = b.T
+            if inverse is not None:
+                pinv = np.linalg.inv(b @ mol.get_gmatrix(power=1/2, use_internals=False) @ inverse)
+                inverse = inverse @ pinv
+        else:
+            b, norms = nput.vec_normalize(b, axis=1, return_norms=True)
+            if inverse is not None:
+                inverse = inverse @ np.diag(norms)
+        b = b @ mol.get_gmatrix(power=1/2, use_internals=False)
+        if inverse is not None:
+            return b, inverse
+        else:
+            return b
+    elif mode == 'inverse':
+        if inverse is not None:
+            if expansion is None:
+                expansion = mol.get_cartesians_by_internals(1)[0]
+            else:
+                expansion = np.asanyarray(expansion)  # TODO: why?
+                if expansion.ndim == 3:
+                    expansion = expansion[0]
+            b = mol.get_gmatrix(power=1/2, use_internals=False) @ inverse
+            if orthogonalize:
+                b, r = np.linalg.qr(b)
+                pinv = np.linalg.inv(expansion @ mol.get_gmatrix(power=-1/2, use_internals=False) @ b)
+                expansion = pinv @ expansion
+            else:
+                b, norms = nput.vec_normalize(b, axis=0, return_norms=True)
+                expansion = np.diag(norms) @ expansion
+            b = mol.get_gmatrix(power=-1/2, use_internals=False) @ b
+            return expansion, b
+        else:
+            if expansion is None:
+                expansion = mol.get_internals_by_cartesians(1)[0]
+            else:
+                expansion = np.asanyarray(expansion)  # TODO: why?
+                if expansion.ndim == 3:
+                    expansion = expansion[0]
+            b = mol.get_gmatrix(power=1/2, use_internals=False) @ expansion
+            if orthogonalize:
+                b, r = np.linalg.qr(b)
+            else:
+                b, norms = nput.vec_normalize(b, axis=0, return_norms=True)
+            b = mol.get_gmatrix(power=-1/2, use_internals=False) @ b
+            return b
+    else:
+        raise ValueError(mode)
+
+def mass_weighted_displacement_inverse(mol, expansion, use_pinv=False):
+    gi12 = mol.get_gmatrix(power=-1/2, use_internals=False)
+    b = expansion @ gi12
+    if use_pinv:
+        bT = np.linalg.pinv(b)
+    else:
+        bT = b.T
+    return gi12 @ bT
 
 class ForceOptimizer:
     default_options = {
@@ -353,63 +424,169 @@ class ForceOptimizer:
         'method':'cg',
         'max_iterations':100
     }
-    def __init__(self, reactant_mol, ts_mol, optimal_forces=None, reorder=True, **determination_opts):
+    def __init__(self, reactant_mol, ts_mol, optimal_forces=None, reorder=True, inverse_forces=None, **determination_opts):
         self.rs = reactant_mol
         self.ts = ts_mol
         self.opts = dict(self.default_options, **determination_opts)
         self.reorder = reorder
         self._optimal_forces = optimal_forces
+        self._inverse = inverse_forces
 
     @classmethod
-    def from_displacements(cls, reactant_mol, ts_mol, dirs_gs, dirs_ts=None, reorder=False, modes=None):
+    def from_displacements(cls,
+                           reactant_mol, ts_mol, dirs_gs, dirs_ts=None,
+                           reorder=False,
+                           modes=None,
+                           orthogonalize=False,
+                           dirs_gs_inv=None,
+                           dirs_ts_inv=None,
+                           orthogonalization_mode='forward'
+                           ):
         if modes is None:
             modes = (None, None)
         rs_modes, ts_modes = modes
         if rs_modes is None:
             if reactant_mol.potential_derivatives is None:
                 reactant_mol.potential_derivatives = reactant_mol.calculate_energy(order=2)[1:]
-            rs_modes = reactant_mol.get_normal_modes()
+            rs_modes = reactant_mol.get_normal_modes(use_internals=False)
         if ts_modes is None:
             if ts_mol.potential_derivatives is None:
                 ts_mol.potential_derivatives = ts_mol.calculate_energy(order=2)[1:]
-            ts_modes = ts_mol.get_normal_modes()
+            ts_modes = ts_mol.get_normal_modes(use_internals=False)
 
-        dirs_gs = mass_weighted_normalize_displacements(reactant_mol, dirs_gs)
+        dirs_gs = mass_weighted_normalize_displacements(reactant_mol, dirs_gs,
+                                                        inverse=dirs_gs_inv,
+                                                        orthogonalize=orthogonalize,
+                                                        mode=orthogonalization_mode)
+        if dirs_gs_inv is not None:
+            dirs_gs, dirs_gs_inv = dirs_gs
+
         if dirs_ts is not None:
-            dirs_ts = mass_weighted_normalize_displacements(reactant_mol, dirs_ts)
+            dirs_ts = mass_weighted_normalize_displacements(ts_mol, dirs_ts,
+                                                            inverse=dirs_ts_inv,
+                                                            orthogonalize=orthogonalize,
+                                                            mode=orthogonalization_mode)
+            if dirs_ts_inv is not None:
+                dirs_ts, dirs_ts_inv = dirs_ts
 
         if reorder:
-            gammas, dirs = reorder_force_dirs(reactant_mol, ts_mol, dirs_gs, dirs_ts, use_mode_space=True)
+            gammas, dirs, ord = reorder_force_dirs(reactant_mol, ts_mol, dirs_gs, dirs_ts,
+                                                   modes=(rs_modes, ts_modes),
+                                                   use_mode_space=True,
+                                                   return_ordering=True
+                                                   )
+            if dirs_ts_inv is not None:
+                inverse = (dirs_gs_inv[:, ord,], dirs_ts_inv[:, ord,])
+            elif dirs_gs_inv is not None:
+                inverse = dirs_gs_inv[:, ord]
+            else:
+                inverse = None
+
         else:
-            gammas = compute_reaction_gamma(reactant_mol, ts_mol, dirs_gs, dirs_ts, use_mode_space=True)
+            gammas = compute_reaction_gamma(reactant_mol, ts_mol, dirs_gs, dirs_ts,
+                                            use_mode_space=True,
+                                            modes=(rs_modes, ts_modes)
+                                            )
             if dirs_ts is not None:
                 dirs = (dirs_gs, dirs_ts)
             else:
                 dirs = dirs_gs
-        return cls(reactant_mol, ts_mol, optimal_forces=((gammas, dirs), (rs_modes, ts_modes)))
+
+            if dirs_ts_inv is not None:
+                inverse = (dirs_gs_inv, dirs_ts_inv)
+            elif dirs_gs_inv is not None:
+                inverse = dirs_gs_inv
+            else:
+                inverse = None
+
+        return cls(reactant_mol, ts_mol,
+                   optimal_forces=((gammas, dirs), (rs_modes, ts_modes)),
+                   inverse_forces=inverse
+                   )
 
     @classmethod
-    def from_internals(cls, reactant_mol, ts_mol, internal_spec, active_atoms=None, fixed_atoms=None, **opts):
+    def from_mol_displacements(cls, reactant_mol, ts_mol, internals=None, **opts):
+        if internals is not None:
+            ts_mol = ts_mol.modify(internals=internals)
+            reactant_mol = reactant_mol.modify(internals=ts_mol.internals)
+        rs_disp_inv = reactant_mol.get_internals_by_cartesians(order=1)[0]
+        ts_disp_inv = ts_mol.get_internals_by_cartesians(order=1)[0]
+        rs_disp = reactant_mol.get_cartesians_by_internals(order=1)[0]
+        ts_disp = ts_mol.get_cartesians_by_internals(order=1)[0]
+        return cls.from_displacements(reactant_mol, ts_mol, rs_disp, ts_disp,
+                                      dirs_gs_inv=rs_disp_inv,
+                                      dirs_ts_inv=ts_disp_inv,
+                                      **opts)
+
+    @classmethod
+    def from_internals(cls, reactant_mol, ts_mol, internal_spec, active_atoms=None, fixed_atoms=None,
+                       remove_translation_rotation=True,
+                       **opts):
         if fixed_atoms is None and active_atoms is not None:
             fixed_atoms = np.setdiff1d(np.arange(len(reactant_mol.coords)), active_atoms)
 
         # rs_dist.fragment_indices[1][(4, 5, 6, 7),]
-        _, disp_gs = nput.internal_coordinate_tensors(
+        inv_gs, disp_gs = nput.internal_coordinate_tensors(
             reactant_mol.coords,
             internal_spec,
             fixed_atoms=fixed_atoms,
             masses=reactant_mol.atomic_masses,
-            return_inverse=True
+            return_inverse=True,
+            remove_inverse_translation_rotation=remove_translation_rotation,
+            order=1
         )
-        _, disp_ts = nput.internal_coordinate_tensors(
+        inv_ts, disp_ts = nput.internal_coordinate_tensors(
             ts_mol.coords,
             internal_spec,
             fixed_atoms=fixed_atoms,
             masses=ts_mol.atomic_masses,
-            return_inverse=True
+            return_inverse=True,
+            remove_inverse_translation_rotation=remove_translation_rotation,
+            order=1
         )
 
-        return cls.from_displacements(reactant_mol, ts_mol, disp_gs, disp_ts, **opts)
+        return cls.from_displacements(reactant_mol, ts_mol, disp_gs[0], disp_ts[0],
+                                      dirs_gs_inv=inv_gs[1],
+                                      dirs_ts_inv=inv_ts[1],
+                                      **opts)
+
+    @classmethod
+    def from_modes(cls, reactant_mol, ts_mol,
+                   modes=None,
+                   fragment_indices=None,
+                   ts_only=False,
+                   active_atoms=None,
+                   fixed_atoms=None,
+                   **opts):
+        if modes is None:
+            modes = (modes, modes)
+        gs_modes, ts_modes = modes
+        if gs_modes is None:
+            if ts_only:
+                gs_modes = ts_mol.get_normal_modes(use_internals=False)
+            else:
+                gs_modes = reactant_mol.get_normal_modes(use_internals=False)
+        if ts_modes is None:
+            ts_modes = ts_mol.get_normal_modes(use_internals=False)
+
+        if fragment_indices is not None:
+            if isinstance(fragment_indices, int):
+                fragment_indices = reactant_mol.fragment_indices[fragment_indices]
+            gs_modes = gs_modes.localize(atoms=fragment_indices, allow_mode_mixing=True)
+            ts_modes = ts_modes.localize(atoms=fragment_indices, allow_mode_mixing=True)
+        elif active_atoms is not None or fixed_atoms is not None:
+            if fixed_atoms is not None:
+                active_atoms = np.setdiff1d(np.arange(len(reactant_mol.coords)), fixed_atoms)
+            gs_modes = gs_modes.localize(atoms=active_atoms, allow_mode_mixing=True)
+            ts_modes = ts_modes.localize(atoms=active_atoms, allow_mode_mixing=True)
+        gs_modes = gs_modes.remove_mass_weighting()
+        ts_modes = ts_modes.remove_mass_weighting()
+        return cls.from_displacements(
+            reactant_mol, ts_mol, gs_modes.coords_by_modes, dirs_ts=ts_modes.coords_by_modes,
+            dirs_gs_inv=gs_modes.modes_by_coords,
+            dirs_ts_inv=ts_modes.modes_by_coords,
+            **opts
+        )
 
     def optimize(self):
         if self.rs.potential_derivatives is None:
@@ -436,6 +613,18 @@ class ForceOptimizer:
             self._optimal_forces = self.optimize()
         return self._optimal_forces[0][1]
     @property
+    def force_dirs_inverse(self):
+        if self._inverse is None:
+            fds = self._optimal_forces[0][1]
+            if isinstance(fds, np.ndarray):
+                self._inverse = mass_weighted_displacement_inverse(self.ts, fds)
+            else:
+                self._inverse = (
+                    mass_weighted_displacement_inverse(self.rs, fds[0]),
+                    mass_weighted_displacement_inverse(self.ts, fds[1])
+                )
+        return self._inverse
+    @property
     def rs_modes(self):
         if self._optimal_forces is None:
             self._optimal_forces = self.optimize()
@@ -446,7 +635,7 @@ class ForceOptimizer:
             self._optimal_forces = self.optimize()
         return self._optimal_forces[1][1]
 
-    def animate_normed(self, i, expansion=None, use_internals=False, mag=.5, mol='ts'):
+    def animate_normed(self, i, expansion=None, modes=None, use_internals=False, mag=.5, mol='ts', **opts):
         if expansion is None and not use_internals:
             expansion = self.force_dirs
         if dev.str_is(mol, 'ts'):
@@ -459,8 +648,20 @@ class ForceOptimizer:
                 expansion = expansion[0]
         exp = mass_weighted_normalize_displacements(mol, expansion=expansion)
         return mol.animate_coordinate(i, mag,
-                                      coordinate_expansion=[nput.vec_normalize(exp, axis=1)]
+                                      coordinate_expansion=[nput.vec_normalize(exp, axis=1)],
+                                      **opts
                                       )
+    
+    def animate_mode(self, i, modes=None, mol='ts', **opts):
+        if dev.str_is(mol, 'ts'):
+            mol = self.ts
+            if modes is None:
+                modes = self.ts_modes
+        elif dev.str_is(mol, 'reactant'):
+            mol = self.rs
+            if modes is None:
+                modes = self.rs_modes
+        return mol.animate_mode(i, modes=modes, **opts)
 
 
 

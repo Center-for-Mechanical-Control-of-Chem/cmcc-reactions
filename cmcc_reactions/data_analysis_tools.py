@@ -261,6 +261,18 @@ def plot_forces_from_index(reaction_class, idx_spec, structure_index=0, scaling=
         **opts
     )
 
+def plot_force(mol, force, scaling=1, normalize=True, remove_translation_rotation=False, **opts):
+    if remove_translation_rotation:
+        force = remove_transrot(mol, force)
+    if normalize:
+        force = nput.vec_normalize(np.asanyarray(force).flatten())
+
+    return mol.plot(
+        backend='x3d',
+        mode_vectors=force * scaling,
+        **opts
+    )
+
 
 def get_diene_embedding(geom, c1, c2):
     check_bonds = set(
