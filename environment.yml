@@ -7,16 +7,17 @@ channels:
   - anaconda
   - defaults
 dependencies:
+  - python=3.10
   - "ase"
   - "rdkit"
   - "matplotlib"
   - "ipykernel"
+  - "pytorch==2.3.0"
   - "pip"
   - pip:
-    - --find-links https://data.pyg.org/whl/torch-2.3.0+gpu.html
-    - "torch==2.3.0+gpu"
     - "torch_cluster"
     - "mccoygroup-mcutils"
+    - "mccoygroup-psience"
     - "chython"
     - "chytorch"
     - "chytorch-rxnmap"
