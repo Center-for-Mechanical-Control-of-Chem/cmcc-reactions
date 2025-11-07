@@ -6,6 +6,7 @@ import McUtils.Devutils as dev
 import McUtils.Numputils as nput
 from Psience.Molecools import Molecule
 from Psience.Modes import MixtureModes
+import McUtils.Plots as plt
 
 __all__ = [
     "find_optimal_displacement_coordinate",
@@ -310,8 +311,8 @@ def compute_reaction_gamma(reactant, transition_state, direction_gs,
         new_modes_gs = reactant.get_normal_modes()
 
     if use_mode_space:
-        f_ts = nm_hess(new_modes_ts, L=np.eye(new_modes_ts.matrix.shape[-1]))
-        f_gs = nm_hess(new_modes_gs, L=new_modes_ts.inverse @ new_modes_gs.matrix)
+        f_ts = nm_hess(new_modes_ts, L=np.eye(new_modes_ts.modes_by_coords.shape[-1]))
+        f_gs = nm_hess(new_modes_gs, L=new_modes_ts.coords_by_modes @ new_modes_gs.modes_by_coords)
         direction_gs = np.dot(direction_gs, new_modes_ts.modes_by_coords)
         direction_ts = np.dot(direction_ts, new_modes_ts.modes_by_coords)
     else:
@@ -438,6 +439,7 @@ class ForceOptimizer:
                            reorder=False,
                            modes=None,
                            orthogonalize=False,
+                           inverse=None,
                            dirs_gs_inv=None,
                            dirs_ts_inv=None,
                            orthogonalization_mode='forward'
@@ -453,6 +455,14 @@ class ForceOptimizer:
             if ts_mol.potential_derivatives is None:
                 ts_mol.potential_derivatives = ts_mol.calculate_energy(order=2)[1:]
             ts_modes = ts_mol.get_normal_modes(use_internals=False)
+
+        if len(dirs_gs) == 2 and nput.is_numeric_array_like(dirs_gs[0], 2):
+            dirs_gs, dirs_ts = dirs_gs
+        if inverse is not None:
+            if dirs_ts is not None:
+                dirs_gs_inv, dirs_ts_inv = inverse
+            else:
+                dirs_gs_inv = inverse
 
         dirs_gs = mass_weighted_normalize_displacements(reactant_mol, dirs_gs,
                                                         inverse=dirs_gs_inv,
@@ -473,8 +483,7 @@ class ForceOptimizer:
             gammas, dirs, ord = reorder_force_dirs(reactant_mol, ts_mol, dirs_gs, dirs_ts,
                                                    modes=(rs_modes, ts_modes),
                                                    use_mode_space=True,
-                                                   return_ordering=True
-                                                   )
+                                                   return_ordering=True)
             if dirs_ts_inv is not None:
                 inverse = (dirs_gs_inv[:, ord,], dirs_ts_inv[:, ord,])
             elif dirs_gs_inv is not None:
@@ -485,8 +494,7 @@ class ForceOptimizer:
         else:
             gammas = compute_reaction_gamma(reactant_mol, ts_mol, dirs_gs, dirs_ts,
                                             use_mode_space=True,
-                                            modes=(rs_modes, ts_modes)
-                                            )
+                                            modes=(rs_modes, ts_modes))
             if dirs_ts is not None:
                 dirs = (dirs_gs, dirs_ts)
             else:
@@ -588,6 +596,57 @@ class ForceOptimizer:
             **opts
         )
 
+    @classmethod
+    def construct(cls, rs, ts, *,
+                  specs=None,
+                  mol_internals=None,
+                  displacements=None,
+                  modes=None,
+                  active_atoms=None,
+                  fixed_atoms=None,
+                  fragment_ref=None,
+                  **opts):
+        if active_atoms is not None or fixed_atoms is not None and fragment_ref is not None:
+            frag = rs.fragment_indices[fragment_ref]
+            if active_atoms is not None:
+                active_atoms = frag[active_atoms,]
+            if fixed_atoms is not None:
+                fixed_atoms = frag[fixed_atoms,]
+        if specs is not None:
+            m = cls.from_internals(rs, ts, specs,
+                                   active_atoms=active_atoms, fixed_atoms=fixed_atoms,
+                                   **opts)
+        elif mol_internals is not None:
+            if active_atoms is not None:
+                raise ValueError("`mol_internals` can't be paired with `active_atoms`")
+            if active_atoms is not None:
+                raise ValueError("`mol_internals` can't be paired with `active_atoms`")
+            m = cls.from_mol_displacements(rs, ts, mol_internals, **opts)
+        elif modes is not None:
+            if dev.str_is(modes, 'auto'):
+                modes = None
+            m = cls.from_modes(rs, ts, modes=modes,
+                               active_atoms=active_atoms, fixed_atoms=fixed_atoms,
+                               **opts)
+        elif displacements is not None:
+            if active_atoms is not None:
+                raise ValueError("`displacements` can't be paired with `active_atoms`")
+            if active_atoms is not None:
+                raise ValueError("`displacements` can't be paired with `active_atoms`")
+            m = cls.from_displacements(rs, ts, displacements, **opts)
+        else:
+            if fixed_atoms is not None:
+                active_atoms = np.setdiff1d(np.arange(len(rs.atoms)), fixed_atoms)
+            if active_atoms is not None:
+                fi = opts.get('fragment_indices')
+                if fi is None:
+                    opts['fragment_indices'] = active_atoms
+                else:
+                    raise ValueError("got both `fragment_indices` and `active_atoms` for optimizer")
+            m = cls(rs, ts, specs, **opts)
+
+        return m
+
     def optimize(self):
         if self.rs.potential_derivatives is None:
             self.rs.potential_derivatives = self.rs.calculate_energy(order=2)[1:]
@@ -635,6 +694,63 @@ class ForceOptimizer:
             self._optimal_forces = self.optimize()
         return self._optimal_forces[1][1]
 
+    @property
+    def mass_weighted_force_dirs(self):
+        fds = self.force_dirs
+        gi12 = self.ts.get_gmatrix(power=-1/2, use_internals=False)
+        if isinstance(fds, np.ndarray):
+            return fds @ gi12
+        else:
+            return (
+                    fds[0] @ gi12,
+                    fds[1] @ gi12
+            )
+    @property
+    def mass_weighted_force_dirs_inverse(self):
+        fds = self.force_dirs_inverse
+        g12 = self.ts.get_gmatrix(power=1/2, use_internals=False)
+        if isinstance(fds, np.ndarray):
+            return g12 @ fds
+        else:
+            return (
+                g12 @ fds[0],
+                g12 @ fds[1]
+            )
+
+    @property
+    def kcal_nN(self):
+        return UnitsData.convert("Hartrees", "Kilocalories/Mole") * (
+            UnitsData.convert(("NanoJoules", "InverseMeters"), ("Hartrees", "InverseBohrRadius"))
+        ) ** 2
+
+    def direction_overlap(self, other, mol='ts'):
+        fds = self.force_dirs
+        if isinstance(fds, np.ndarray):
+            fds = (fds, fds)
+        fds2 = other.force_dirs_inverse
+        if isinstance(fds2, np.ndarray):
+            fds2 = (fds2, fds2)
+        if mol == 'ts':
+            return fds[1] @ fds2[1]
+        else:
+            return fds[0] @ fds2[0]
+
+    def mode_overlap(self, mol='ts'):
+        fds = self.force_dirs
+        if isinstance(fds, np.ndarray):
+            fds = (fds, fds)
+        if mol == 'ts':
+            return fds[1] @ self.ts_modes.modes_by_coords
+        else:
+            return fds[0] @ self.rs_modes.modes_by_coords
+
+    @classmethod
+    def plot_overlap(self, overlap, **styles):
+        return plt.ArrayPlot(overlap**2, vmin=0, vmax=1, **styles)
+    @classmethod
+    def overlap_breakdown(self, overlap):
+        return np.round(overlap**2 * 100)
+
     def animate_normed(self, i, expansion=None, modes=None, use_internals=False, mag=.5, mol='ts', **opts):
         if expansion is None and not use_internals:
             expansion = self.force_dirs
@@ -651,7 +767,7 @@ class ForceOptimizer:
                                       coordinate_expansion=[nput.vec_normalize(exp, axis=1)],
                                       **opts
                                       )
-    
+
     def animate_mode(self, i, modes=None, mol='ts', **opts):
         if dev.str_is(mol, 'ts'):
             mol = self.ts
