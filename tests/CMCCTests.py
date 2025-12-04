@@ -5,7 +5,7 @@ import numpy as np
 dev_root = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)
 )))
-root = os.path.join(dev_root, 'cmcc_reactions')
+root = os.path.join(dev_root, 'cmcc-reactions')
 deps = os.path.join(dev_root, 'dependencies')
 sys.path.insert(0, root)
 sys.path.insert(0, deps)
@@ -19,11 +19,15 @@ import tempfile as tf
 import cmcc_reactions.reaction_data_schema as schema
 import cmcc_reactions.data_analysis_tools as thc_tools
 import cmcc_reactions.generate_reaction_products as gen_prods
+import cmcc_reactions.coordinate_choice as cocho
 
 __all__ = [
     "CMCCTests"
 ]
 
+
+def test_data(*path):
+    return os.path.join(root, "tests", "TestData", *path)
 class CMCCTests(unittest.TestCase):
 
     @unittest.skip
@@ -129,6 +133,7 @@ class CMCCTests(unittest.TestCase):
         # for r,c in zip(remp['coords'], comp['coords']):
         #     print(r-c)
 
+    @unittest.skip
     def test_GenerateReactionProducts(self):
 
         woof = gen_prods.test_main()
@@ -140,6 +145,13 @@ class CMCCTests(unittest.TestCase):
         #     mod_smi,
         #     gen_prods.bond_breaking_indices(mod_smi)
         # )
+
+    def test_CoordinateSystemGen(self):
+        from Psience.Molecools import Molecule
+
+        ts_samp = Molecule.from_file(test_data('ts_samp.xyz'))
+        cocho.get_mostly_fixed_coordinate_system(ts_samp, [(22, 18, 19, 20)])
+
 
 if __name__ == '__main__':
     os.chdir(root)
