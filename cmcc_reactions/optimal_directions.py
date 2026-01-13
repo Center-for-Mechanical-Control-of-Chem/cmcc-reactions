@@ -1,3 +1,5 @@
+import collections
+
 import numpy as np
 from scipy.optimize import minimize as scipy_opt
 from McUtils.Data import UnitsData
@@ -211,12 +213,26 @@ def construct_force_dirs(modes_gs, modes_ts,
                          *,
                          num_dirs,
                          idx_start,
+                         mols=None,
                          max_iterations=None,
+                         use_mode_space=True,
                          **opts
                          ):
-    # nat = len(modes_gs.masses)
-    hess_ts_nms = nm_hess(modes_ts, L=np.eye(modes_ts.matrix.shape[-1]))
-    hess_gs_nms = nm_hess(modes_gs, L=modes_ts.inverse @ modes_gs.matrix)
+
+    if use_mode_space:
+        if dev.str_is(use_mode_space, 'cartesian'):
+            reactant, transition_state = mols
+            hess_ts_nms = nput.tensor_reexpand([modes_ts.coords_by_modes], [0, transition_state.potential_derivatives[1]])[1]
+            hess_gs_nms = nput.tensor_reexpand([modes_ts.coords_by_modes], [0, reactant.potential_derivatives[1]])[1]
+        else:
+            hess_ts_nms = nm_hess(modes_ts, L=np.eye(modes_ts.modes_by_coords.shape[-1]))
+            hess_gs_nms = nm_hess(modes_gs, L=modes_ts.coords_by_modes @ modes_gs.modes_by_coords)
+    else:
+        hess_gs_nms = modes_gs.compute_hessian('coords')
+        hess_ts_nms = modes_ts.compute_hessian('coords')
+
+    # hess_ts_nms = nm_hess(modes_ts, L=np.eye(modes_ts.matrix.shape[-1]))
+    # hess_gs_nms = nm_hess(modes_gs, L=modes_ts.inverse @ modes_gs.matrix)
 
     force_dirs, errors = get_force_dirs(hess_gs_nms, hess_ts_nms,
                                         np.eye(len(hess_ts_nms))[:, :idx_start],
@@ -285,6 +301,7 @@ def reaction_force_dirs(reactant, transition_state,
     dirs = construct_force_dirs(new_modes_gs, new_modes_ts,
                                 num_dirs=num_dirs,
                                 idx_start=idx_start,
+                                mols=(reactant, transition_state),
                                 **opts
                                 )
     if return_modes:
@@ -292,11 +309,12 @@ def reaction_force_dirs(reactant, transition_state,
     else:
         return dirs
 
-def compute_reaction_gamma(reactant, transition_state, direction_gs,
-                           direction_ts=None,
-                           use_mode_space=True,
-                           modes=None
-                           ):
+def prep_gamma_hessians(
+        reactant, transition_state, direction_gs,
+        direction_ts=None,
+        use_mode_space=True,
+        modes=None
+):
     direction_gs = np.asanyarray(direction_gs)
     if direction_ts is None:
         direction_ts = direction_gs
@@ -311,13 +329,31 @@ def compute_reaction_gamma(reactant, transition_state, direction_gs,
         new_modes_gs = reactant.get_normal_modes()
 
     if use_mode_space:
-        f_ts = nm_hess(new_modes_ts, L=np.eye(new_modes_ts.modes_by_coords.shape[-1]))
-        f_gs = nm_hess(new_modes_gs, L=new_modes_ts.coords_by_modes @ new_modes_gs.modes_by_coords)
-        direction_gs = np.dot(direction_gs, new_modes_ts.modes_by_coords)
-        direction_ts = np.dot(direction_ts, new_modes_ts.modes_by_coords)
+        if dev.str_is(use_mode_space, 'cartesian'):
+            f_ts = nput.tensor_reexpand([new_modes_ts.coords_by_modes], [0, transition_state.potential_derivatives[1]])[1]
+            f_gs = nput.tensor_reexpand([new_modes_ts.coords_by_modes], [0, reactant.potential_derivatives[1]])[1]
+            direction_gs = np.dot(direction_gs, new_modes_ts.modes_by_coords)
+            direction_ts = np.dot(direction_ts, new_modes_ts.modes_by_coords)
+        else:
+            f_ts = nm_hess(new_modes_ts, L=np.eye(new_modes_ts.modes_by_coords.shape[-1]))
+            f_gs = nm_hess(new_modes_gs, L=new_modes_ts.coords_by_modes @ new_modes_gs.modes_by_coords)
+            direction_gs = np.dot(direction_gs, new_modes_ts.modes_by_coords)
+            direction_ts = np.dot(direction_ts, new_modes_ts.modes_by_coords)
     else:
         f_gs = new_modes_gs.compute_hessian('coords')
         f_ts = new_modes_ts.compute_hessian('coords')
+
+    return (direction_gs, direction_ts), (f_gs, f_ts)
+
+def compute_reaction_gamma(reactant, transition_state, direction_gs,
+                           direction_ts=None,
+                           use_mode_space=True,
+                           modes=None
+                           ):
+    (direction_gs, direction_ts), (f_gs, f_ts) = prep_gamma_hessians(
+        reactant, transition_state,
+        direction_gs, direction_ts, use_mode_space, modes
+    )
 
     if direction_gs.ndim > 1:
         return np.array([
@@ -425,13 +461,19 @@ class ForceOptimizer:
         'method':'cg',
         'max_iterations':100
     }
-    def __init__(self, reactant_mol, ts_mol, optimal_forces=None, reorder=True, inverse_forces=None, **determination_opts):
+    def __init__(self, reactant_mol, ts_mol, optimal_forces=None, reorder=True, inverse_forces=None,
+                 use_mode_space=True,
+                 reembed=True,
+                 **determination_opts):
+        if reembed:
+            reactant_mol = reactant_mol.get_embedded_molecule(ref=ts_mol)
         self.rs = reactant_mol
         self.ts = ts_mol
         self.opts = dict(self.default_options, **determination_opts)
         self.reorder = reorder
         self._optimal_forces = optimal_forces
         self._inverse = inverse_forces
+        self.use_mode_space = use_mode_space
 
     @classmethod
     def from_displacements(cls,
@@ -442,6 +484,7 @@ class ForceOptimizer:
                            inverse=None,
                            dirs_gs_inv=None,
                            dirs_ts_inv=None,
+                           use_mode_space=True,
                            orthogonalization_mode='forward'
                            ):
         if modes is None:
@@ -482,7 +525,7 @@ class ForceOptimizer:
         if reorder:
             gammas, dirs, ord = reorder_force_dirs(reactant_mol, ts_mol, dirs_gs, dirs_ts,
                                                    modes=(rs_modes, ts_modes),
-                                                   use_mode_space=True,
+                                                   use_mode_space=use_mode_space,
                                                    return_ordering=True)
             if dirs_ts_inv is not None:
                 inverse = (dirs_gs_inv[:, ord,], dirs_ts_inv[:, ord,])
@@ -493,7 +536,7 @@ class ForceOptimizer:
 
         else:
             gammas = compute_reaction_gamma(reactant_mol, ts_mol, dirs_gs, dirs_ts,
-                                            use_mode_space=True,
+                                            use_mode_space=use_mode_space,
                                             modes=(rs_modes, ts_modes))
             if dirs_ts is not None:
                 dirs = (dirs_gs, dirs_ts)
@@ -509,7 +552,8 @@ class ForceOptimizer:
 
         return cls(reactant_mol, ts_mol,
                    optimal_forces=((gammas, dirs), (rs_modes, ts_modes)),
-                   inverse_forces=inverse
+                   inverse_forces=inverse,
+                   use_mode_space=use_mode_space
                    )
 
     @classmethod
@@ -653,11 +697,11 @@ class ForceOptimizer:
         if self.ts.potential_derivatives is None:
             self.ts.potential_derivatives = self.ts.calculate_energy(order=2)[1:]
 
-        (dirs, _), modes = reaction_force_dirs(self.rs, self.ts, **self.opts)
+        (dirs, _), modes = reaction_force_dirs(self.rs, self.ts, use_mode_space=self.use_mode_space, **self.opts)
         if self.reorder:
-            gammas, dirs = reorder_force_dirs(self.rs, self.ts, dirs, use_mode_space=True)
+            gammas, dirs = reorder_force_dirs(self.rs, self.ts, dirs, use_mode_space=self.use_mode_space)
         else:
-            gammas = compute_reaction_gamma(self.rs, self.ts, dirs, use_mode_space=True)
+            gammas = compute_reaction_gamma(self.rs, self.ts, dirs, use_mode_space=self.use_mode_space)
 
         return (gammas, dirs), modes
 
@@ -779,5 +823,45 @@ class ForceOptimizer:
                 modes = self.rs_modes
         return mol.animate_mode(i, modes=modes, **opts)
 
+    def get_displaced_geometries(self, mode, disp_min=-50, disp_max=50, steps=50):
+        scan_coords_r = self.rs.get_scan_coordinates(
+            [[disp_min, disp_max, steps]],
+            which=[mode],
+            coordinate_expansion=[self.force_dirs]
+        )
+        scan_coords_t = self.ts.get_scan_coordinates(
+            [[disp_min, disp_max, steps]],
+            which=[mode],
+            coordinate_expansion=[self.force_dirs]
+        )
+
+        return np.linspace(disp_min, disp_max, steps), scan_coords_r, scan_coords_t
+
+    def get_distortion_energies(self, mode, disp_min=-50, disp_max=50, steps=50):
+        x, sr, st = self.get_displaced_geometries(mode, disp_min=disp_min, disp_max=disp_max, steps=steps)
+        eng_r = self.rs.calculate_energy(coords=sr)
+        eng_ts = self.ts.calculate_energy(coords=st)
+
+        return x, eng_r - np.min(eng_r), eng_ts - np.min(eng_ts)
+
+    def plot_distortion_energies(self, mode, disp_min=-50, disp_max=50, steps=50, **opts):
+        x, eng_r, eng_ts = self.get_distortion_energies(mode, disp_min=disp_min, disp_max=disp_max, steps=steps)
+        return plt.plot_multi(
+            {'y': eng_r * UnitsData.convert("Hartrees", "Kilocalories/Mole"), 'label': 'gs'},
+            {'y': eng_ts * UnitsData.convert("Hartrees", "Kilocalories/Mole"), 'label': 'ts'},
+            x=x,
+            **collections.ChainMap(
+                opts,
+                dict(
+                    plot_legend=True,
+                    axes_labels=[r'x ($a_0\text{-ish}$)', r'$\Delta$E (kcal mol$^{-1})$'],
+                    legend_style={
+                        'frameon': False,
+                        'fontsize': 13
+                    },
+                    image_size=500
+                )
+            )
+        )
 
 
