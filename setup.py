@@ -22,7 +22,8 @@ setuptools.setup(
     python_requires=">=3.10",
     install_requires=[
         "ase",
-        "rdkit",
+        "numpy<2",
+        "rdkit<25",
         "torch",
         "torch_geometric",
         "matplotlib",

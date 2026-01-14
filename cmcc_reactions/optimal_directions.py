@@ -837,15 +837,31 @@ class ForceOptimizer:
 
         return np.linspace(disp_min, disp_max, steps), scan_coords_r, scan_coords_t
 
-    def get_distortion_energies(self, mode, disp_min=-50, disp_max=50, steps=50):
+    def get_distortion_energies(self, mode, disp_min=-50, disp_max=50, steps=50, order=None, shift=True):
+        x, sr, st = self.get_displaced_geometries(mode, disp_min=disp_min, disp_max=disp_max, steps=steps)
+        eng_r = self.rs.calculate_energy(coords=sr, order=order)
+        eng_ts = self.ts.calculate_energy(coords=st, order=order)
+        if order is None:
+            if shift:
+                eng_r, eng_ts = eng_r - np.min(eng_r), eng_ts - np.min(eng_ts)
+        else:
+            if shift:
+                eng_r[0] = eng_r[0] - np.min(eng_r[0])
+                eng_ts[0] = eng_ts[0] - np.min(eng_ts[0])
+            eng_r = eng_r[:1] + nput.tensor_reexpand([self.force_dirs], eng_r[1:], axes=[-1, -1])
+            eng_ts = eng_ts[:1] + nput.tensor_reexpand([self.force_dirs], eng_ts[1:], axes=[-1, -1])
+
+        return x, eng_r, eng_ts
+
+    def get_distortion_forces(self, mode, disp_min=-50, disp_max=50, steps=50):
         x, sr, st = self.get_displaced_geometries(mode, disp_min=disp_min, disp_max=disp_max, steps=steps)
         eng_r = self.rs.calculate_energy(coords=sr)
         eng_ts = self.ts.calculate_energy(coords=st)
 
         return x, eng_r - np.min(eng_r), eng_ts - np.min(eng_ts)
 
-    def plot_distortion_energies(self, mode, disp_min=-50, disp_max=50, steps=50, **opts):
-        x, eng_r, eng_ts = self.get_distortion_energies(mode, disp_min=disp_min, disp_max=disp_max, steps=steps)
+    @classmethod
+    def plot_eng_comp(cls, x, eng_r, eng_ts, **opts):
         return plt.plot_multi(
             {'y': eng_r * UnitsData.convert("Hartrees", "Kilocalories/Mole"), 'label': 'gs'},
             {'y': eng_ts * UnitsData.convert("Hartrees", "Kilocalories/Mole"), 'label': 'ts'},
@@ -864,4 +880,6 @@ class ForceOptimizer:
             )
         )
 
-
+    def plot_distortion_energies(self, mode, disp_min=-50, disp_max=50, steps=50, **opts):
+        x, eng_r, eng_ts = self.get_distortion_energies(mode, disp_min=disp_min, disp_max=disp_max, steps=steps)
+        return self.plot_eng_comp(x, eng_r, eng_ts, **opts)
