@@ -454,6 +454,12 @@ def mass_weighted_displacement_inverse(mol, expansion, use_pinv=False):
         bT = b.T
     return gi12 @ bT
 
+def gamma_to_force_conversions(energy_units="Kilocalories/Mole", force_units="PicoJoules/Meters"):
+    return (
+            UnitsData.convert("Hartrees", energy_units)
+            / UnitsData.convert("Hartrees/BohrRadius", force_units) ** 2
+    )
+
 class ForceOptimizer:
     default_options = {
         'num_dirs':50,
