@@ -276,11 +276,13 @@ def write_gsm_constraint(nat, selected_force_dirs,
             files.append(filename)
     return files
 
+LOW_FREQUENCY_MODE_CUTOFF = 0.00045
 def reaction_force_dirs(reactant, transition_state,
                         num_dirs=6,
                         fragment_indices=None,
-                        low_frequency_cutoff=0.00045, # 100 cm-1
+                        low_frequency_cutoff=None, # 100 cm-1
                         return_modes=True,
+                        extra_localization=None,
                         **opts
                         ):
     new_modes_ts = transition_state.get_normal_modes()
@@ -292,7 +294,14 @@ def reaction_force_dirs(reactant, transition_state,
         new_modes_gs = new_modes_gs.localize(atoms=fragment_indices, allow_mode_mixing=True)
         new_modes_ts = new_modes_ts.localize(atoms=fragment_indices, allow_mode_mixing=True)
 
-    if low_frequency_cutoff is not None:
+    if extra_localization is not None:
+        extra_localization = extra_localization | dict(allow_mode_mixing=True)
+        new_modes_gs = new_modes_gs.localize(**extra_localization)
+        new_modes_ts = new_modes_ts.localize(**extra_localization)
+
+    if low_frequency_cutoff is None:
+        low_frequency_cutoff = LOW_FREQUENCY_MODE_CUTOFF
+    if low_frequency_cutoff > 0:
         ts_freqs = new_modes_ts.freqs
         idx_start = int(np.where(ts_freqs >= low_frequency_cutoff)[0][0])
     else:
@@ -889,3 +898,157 @@ class ForceOptimizer:
     def plot_distortion_energies(self, mode, disp_min=-50, disp_max=50, steps=50, **opts):
         x, eng_r, eng_ts = self.get_distortion_energies(mode, disp_min=disp_min, disp_max=disp_max, steps=steps)
         return self.plot_eng_comp(x, eng_r, eng_ts, **opts)
+
+    def plot_distortion_forces(self, mode, disp_min=-50, disp_max=50, steps=50,
+                               units=None,
+                               force_unit='kcal mol$^{-1}$/a$_0$-ish',
+                               **opts):
+        x, exp_r, exp_t = self.get_distortion_energies(mode, disp_min=disp_min, disp_max=disp_max, steps=steps, order=1)
+        e_r = exp_r[1][:, mode]
+        e_t = exp_t[1][:, mode]
+        if units is not None:
+            if isinstance(units, str):
+                units = units.split("/")
+            conv = UnitsData.convert("Hartrees", units[0]) / (
+                UnitsData.convert("BohrRadius", units[1])
+            ) * UnitsData.convert("Kilocalories/Mole", "Hartrees")
+            e_r = e_r * conv
+            e_t = e_t * conv
+
+        return self.plot_eng_comp(x,
+                                  e_r,
+                                  e_t,
+                                  axes_labels=["x ($a_0$-ish)", fr"$\partial E/\partial x$ ({force_unit})"],
+                                  **opts
+                                  )  # .savefig('/Users/Mark/Desktop/sample_distortion_forces.png')
+    @classmethod
+    def _extrap_solve_insertion(cls, forces, force_r):
+        dr_pos = np.searchsorted(force_r, forces)
+        drs = []
+        for f, d in zip(forces, dr_pos):
+            if d == len(force_r):  # linear extrapolation
+                c = force_r[-1] - force_r[-2]
+                s = (f - force_r[-1]) / c
+                drs.append((d, s))
+            elif d == 0:  # linear extrapolation
+                c = force_r[1] - force_r[0]
+                s = (f - force_r[0]) / c
+                drs.append((d, s))
+            else:
+                f0 = force_r[d]
+                f1 = force_r[d - 1]
+                s = (f0 - f) / (f0 - f1)
+                drs.append((d, s))
+        return drs
+
+    @classmethod
+    def _extrap_solve_energy(cls, x, energies, displacement_pairs, nearest=False):
+        es = []
+        xs = []
+        for start, offset in displacement_pairs:
+            if nearest:
+                sx = 0
+                s = 0
+                if start == len(energies):
+                    x0 = x[-1]
+                    e0 = energies[-1]
+                elif start == 0:
+                    x0 = x[0]
+                    e0 = energies[0]
+                else:
+                    if offset > .5:
+                        x0 = x[start]
+                        e0 = energies[start]
+                    else:
+                        x0 = x[start - 1]
+                        e0 = energies[start-1]
+            else:
+                if start == len(energies):
+                    x0 = x[-1]
+                    x1 = x[-2]
+                    sx = (x0 - x1)
+                    e0 = energies[-1]
+                    e1 = energies[-2]
+                    s = (e0 - e1) #/ sx
+                elif start == 0:
+                    x0 = x[1]
+                    x1 = x[0]
+                    sx = (x0 - x1)
+                    e0 = energies[1]
+                    e1 = energies[0]
+                    s = (e0 - e1) #/ sx # offset is negative
+                else:
+                    x0 = x[start]
+                    x1 = x[start - 1]
+                    sx = (x0 - x1)
+                    e0 = energies[start]
+                    e1 = energies[start - 1]
+                    s = (e0 - e1) #/ sx
+            xs.append(x0 + offset * sx)
+            es.append(e0 + offset * s)
+        return np.array(xs), np.array(es)
+
+    @classmethod
+    def predicted_deltas_from_expansion_energies(cls,
+                                                 mode,
+                                                 forces,
+                                                 x, exp_r, exp_t,
+                                                 units=None,
+                                                 energy_units='Kilocalories/Mole',
+                                                 nearest=False
+                                                 ):
+
+        smol = nput.is_numeric(forces)
+        if smol: forces = [forces]
+        forces = np.asanyarray(forces)
+        if units is not None:
+            if isinstance(units, str):
+                units = units.split("/")
+            conv = UnitsData.convert(units[0], "Hartrees") / (
+                UnitsData.convert(units[1], "BohrRadius")
+            )
+            forces = conv * forces
+
+        force_r = exp_r[1][:, mode]
+        extrap_pos_r = cls._extrap_solve_insertion(forces, force_r)
+        force_t = exp_t[1][:, mode]
+        extrap_pos_t = cls._extrap_solve_insertion(forces, force_t)
+
+        conv = UnitsData.convert("Hartrees", energy_units)
+        x_r, eng_r = cls._extrap_solve_energy(x, exp_r[0] - np.min(exp_r[0]), extrap_pos_r, nearest=nearest)
+        x_t, eng_t = cls._extrap_solve_energy(x, exp_t[0] - np.min(exp_t[0]), extrap_pos_t, nearest=nearest)
+
+        eng_r = conv * eng_r
+        eng_t = conv * eng_t
+
+        if smol:
+            x_r = x_r[0]
+            extrap_pos_r = extrap_pos_r[0]
+            eng_r = eng_r[0]
+            x_t = x_t[0]
+            extrap_pos_t = extrap_pos_t[0]
+            eng_t = eng_t[0]
+
+        return (eng_r, x_r, extrap_pos_r), (eng_t, x_t, extrap_pos_t)
+
+    def predicted_delta_from_forces(self,
+                                    mode,
+                                    forces,
+                                    units=None,
+                                    disp_min=-50,
+                                    disp_max=50,
+                                    steps=50,
+                                    nearest=False
+                                    ):
+        x, exp_r, exp_t = self.get_distortion_energies(mode,
+                                                       disp_min=disp_min, disp_max=disp_max, steps=steps, order=1)
+
+        preds = self.predicted_deltas_from_expansion_energies(
+            mode,
+            forces,
+            x, exp_r, exp_t,
+            units=units,
+            nearest=nearest
+        )
+
+        return preds + ((x, exp_r, exp_t),)
