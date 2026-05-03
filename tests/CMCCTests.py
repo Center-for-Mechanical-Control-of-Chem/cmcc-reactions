@@ -20,6 +20,7 @@ import cmcc_reactions.reaction_data_schema as schema
 import cmcc_reactions.data_analysis_tools as thc_tools
 import cmcc_reactions.generate_reaction_products as gen_prods
 import cmcc_reactions.coordinate_choice as cocho
+import cmcc_reactions.utils as utils
 
 __all__ = [
     "CMCCTests"
@@ -135,9 +136,44 @@ class CMCCTests(unittest.TestCase):
 
     @unittest.skip
     def test_GenerateReactionProducts(self):
+        import warnings
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        woof = gen_prods.test_main()
-        print(woof)
+        dienes = [
+            ["CH", "CH", "CH", "CH"],
+            # ["C@@H", "C", "C@H", "C@H"],
+            # ["C@@H", "C", "C@H", "C@@H"],
+            # ["C@H", "C", "C@@H", "C@H"]
+        ]
+        diene_template = "[{D[0]}:1]([CH2:7]2)[{D[1]}:5]=[{D[2]}:6][{D[3]}:2]2"
+        base_templates = [
+            "[R][C@@H:3]1[diene][C@@H:4]1[X]",
+            "[R][C@@H:3]1[diene][C@H:4]1[X]"
+        ]
+        replacements = {
+            'R': ["O=S(=O)(C2=CC=CC=C2)", "NC", "NC(=O)", "FC(C=C3)=CC=C3"],
+            'X': ["S(=O)(C4=CC=CC=C4)=O", "CN", "C(=O)N", "C5=CC=C(F)C=C5"],
+            "R'": ["S(=O)(C6=CC=CC=C6)=O", "CN", "C(=O)N", "C7=CC=C(F)C=C7"]
+        }
+
+        import shutil
+        output_dir = os.path.expanduser('~/Desktop/test_smi')
+        shutil.rmtree(output_dir)
+        dat = gen_prods.generate_products_and_optimize(
+            base_templates[:1],
+            dienes,
+            {
+                k: v
+                for k, v in replacements.items()
+            },
+            diene_template=diene_template,
+            evaluate_energy=False,
+            preoptimize=False,
+            output_dir=output_dir,
+            parallelizer=None,
+            verbose=True
+        )
+        print(dat)
 
         # mod_smi = gen_prods.modify_template(gen_prods.template_1, {'R':'CCC', 'X':'ONO', "R'":'F'})
         # mod_smi = gen_prods.modify_template(gen_prods.template_5, {'R':'CCC', 'X':'ONO', "R'":'F'})
@@ -146,6 +182,24 @@ class CMCCTests(unittest.TestCase):
         #     gen_prods.bond_breaking_indices(mod_smi)
         # )
 
+    def test_InitialSampling(self):
+        import warnings
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+        init_data = utils.read_namedtuple(
+            test_data('product.json'),
+            nt_type='InitialProductData'
+        )
+
+        presamp = gen_prods.generate_reactants_from_products(
+            init_data,
+            max_iterations=5,
+            output_dir=test_data()
+        )
+
+
+    @unittest.skip
     def test_CoordinateSystemGen(self):
         from Psience.Molecools import Molecule
 
