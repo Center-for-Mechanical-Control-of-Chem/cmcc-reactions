@@ -308,7 +308,10 @@ def _generate_products_and_optimize(smiles_iterator,
 
         diene_inds = ((0, 2), (1, 3))#get_bond_breaking_indices(smiles)
         if evaluate_energy:
-            top_indices = np.argpartition(engs, num_structs)[:num_structs]
+            if len(engs) > num_structs:
+                top_indices = np.argpartition(engs, num_structs)[:num_structs]
+            else:
+                top_indices = np.argsort(engs)
         else:
             top_indices = np.arange(min([len(structs), num_structs]))
 
