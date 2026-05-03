@@ -188,6 +188,19 @@ class CMCCTests(unittest.TestCase):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         init_data = utils.read_namedtuple(
+            test_data('problem_product.json'),
+            nt_type='InitialProductData'
+        )
+
+        presamp = gen_prods.generate_reactants_from_products(
+            init_data,
+            max_iterations=0,
+            # output_dir=test_data()
+        )
+
+        return
+
+        init_data = utils.read_namedtuple(
             test_data('product.json'),
             nt_type='InitialProductData'
         )

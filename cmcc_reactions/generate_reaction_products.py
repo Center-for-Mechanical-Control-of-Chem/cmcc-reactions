@@ -220,6 +220,8 @@ def _get_rmsd_groups(rmsd_blocks, group, rmsd_cutoff):
     return [group[r] for r in representatives]
 
 def get_rmsd_pruned_structs(structs, rmsd_cutoff=.1):
+    if len(structs) == 1:
+        return structs
     mw_coords = np.array([
         s.coords * np.sqrt(s.masses / np.sum(s.masses))[:, np.newaxis]
         for s in structs
