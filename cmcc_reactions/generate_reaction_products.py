@@ -693,3 +693,46 @@ def generate_reactants_from_products(
 
     return new_traj
 
+def refine_trajectory(product_data: InitialProductData, trajectory_data: ReoptimizedTrajectoryData,
+                      energy_evaluator='aimnet2',
+                      profile_generator='ase-neb',
+                      output_dir=None,
+                      info_file='refined.json',
+                      **optimization_settings
+                      ):
+    # init_js = dev.read_json(TestManager.test_data('product.json'))
+    # new_js = dev.read_json(TestManager.test_data('trajectory.json'))
+
+
+    traj = [
+        Molecule(product_data.atoms, c)
+        for c in trajectory_data.final_trajectory
+    ]
+
+    rxn = Reaction([traj[0]], [traj[-1]])
+    prof = rxn.get_profile_generator(profile_generator,
+                                     energy_evaluator=energy_evaluator)
+    new_images = prof.generate(base_images=traj,
+                               **optimization_settings)
+
+    new_traj = ReoptimizedTrajectoryData(
+        final_trajectory=np.array([t.coords for t in new_images]),
+        final_energies=prof.evaluate_profile_energies(new_images),
+        final_rmsds=prof.evaluate_profile_distances(new_images),
+        initial_trajectory=trajectory_data.final_trajectory,
+        initial_energies=trajectory_data.final_energies,
+        initial_rmsds=trajectory_data.final_rmsds,
+        raw_pre_sampling=trajectory_data.raw_pre_sampling,
+        raw_pre_energies=trajectory_data.raw_pre_energies
+    )
+
+    if output_dir is not None:
+        utils.write_namedtuple(
+            os.path.join(output_dir, info_file),
+            new_traj
+        )
+
+    return new_traj
+
+
+    traj[0].plot([i.coords for i in new_images]).show()

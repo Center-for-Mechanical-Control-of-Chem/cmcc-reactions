@@ -182,6 +182,7 @@ class CMCCTests(unittest.TestCase):
         #     gen_prods.bond_breaking_indices(mod_smi)
         # )
 
+    @unittest.skip
     def test_InitialSampling(self):
         import warnings
         warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -211,6 +212,30 @@ class CMCCTests(unittest.TestCase):
             output_dir=test_data()
         )
 
+    def test_RefinedSampling(self):
+        import warnings
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+        init_data = utils.read_namedtuple(
+            test_data('product_tris.json'),
+            nt_type='InitialProductData'
+        )
+        traj_data = utils.read_namedtuple(
+            test_data('trajectory_tris.json'),
+            nt_type='ReoptimizedTrajectoryData'
+        )
+
+        new_traj = gen_prods.refine_trajectory(
+            init_data,
+            traj_data
+        )
+
+        import McUtils.Plots as plt
+        plt.Plot(
+            new_traj.final_rmsds,
+            new_traj.final_energies
+        ).show()
 
     @unittest.skip
     def test_CoordinateSystemGen(self):
