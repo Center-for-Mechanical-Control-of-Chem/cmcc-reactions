@@ -5,6 +5,10 @@ import json
 import pickle
 import base64
 import numbers
+import glob
+import os
+
+import McUtils.Devutils as dev
 
 __all__ = [
     "read_tree",
@@ -299,3 +303,21 @@ def read_namedtuple(file, nt_type=None, decompress=False, mode='json', **opts):
         nt_type = namedtuple_registry[nt_type]
 
     return nt_type(**obj)
+
+def construct_json_file_tree(top_dir, js_patterns="**/*.json", recursive=True):
+    tree = {}
+    if isinstance(js_patterns, str):
+        js_patterns = [js_patterns]
+    files = []
+    for pattern in js_patterns:
+        files.extend(glob.glob(pattern, root_dir=top_dir, recursive=recursive))
+    for f in files:
+        segments = dev.split_path(f)
+        subtree = tree
+        for s in segments[:-1]:
+            if s not in subtree:
+                subtree[s] = {}
+            subtree = subtree[s]
+        name = os.path.splitext(segments[-1])[0]
+        subtree[name] = dev.read_json(os.path.join(top_dir, f))
+    return tree

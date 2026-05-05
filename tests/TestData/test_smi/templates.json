@@ -1,0 +1,1 @@
+{"templates": ["[R][C@@H:3]1[diene][C@@H:4]1[X]"], "diene_bond": [["CH", "CH", "CH", "CH"]], "groups": {"R": ["O=S(=O)(C2=CC=CC=C2)", "NC", "NC(=O)", "FC(C=C3)=CC=C3"], "X": ["S(=O)(C4=CC=CC=C4)=O", "CN", "C(=O)N", "C5=CC=C(F)C=C5"], "R'": ["S(=O)(C6=CC=CC=C6)=O", "CN", "C(=O)N", "C7=CC=C(F)C=C7"]}, "diene_template": "[{D[0]}:1]([CH2:7]2)[{D[1]}:5]=[{D[2]}:6][{D[3]}:2]2"}

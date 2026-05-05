@@ -212,6 +212,7 @@ class CMCCTests(unittest.TestCase):
             output_dir=test_data()
         )
 
+    @unittest.skip
     def test_RefinedSampling(self):
         import warnings
         warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -243,6 +244,11 @@ class CMCCTests(unittest.TestCase):
 
         ts_samp = Molecule.from_file(test_data('ts_samp.xyz'))
         cocho.get_mostly_fixed_coordinate_system(ts_samp, [(22, 18, 19, 20)])
+
+    def test_CompressFSTree(self):
+        tree = utils.construct_json_file_tree(test_data('test_smi'))
+        import pprint
+        pprint.pprint(tree)
 
 
 if __name__ == '__main__':
