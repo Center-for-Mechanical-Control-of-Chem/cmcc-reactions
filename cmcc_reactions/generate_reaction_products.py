@@ -258,6 +258,7 @@ def _generate_products_and_optimize(smiles_iterator,
                                     smiles_hash_generator,
                                     output_dir,
                                     rmsd_cutoff=.025,
+                                    preopt_iterations=50,
                                     verbose=False
                                     ):
     final_structures = []
@@ -301,6 +302,7 @@ def _generate_products_and_optimize(smiles_iterator,
         if preoptimize:
             if optimizer_settings is None:
                 optimizer_settings = {}
+            os2 = optimizer_settings | {'max_iterations':preopt_iterations}
             structs = [struct.optimize(**optimizer_settings) for struct in structs]
             if rmsd_cutoff is not None:
                 structs = get_rmsd_pruned_structs(structs, rmsd_cutoff=rmsd_cutoff)
