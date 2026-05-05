@@ -321,3 +321,19 @@ def construct_json_file_tree(top_dir, js_patterns="**/*.json", recursive=True):
         name = os.path.splitext(segments[-1])[0]
         subtree[name] = dev.read_json(os.path.join(top_dir, f))
     return tree
+
+def annotate_json_file_tree(top_dir, js_patterns, get_annotations=None, recursive=True, **opts):
+    tree = {}
+    if isinstance(js_patterns, str):
+        js_patterns = [js_patterns]
+    files = []
+    for pattern in js_patterns:
+        files.extend(glob.glob(pattern, root_dir=top_dir, recursive=recursive))
+    for f in files:
+        f = os.path.join(top_dir, f)
+        dev_tree = dev.read_json(f)
+        dev_tree.update(**opts)
+        if get_annotations is not None:
+            dev_tree.update(**get_annotations(f))
+        dev.write_json(f, dev_tree)
+    return tree
