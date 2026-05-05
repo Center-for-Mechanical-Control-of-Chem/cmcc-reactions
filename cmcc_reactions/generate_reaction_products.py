@@ -135,18 +135,20 @@ InitialProductData = collections.namedtuple(
         'coords',
         'bonds',
         'energy',
-        'breakpoints'
+        'breakpoints',
+        "evaluator"
     ]
 )
 utils.register_namedtuple(InitialProductData)
-def create_product_data(struct, inds, energy=None, smiles=None):
+def create_product_data(struct, inds, energy=None, smiles=None, energy_evaluator=None):
     return InitialProductData(
         smiles=smiles,
         atoms=struct.atoms,
         coords=struct.coords,
         bonds=[[int(i), int(j), float(t)] for i, j, t in struct.bonds],
         energy=energy,
-        breakpoints=inds
+        breakpoints=inds,
+        evaluator=energy_evaluator
     )
 def write_product_structure(output_dir, struct, inds,
                             # conf_file='conf.xyz',
@@ -250,6 +252,7 @@ def _generate_products_and_optimize(smiles_iterator,
                                     num_structs,
                                     calc,
                                     evaluate_energy,
+                                    energy_evaluator,
                                     preoptimize,
                                     optimizer_settings,
                                     smiles_hash_generator,
@@ -330,13 +333,15 @@ def _generate_products_and_optimize(smiles_iterator,
                     os.path.join(output_dir, smiles_label, str(i)),
                     struct, diene_inds,
                     energy=engs[i],
-                    smiles=smiles
+                    smiles=smiles,
+                    energy_evaluator=energy_evaluator
                 )
             else:
                 product_data = create_product_data(
                     struct, diene_inds,
                     energy=engs[i],
-                    smiles=smiles
+                    smiles=smiles,
+                    energy_evaluator=energy_evaluator
                 )
 
             products.append(product_data)
@@ -411,6 +416,7 @@ def generate_products_and_optimize(
             num_structs=num_structs,
             calc=energy_evaluator,
             evaluate_energy=evaluate_energy,
+            energy_evaluator=energy_evaluator,
             preoptimize=preoptimize,
             optimizer_settings=optimizer_settings,
             smiles_hash_generator=smiles_hash_generator,
@@ -436,6 +442,7 @@ def generate_products_and_optimize(
                     num_structs=num_structs,
                     calc=calc,
                     evaluate_energy=evaluate_energy,
+                    energy_evaluator=energy_evaluator,
                     preoptimize=preoptimize,
                     optimizer_settings=optimizer_settings,
                     smiles_hash_generator=smiles_hash_generator,
@@ -590,6 +597,7 @@ def get_critical_points(trajectory, energies=None, initial='product'):
 ReoptimizedTrajectoryData = collections.namedtuple(
     "ReoptimizedTrajectoryData",
     [
+        "atoms",
         "final_trajectory",
         "final_energies",
         "final_rmsds",
@@ -597,7 +605,8 @@ ReoptimizedTrajectoryData = collections.namedtuple(
         "initial_energies",
         "initial_rmsds",
         "raw_pre_sampling",
-        "raw_pre_energies"
+        "raw_pre_energies",
+        "evaluator"
     ]
 )
 utils.register_namedtuple(ReoptimizedTrajectoryData)
@@ -639,6 +648,7 @@ def reoptimize_trajectory(mol,
     old_rmsds = prof.evaluate_profile_distances(traj_structs, normalize=False)
 
     return ReoptimizedTrajectoryData(
+        atoms=base_structs[0].atoms,
         final_trajectory=np.array([t.coords for t in new_geoms]),
         final_energies=new_engs,
         final_rmsds=new_rmsds,
@@ -646,7 +656,8 @@ def reoptimize_trajectory(mol,
         initial_energies=traj_engs,
         initial_rmsds=old_rmsds,
         raw_pre_sampling=init_traj,
-        raw_pre_energies=init_engs
+        raw_pre_energies=init_engs,
+        evaluator=energy_evaluator
     )
 
 def generate_reactants_from_products(
@@ -694,15 +705,18 @@ def generate_reactants_from_products(
     return new_traj
 
 def refine_trajectory(product_data: InitialProductData, trajectory_data: ReoptimizedTrajectoryData,
-                      energy_evaluator='aimnet2',
+                      energy_evaluator=None,
                       profile_generator='ase-neb',
                       output_dir=None,
                       info_file='refined.json',
+                      method_options=None,
+                      climb=True,
                       **optimization_settings
                       ):
     # init_js = dev.read_json(TestManager.test_data('product.json'))
     # new_js = dev.read_json(TestManager.test_data('trajectory.json'))
-
+    if energy_evaluator is None:
+        energy_evaluator = product_data.evaluator
 
     traj = [
         Molecule(product_data.atoms, c)
@@ -710,12 +724,17 @@ def refine_trajectory(product_data: InitialProductData, trajectory_data: Reoptim
     ]
 
     rxn = Reaction([traj[0]], [traj[-1]])
+    if method_options is None:
+        method_options = {}
     prof = rxn.get_profile_generator(profile_generator,
-                                     energy_evaluator=energy_evaluator)
+                                     energy_evaluator=energy_evaluator,
+                                     climb=climb,
+                                     **method_options)
     new_images = prof.generate(base_images=traj,
                                **optimization_settings)
 
     new_traj = ReoptimizedTrajectoryData(
+        atoms=product_data.atoms,
         final_trajectory=np.array([t.coords for t in new_images]),
         final_energies=prof.evaluate_profile_energies(new_images),
         final_rmsds=prof.evaluate_profile_distances(new_images),
@@ -723,7 +742,8 @@ def refine_trajectory(product_data: InitialProductData, trajectory_data: Reoptim
         initial_energies=trajectory_data.final_energies,
         initial_rmsds=trajectory_data.final_rmsds,
         raw_pre_sampling=trajectory_data.raw_pre_sampling,
-        raw_pre_energies=trajectory_data.raw_pre_energies
+        raw_pre_energies=trajectory_data.raw_pre_energies,
+        evaluator=energy_evaluator
     )
 
     if output_dir is not None:
