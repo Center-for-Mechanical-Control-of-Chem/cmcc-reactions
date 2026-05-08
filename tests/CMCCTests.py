@@ -17,8 +17,9 @@ import itertools
 import pprint
 import tempfile as tf
 import cmcc_reactions.reaction_data_schema as schema
-import cmcc_reactions.data_analysis_tools as thc_tools
+# import cmcc_reactions.data_analysis_tools as thc_tools
 import cmcc_reactions.generate_reaction_products as gen_prods
+import cmcc_reactions.reaction_data_analysis as rda
 import cmcc_reactions.coordinate_choice as cocho
 import cmcc_reactions.utils as utils
 
@@ -245,10 +246,18 @@ class CMCCTests(unittest.TestCase):
         ts_samp = Molecule.from_file(test_data('ts_samp.xyz'))
         cocho.get_mostly_fixed_coordinate_system(ts_samp, [(22, 18, 19, 20)])
 
+    @unittest.skip
     def test_CompressFSTree(self):
         tree = utils.construct_json_file_tree(test_data('test_smi'))
         import pprint
         pprint.pprint(tree)
+
+    def test_DA_Analysis(self):
+        rda.DielsAlderReactionTrajectory.from_file(
+            test_data('refined.json')
+        ).plot_profile(
+            distance_metric=rda.incremental_rmsds
+        ).show()
 
 
 if __name__ == '__main__':

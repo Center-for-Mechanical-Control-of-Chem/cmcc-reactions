@@ -148,7 +148,66 @@ def get_critical_points(trajectory, energies=None, initial=None):
         react_idx = np.argmin(energies[ts_idx:])
     return energies, (ts_idx, react_idx, product_idx)
 
+def centroid_distance(traj, bonds):
+    traj = np.asanyarray(traj)
+    a1, a2 = np.array(bonds).T
+    return nput.pts_norms(
+        np.average(traj[:, a1], axis=-1),
+        np.average(traj[:, a2], axis=-1)
+    )
+
+def dienophile_distance(traj, bonds):
+    traj = np.asanyarray(traj)
+    _, (i, j) = np.array(bonds).T
+    return nput.pts_norms(traj[:, i], traj[:, j])
+
+def incremental_rmsds(traj, bonds=None, sel=None):
+    traj = np.asanyarray(traj)
+    if sel is None and bonds is not None:
+        sel = np.asanyarray(bonds).flatten()
+    if sel is not None:
+        traj = traj[..., sel, :]
+    disps = np.diff(traj, axis=0).reshape((len(traj)-1, -1))
+    rmsds = np.linalg.norm(disps, axis=-1)
+    return np.cumsum(np.concatenate([[0], rmsds]), axis=0)
+
+metric_label_map = {
+    centroid_distance: 'Centroid Distance',
+    dienophile_distance: r'$r_{\text{C=C}}$',
+    incremental_rmsds: 'Cumulative RMSD'
+}
+def plot_reaction_profile(
+            coordinates,
+            energies,
+            distance_metric=None,
+            metric_label=None,
+            bonds=((0, 2), (1, 3)),
+            **opts):
+    energies, (ts, p, r) = get_critical_points(None, energies)
+    energies = np.asanyarray(energies)
+    if distance_metric is None:
+        distance_metric = dienophile_distance
+    if metric_label is None:
+        metric_label = metric_label_map.get(distance_metric)
+        if metric_label is None:
+            metric_label = distance_metric.__name__
+    x1 = distance_metric(coordinates, bonds) * UnitsData.convert("BohrRadius", "Angstroms")
+    return plt.Plot(
+        x1,
+        (energies - energies[r]) * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
+        **(dict(
+            axes_labels=[
+                metric_label + r" ($\AA$)",
+                "E (kcal mol$^{-1}$)"
+            ]
+        ) | opts)
+    )
+
+
+
 class DielsAlderReactionTrajectory:
+    #TODO: split this into a ReactionTrajectory base class
+    #      and subclass in specifically the `diene_atoms` etc.
     def __init__(self, atoms, structures,
                  energies=None,
                  ts_index=None,
@@ -226,118 +285,82 @@ class DielsAlderReactionTrajectory:
             **etc
         )
 
-def centroid_distance(traj, bonds):
-    traj = np.asanyarray(traj)
-    a1, a2 = np.array(bonds).T
-    return nput.pts_norms(
-        np.average(traj[:, a1], axis=-1),
-        np.average(traj[:, a2], axis=-1)
-    )
-
-def dienophile_distance(traj, bonds):
-    traj = np.asanyarray(traj)
-    _, (i, j) = np.array(bonds).T
-    return nput.pts_norms(traj[:, i], traj[:, j])
-
-def incremental_rmsds(traj, bonds=None, sel=None):
-    traj = np.asanyarray(traj)
-    if sel is None and bonds is not None:
-        sel = np.asanyarray(bonds).flatten()
-    if sel is not None:
-        traj = traj[..., sel, :]
-    rmsds = np.diff(traj, axis=0).reshape((len(traj)-1, -1))
-    return np.cumsum(np.concatenate([[0], rmsds]), axis=0)
-
-metric_label_map = {
-    centroid_distance: 'Centroid Distance',
-    dienophile_distance: r'$r_{\text{C=C}}$'
-}
-def plot_trajectory(
-        coordinates, energies,
-        use_rmsd=None,
-        distance_metric=None,
-        metric_label=None,
-        **opts):
-    min_e = np.min(np.concatenate([traj_data.final_energies[:5], traj_data.initial_energies[:5]]))
-    if distance_metric is None:
-        distance_metric = dienophile_distance
-    elif use_rmsd is None:
-        use_rmsd = False
-    if use_rmsd:
-        if metric_label is None:
-            metric_label = "RMSD"
-        x1 = np.array(traj_data.final_rmsds) * UnitsData.convert("BohrRadius", "Angstroms")
-    else:
-        if metric_label is None:
-            metric_label = metric_label_map.get(distance_metric)
-            if metric_label is None:
-                metric_label = distance_metric.__name__
-        x1 = distance_metric(traj_data.final_trajectory, [[0, 2], [1, 3]]) * UnitsData.convert("BohrRadius",
-                                                                                               "Angstroms")
-    return plt.Plot(
-        x1,
-        (traj_data.final_energies - min_e) * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
-        **(dict(
-            axes_labels=[
-                metric_label + r" ($\AA$)",
-                "E (kcal mol$^{-1}$)"
-            ]
-        ) | opts)
-    )
-
-def plot_comp_traj(traj_data, comp_data=None,
-                   use_rmsd=None,
-                   distance_metric=None,
-                   metric_label=None,
-                   **opts):
-    min_e = np.min(np.concatenate([traj_data.final_energies[:5], traj_data.initial_energies[:5]]))
-    if distance_metric is None:
-        distance_metric = dienophile_distance
-    elif use_rmsd is None:
-        use_rmsd = False
-    if use_rmsd:
-        if metric_label is None:
-            metric_label = "RMSD"
-        x1 = np.array(traj_data.final_rmsds) * UnitsData.convert("BohrRadius", "Angstroms")
-    else:
-        if metric_label is None:
-            metric_label = metric_label_map.get(distance_metric)
-            if metric_label is None:
-                metric_label = distance_metric.__name__
-        x1 = distance_metric(traj_data.final_trajectory, [[0, 2], [1, 3]]) * UnitsData.convert("BohrRadius",
-                                                                                               "Angstroms")
-    f1 = plt.Plot(
-        x1,
-        (traj_data.final_energies - min_e) * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
-        **(dict(
-            axes_labels=[
-                metric_label + r" ($\AA$)",
-                "E (kcal mol$^{-1}$)"
-            ]
-        ) | opts)
-    )
-    if comp_data is None:
-        if use_rmsd:
-            x2 = np.array(traj_data.initial_rmsds) * UnitsData.convert("BohrRadius", "Angstroms")
-        else:
-            x2 = distance_metric(traj_data.initial_trajectory, [[0, 2], [1, 3]]) * UnitsData.convert("BohrRadius",
-                                                                                                     "Angstroms")
-        plt.Plot(
-            x2,
-            (traj_data.initial_energies - min_e) * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
-            figure=f1,
-            linestyle='dashed'
+    @classmethod
+    def from_file(cls, file, **etc):
+        return cls.from_trajectory_data(
+            utils.read_namedtuple(file, 'ReoptimizedTrajectoryData'),
+            **etc
         )
-    else:
-        if use_rmsd:
-            x2 = np.array(comp_data.final_rmsds) * UnitsData.convert("BohrRadius", "Angstroms")
-        else:
-            x2 = distance_metric(comp_data.final_trajectory, [[0, 2], [1, 3]]) * UnitsData.convert("BohrRadius",
-                                                                                                   "Angstroms")
-        plt.Plot(
-            x2,
-            (comp_data.final_energies - min_e) * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
-            figure=f1,
-            linestyle='dashed'
+
+    def plot_profile(self,
+                     distance_metric=None,
+                     metric_label=None,
+                     bonds=((0, 2), (1, 3)),
+                     **opts
+                     ):
+        return plot_reaction_profile(
+            self.structures,
+            self.energies,
+            distance_metric=distance_metric,
+            metric_label=metric_label,
+            bonds=bonds,
+            **opts
         )
-    return f1
+
+# def plot_comp_traj(traj_data,
+#                    comp_data=None,
+#                    use_rmsd=None,
+#                    distance_metric=None,
+#                    metric_label=None,
+#                    **opts):
+#     min_e = np.min(np.concatenate([traj_data.final_energies[:5], traj_data.initial_energies[:5]]))
+#     if distance_metric is None:
+#         distance_metric = dienophile_distance
+#     elif use_rmsd is None:
+#         use_rmsd = False
+#     if use_rmsd:
+#         if metric_label is None:
+#             metric_label = "RMSD"
+#         x1 = np.array(traj_data.final_rmsds) * UnitsData.convert("BohrRadius", "Angstroms")
+#     else:
+#         if metric_label is None:
+#             metric_label = metric_label_map.get(distance_metric)
+#             if metric_label is None:
+#                 metric_label = distance_metric.__name__
+#         x1 = distance_metric(traj_data.final_trajectory, [[0, 2], [1, 3]]) * UnitsData.convert("BohrRadius",
+#                                                                                                "Angstroms")
+#     f1 = plt.Plot(
+#         x1,
+#         (traj_data.final_energies - min_e) * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
+#         **(dict(
+#             axes_labels=[
+#                 metric_label + r" ($\AA$)",
+#                 "E (kcal mol$^{-1}$)"
+#             ]
+#         ) | opts)
+#     )
+#     if comp_data is None:
+#         if use_rmsd:
+#             x2 = np.array(traj_data.initial_rmsds) * UnitsData.convert("BohrRadius", "Angstroms")
+#         else:
+#             x2 = distance_metric(traj_data.initial_trajectory, [[0, 2], [1, 3]]) * UnitsData.convert("BohrRadius",
+#                                                                                                      "Angstroms")
+#         plt.Plot(
+#             x2,
+#             (traj_data.initial_energies - min_e) * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
+#             figure=f1,
+#             linestyle='dashed'
+#         )
+#     else:
+#         if use_rmsd:
+#             x2 = np.array(comp_data.final_rmsds) * UnitsData.convert("BohrRadius", "Angstroms")
+#         else:
+#             x2 = distance_metric(comp_data.final_trajectory, [[0, 2], [1, 3]]) * UnitsData.convert("BohrRadius",
+#                                                                                                    "Angstroms")
+#         plt.Plot(
+#             x2,
+#             (comp_data.final_energies - min_e) * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
+#             figure=f1,
+#             linestyle='dashed'
+#         )
+#     return f1

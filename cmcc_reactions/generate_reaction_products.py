@@ -756,5 +756,17 @@ def refine_trajectory(product_data: InitialProductData, trajectory_data: Reoptim
 
     return new_traj
 
-
-    traj[0].plot([i.coords for i in new_images]).show()
+def test_refinement_methods(
+        product_data: InitialProductData, trajectory_data: ReoptimizedTrajectoryData,
+        refiment_lists:dict[str, dict],
+        info_file_template='refined-{name}.json',
+        **global_options
+):
+    for name, opts in refiment_lists.items():
+        info_file = info_file_template.format(name=name)
+        refine_trajectory(product_data, trajectory_data,
+                          **(
+                              {'info_file':info_file}
+                              | global_options
+                              | opts
+                          ))
