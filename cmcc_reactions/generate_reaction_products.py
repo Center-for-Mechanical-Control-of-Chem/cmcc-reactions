@@ -708,11 +708,13 @@ def generate_reactants_from_products(
 
 def refine_trajectory(product_data: InitialProductData, trajectory_data: ReoptimizedTrajectoryData,
                       energy_evaluator=None,
-                      profile_generator='ase-neb',
+                      profile_generator='pys-string',
                       output_dir=None,
                       info_file='refined.json',
                       method_options=None,
                       climb=True,
+                      ts_opt_generator='pys-dimer',
+                      ts_opt_settings=None,
                       **optimization_settings
                       ):
     # init_js = dev.read_json(TestManager.test_data('product.json'))
@@ -734,6 +736,17 @@ def refine_trajectory(product_data: InitialProductData, trajectory_data: Reoptim
                                      **method_options)
     new_images = prof.generate(base_images=traj,
                                **optimization_settings)
+
+    if ts_opt_generator is not None:
+        rxn = Reaction([new_images[0]], [new_images[-1]])
+        prof = rxn.get_profile_generator(ts_opt_generator,
+                                         energy_evaluator=energy_evaluator,
+                                         climb=climb,
+                                         **method_options)
+        if ts_opt_settings is None:
+            ts_opt_settings = optimization_settings
+        new_images = prof.generate(base_images=new_images,
+                                   **ts_opt_settings)
 
     new_traj = ReoptimizedTrajectoryData(
         atoms=product_data.atoms,

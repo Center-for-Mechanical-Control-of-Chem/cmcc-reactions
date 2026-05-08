@@ -177,13 +177,13 @@ metric_label_map = {
     incremental_rmsds: 'Cumulative RMSD'
 }
 def plot_reaction_profile(
-            coordinates,
-            energies,
-            distance_metric=None,
-            metric_label=None,
-            bonds=((0, 2), (1, 3)),
-            **opts):
-    energies, (ts, p, r) = get_critical_points(None, energies)
+        coordinates,
+        energies,
+        distance_metric=None,
+        metric_label=None,
+        bonds=((0, 2), (1, 3)),
+        **opts):
+    energies, (ts, r, p) = get_critical_points(None, energies)
     energies = np.asanyarray(energies)
     if distance_metric is None:
         distance_metric = dienophile_distance
@@ -306,6 +306,53 @@ class DielsAlderReactionTrajectory:
             bonds=bonds,
             **opts
         )
+
+    def compare_profiles(self, other,
+                         distance_metric=None,
+                         metric_label=None,
+                         bonds=((0, 2), (1, 3)),
+                         figure=None,
+                         comparison_styles=None,
+                         **opts):
+        figure = self.plot_profile(
+            distance_metric=distance_metric,
+            metric_label=metric_label,
+            bonds=bonds,
+            figure=figure,
+            **opts
+        )
+        if comparison_styles is None:
+            comparison_styles = {'linestyle':'dashed'}
+        other.plot_profile(
+            distance_metric=distance_metric,
+            metric_label=metric_label,
+            bonds=bonds,
+            figure=figure,
+            **(opts | comparison_styles)
+        )
+        return figure
+
+    def animate_trajectory(self,
+                           bonds=None,
+                           **opts):
+        anim = None
+        base_mol = self.load_mol(0)
+        if bonds is None:
+            try:
+                anim = base_mol.plot(
+                    self.structures,
+                    bonds='recompute',
+                    **opts
+                )
+            except ValueError:
+                anim = None
+        if anim is None:
+            anim = base_mol.plot(
+                self.structures,
+                bonds=bonds,
+                **opts
+            )
+        return anim
 
 # def plot_comp_traj(traj_data,
 #                    comp_data=None,
