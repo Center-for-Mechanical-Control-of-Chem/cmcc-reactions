@@ -153,6 +153,7 @@ def create_product_data(struct, inds, energy=None, smiles=None, energy_evaluator
 def write_product_structure(output_dir, struct, inds,
                             # conf_file='conf.xyz',
                             energy=None,
+                            energy_evaluator=None,
                             smiles=None,
                             # index_file='isomer.txt',
                             info_file='product.json',
@@ -167,7 +168,7 @@ def write_product_structure(output_dir, struct, inds,
     #         bond_line.format(inds[0]),
     #         bond_line.format(inds[1])
     #     ])
-    product_data = create_product_data(struct, inds, energy=energy, smiles=smiles)
+    product_data = create_product_data(struct, inds, energy=energy, smiles=smiles, energy_evaluator=energy_evaluator)
     utils.write_namedtuple(
         os.path.join(output_dir, info_file),
         product_data

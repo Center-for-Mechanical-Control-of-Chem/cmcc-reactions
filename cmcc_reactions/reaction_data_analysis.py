@@ -6,7 +6,7 @@ from . import reaction_data_schema as schema
 from . import utils
 from . import generate_reaction_products as gen_prods
 
-from McUtils.Data import UnitsData
+from McUtils.Data import UnitsData, BondData
 import McUtils.Numputils as nput
 import McUtils.Plots as plt
 from Psience.Molecools import Molecule
@@ -152,9 +152,29 @@ def centroid_distance(traj, bonds):
     traj = np.asanyarray(traj)
     a1, a2 = np.array(bonds).T
     return nput.pts_norms(
-        np.average(traj[:, a1], axis=-1),
-        np.average(traj[:, a2], axis=-1)
+        np.average(traj[:, a1], axis=-2),
+        np.average(traj[:, a2], axis=-2)
     )
+
+def bond_average_distance(traj, bonds):
+    traj = np.asanyarray(traj)
+    a1, a2 = np.array(bonds).T
+    return np.average(nput.pts_norms(traj[:, a1], traj[:, a2]), axis=-1)
+
+default_cc_single_distance = 1.54#BondData["C", "C"]
+def cc_single_normalized_distance(traj, bonds):
+    return default_cc_single_distance - bond_average_distance(traj, bonds)
+
+def bond_centroid_deviation_distance(traj, bonds):
+    return centroid_distance(traj, bonds) - bond_average_distance(traj, bonds)
+
+def bond_1(traj, bonds):
+    traj = np.asanyarray(traj)
+    return nput.pts_norms(traj[:, bonds[0][0]], traj[:, bonds[0][1]])
+
+def bond_2(traj, bonds):
+    traj = np.asanyarray(traj)
+    return nput.pts_norms(traj[:, bonds[1][0]], traj[:, bonds[1][1]])
 
 def dienophile_distance(traj, bonds):
     traj = np.asanyarray(traj)
@@ -172,10 +192,14 @@ def incremental_rmsds(traj, bonds=None, sel=None):
     return np.cumsum(np.concatenate([[0], rmsds]), axis=0)
 
 metric_label_map = {
-    centroid_distance: 'Centroid Distance',
-    dienophile_distance: r'$r_{\text{C=C}}$',
-    incremental_rmsds: 'Cumulative RMSD'
+    centroid_distance:'Centroid Distance',
+    bond_average_distance:r'$r_\text{avg.}$',
+    cc_single_normalized_distance:r'$\Delta r_\text{avg.}$',
+    bond_1:r'$r_{1,3}$',
+    bond_2:r'$r_{2,4}$',
+    dienophile_distance:r'$r_{\text{C=C}}$'
 }
+default_distance_metric = cc_single_normalized_distance
 def plot_reaction_profile(
         coordinates,
         energies,
@@ -186,7 +210,7 @@ def plot_reaction_profile(
     energies, (ts, r, p) = get_critical_points(None, energies)
     energies = np.asanyarray(energies)
     if distance_metric is None:
-        distance_metric = dienophile_distance
+        distance_metric = cc_single_normalized_distance
     if metric_label is None:
         metric_label = metric_label_map.get(distance_metric)
         if metric_label is None:
@@ -203,6 +227,34 @@ def plot_reaction_profile(
         ) | opts)
     )
 
+def plot_metric_profile(
+        coordinates,
+        distance_metric_1,
+        distance_metric_2,
+        metric_label_1=None,
+        metric_label_2=None,
+        bonds=((0, 2), (1, 3)),
+        **opts):
+    if metric_label_1 is None:
+        metric_label_1 = metric_label_map.get(distance_metric_1)
+        if metric_label_1 is None:
+            metric_label_1 = metric_label_1.__name__
+    if metric_label_2 is None:
+        metric_label_2 = metric_label_map.get(distance_metric_2)
+        if metric_label_2 is None:
+            metric_label_2 = metric_label_2.__name__
+    x1 = distance_metric_1(coordinates, bonds) * UnitsData.convert("BohrRadius", "Angstroms")
+    x2 = distance_metric_2(coordinates, bonds) * UnitsData.convert("BohrRadius", "Angstroms")
+    return plt.Plot(
+        x1,
+        x2,
+        **(dict(
+            axes_labels=[
+                metric_label_1 + r" ($\AA$)",
+                metric_label_2 + r" ($\AA$)",
+            ]
+        ) | opts)
+    )
 
 
 class DielsAlderReactionTrajectory:
@@ -353,6 +405,21 @@ class DielsAlderReactionTrajectory:
                 **opts
             )
         return anim
+
+def compare_profiles_from_file(
+        trajectory_file,
+        **opts
+):
+    return DielsAlderReactionTrajectory.from_file(
+        trajectory_file,
+        which='final',
+    ).compare_profiles(
+        DielsAlderReactionTrajectory.from_file(
+            trajectory_file,
+            which='initial'
+        ),
+        **opts
+    )
 
 # def plot_comp_traj(traj_data,
 #                    comp_data=None,

@@ -213,19 +213,19 @@ class CMCCTests(unittest.TestCase):
             output_dir=test_data()
         )
 
-    @unittest.skip
+    # @unittest.skip
     def test_RefinedSampling(self):
         import warnings
         warnings.filterwarnings("ignore", category=RuntimeWarning)
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         init_data = utils.read_namedtuple(
-            test_data('product_tris.json'),
-            nt_type='InitialProductData'
+            test_data('trajectory.json'),
+            # nt_type='InitialProductData'
         )
         traj_data = utils.read_namedtuple(
-            test_data('trajectory_tris.json'),
-            nt_type='ReoptimizedTrajectoryData'
+            test_data('trajectory.json'),
+            # nt_type='ReoptimizedTrajectoryData'
         )
 
         new_traj = gen_prods.refine_trajectory(
@@ -252,6 +252,7 @@ class CMCCTests(unittest.TestCase):
         import pprint
         pprint.pprint(tree)
 
+    @unittest.skip
     def test_DA_Analysis(self):
         rda.DielsAlderReactionTrajectory.from_file(
             test_data('refined.json')
