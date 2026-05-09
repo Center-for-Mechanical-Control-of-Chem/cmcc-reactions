@@ -406,20 +406,44 @@ class DielsAlderReactionTrajectory:
             )
         return anim
 
-def compare_profiles_from_file(
-        trajectory_file,
+def compare_profiles(
+        trajectory_data,
         **opts
 ):
-    return DielsAlderReactionTrajectory.from_file(
-        trajectory_file,
-        which='final',
-    ).compare_profiles(
-        DielsAlderReactionTrajectory.from_file(
-            trajectory_file,
+    if isinstance(trajectory_data, str):
+        d1 = DielsAlderReactionTrajectory.from_file(
+            trajectory_data,
+            which='final',
+        )
+        d2 = DielsAlderReactionTrajectory.from_file(
+            trajectory_data,
             which='initial'
-        ),
-        **opts
-    )
+        )
+    else:
+        d1 = DielsAlderReactionTrajectory.from_trajectory_data(
+            trajectory_data,
+            which='final',
+        )
+        d2 = DielsAlderReactionTrajectory.from_trajectory_data(
+            trajectory_data,
+            which='initial'
+        )
+    return d1.compare_profiles(d2, **opts)
+
+# def compare_profiles_from_file(
+#         trajectory_file,
+#         **opts
+# ):
+#     return DielsAlderReactionTrajectory.from_file(
+#         trajectory_file,
+#         which='final',
+#     ).compare_profiles(
+#         DielsAlderReactionTrajectory.from_file(
+#             trajectory_file,
+#             which='initial'
+#         ),
+#         **opts
+#     )
 
 # def plot_comp_traj(traj_data,
 #                    comp_data=None,

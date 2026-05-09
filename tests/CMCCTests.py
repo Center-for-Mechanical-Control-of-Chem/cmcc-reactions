@@ -219,9 +219,13 @@ class CMCCTests(unittest.TestCase):
         warnings.filterwarnings("ignore", category=RuntimeWarning)
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        init_data = utils.read_namedtuple(
-            test_data('trajectory.json'),
-            # nt_type='InitialProductData'
+        # init_data = utils.read_namedtuple(
+        #     test_data('trajectory.json'),
+        #     # nt_type='InitialProductData'
+        # )
+        traj_data = utils.read_namedtuple(
+            test_data('trajectory_problem.json'),
+            # nt_type='ReoptimizedTrajectoryData'
         )
         traj_data = utils.read_namedtuple(
             test_data('trajectory.json'),
@@ -229,15 +233,16 @@ class CMCCTests(unittest.TestCase):
         )
 
         new_traj = gen_prods.refine_trajectory(
-            init_data,
-            traj_data
+            traj_data,
+            profile_generator='pys-dimer',
+            # num_images=30,
+            # param='energy',
+            # optimizer='lbfgs'
+            ts_opt_generator=None
+            # ts_opt_settings={}
         )
 
-        import McUtils.Plots as plt
-        plt.Plot(
-            new_traj.final_rmsds,
-            new_traj.final_energies
-        ).show()
+        rda.compare_profiles(new_traj, marker='.').show()
 
     @unittest.skip
     def test_CoordinateSystemGen(self):

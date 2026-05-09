@@ -707,7 +707,8 @@ def generate_reactants_from_products(
 
     return new_traj
 
-def refine_trajectory(product_data: InitialProductData, trajectory_data: ReoptimizedTrajectoryData,
+def refine_trajectory(product_data: InitialProductData|ReoptimizedTrajectoryData,
+                      trajectory_data: ReoptimizedTrajectoryData = None,
                       energy_evaluator=None,
                       profile_generator='pys-string',
                       output_dir=None,
@@ -716,8 +717,11 @@ def refine_trajectory(product_data: InitialProductData, trajectory_data: Reoptim
                       climb=True,
                       ts_opt_generator='pys-dimer',
                       ts_opt_settings=None,
+                      ts_opt_optimizer=None,
                       **optimization_settings
                       ):
+    if trajectory_data is None:
+        trajectory_data = product_data
     # init_js = dev.read_json(TestManager.test_data('product.json'))
     # new_js = dev.read_json(TestManager.test_data('trajectory.json'))
     if energy_evaluator is None:
@@ -745,7 +749,7 @@ def refine_trajectory(product_data: InitialProductData, trajectory_data: Reoptim
                                          climb=climb,
                                          **method_options)
         if ts_opt_settings is None:
-            ts_opt_settings = optimization_settings
+            ts_opt_settings = optimization_settings | dict(optimizer=ts_opt_optimizer)
         new_images = prof.generate(base_images=new_images,
                                    **ts_opt_settings)
 
