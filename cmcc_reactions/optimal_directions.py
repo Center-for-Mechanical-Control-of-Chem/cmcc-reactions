@@ -6,6 +6,7 @@ from McUtils.Data import UnitsData
 from McUtils.Scaffolding import Logger
 import McUtils.Devutils as dev
 import McUtils.Numputils as nput
+import McUtils.Coordinerds as coordops
 from Psience.Molecools import Molecule
 from Psience.Modes import MixtureModes
 import McUtils.Plots as plt
@@ -61,7 +62,9 @@ def get_guess_dir(f_proj_r, f_proj_ts):
     guess_pos = np.argmax(1 / g_base_r - 1 / g_base_ts)
     return L_ts[:, guess_pos]
 
-def scipy_optimize_forces(gs_hess, ts_hess, guess_dir, proj_dirs, *, max_iterations, logger=None,
+def scipy_optimize_forces(gs_hess, ts_hess, guess_dir, proj_dirs, *,
+                          max_iterations,
+                          logger=None,
                           method='nelder-mead'):
     reduced_basis = nput.find_basis(nput.orthogonal_projection_matrix(proj_dirs))
     gs_hess = reduced_basis.T @ gs_hess @ reduced_basis
@@ -214,6 +217,7 @@ def construct_force_dirs(modes_gs, modes_ts,
                          num_dirs,
                          idx_start,
                          mols=None,
+                         internals=None,
                          max_iterations=None,
                          use_mode_space=True,
                          **opts
@@ -227,21 +231,42 @@ def construct_force_dirs(modes_gs, modes_ts,
         else:
             hess_ts_nms = nm_hess(modes_ts, L=np.eye(modes_ts.modes_by_coords.shape[-1]))
             hess_gs_nms = nm_hess(modes_gs, L=modes_ts.coords_by_modes @ modes_gs.modes_by_coords)
+        proj_dir = np.eye(len(hess_ts_nms))[:, :idx_start]
+    elif internals is not None:
+        reactant, transition_state = mols
+        exp_rs = reactant.modify(internals=internals).get_cartesians_by_internals(order=1)
+        exp_ts = transition_state.modify(internals=internals).get_cartesians_by_internals(order=1)
+        exp_ts_inv = transition_state.modify(internals=internals).get_internals_by_cartesians(order=1)
+
+        hess_gs_nms = modes_gs.compute_hessian('coords')
+        hess_ts_nms = modes_ts.compute_hessian('coords')
+
+        hess_ts_nms = nput.tensor_reexpand(exp_ts, [0, hess_ts_nms])[1]
+        hess_gs_nms = nput.tensor_reexpand(exp_rs, [0, hess_gs_nms])[1]
+
+        proj_dir = (modes_ts.coords_by_modes[:idx_start, :] @ exp_ts_inv[0]).T
     else:
         hess_gs_nms = modes_gs.compute_hessian('coords')
         hess_ts_nms = modes_ts.compute_hessian('coords')
+
+        proj_dir = modes_ts.coords_by_modes[:idx_start, :].T
 
     # hess_ts_nms = nm_hess(modes_ts, L=np.eye(modes_ts.matrix.shape[-1]))
     # hess_gs_nms = nm_hess(modes_gs, L=modes_ts.inverse @ modes_gs.matrix)
 
     force_dirs, errors = get_force_dirs(hess_gs_nms, hess_ts_nms,
-                                        np.eye(len(hess_ts_nms))[:, :idx_start],
+                                        proj_dir,
                                         # new_modes_ts.matrix[:, (0,)],
                                         num_dirs,
                                         max_iterations=max_iterations,
                                         **opts
                                         )
-    cart_force_dirs = force_dirs.T @ modes_ts.coords_by_modes
+    if use_mode_space:
+        cart_force_dirs = force_dirs.T @ modes_ts.coords_by_modes
+    elif internals is not None:
+        cart_force_dirs = force_dirs.T @ exp_ts[0]
+    else:
+        cart_force_dirs = force_dirs.T
     selected_force_dirs = cart_force_dirs[idx_start:]
 
     return selected_force_dirs, force_dirs
@@ -276,28 +301,101 @@ def write_gsm_constraint(nat, selected_force_dirs,
             files.append(filename)
     return files
 
-LOW_FREQUENCY_MODE_CUTOFF = 0.00045
-def reaction_force_dirs(reactant, transition_state,
-                        num_dirs=6,
-                        fragment_indices=None,
-                        low_frequency_cutoff=None, # 100 cm-1
-                        return_modes=True,
-                        extra_localization=None,
-                        **opts
-                        ):
+def prep_optimization_modes(reactant, transition_state,
+                            fragment_indices=None,
+                            extra_localization=None,
+                            remove_fragment_transrot=True,
+                            remove_local_transrot=True,
+                            allow_mode_mixing=True,
+                            internals=None,
+                            project_zero_gmatrix_modes=True):
     new_modes_ts = transition_state.get_normal_modes()
     new_modes_gs = reactant.get_normal_modes()
 
     if fragment_indices is not None:
         if isinstance(fragment_indices, int):
             fragment_indices = reactant.fragment_indices[fragment_indices]
-        new_modes_gs = new_modes_gs.localize(atoms=fragment_indices, allow_mode_mixing=True)
-        new_modes_ts = new_modes_ts.localize(atoms=fragment_indices, allow_mode_mixing=True)
+        new_modes_gs = new_modes_gs.localize(atoms=fragment_indices,
+                                             allow_mode_mixing=allow_mode_mixing,
+                                             project_zero_gmatrix_modes=project_zero_gmatrix_modes)
+        new_modes_ts = new_modes_ts.localize(atoms=fragment_indices,
+                                             allow_mode_mixing=allow_mode_mixing,
+                                             project_zero_gmatrix_modes=project_zero_gmatrix_modes)
+
+        if remove_local_transrot:
+            _, dx = nput.transrot_expansion(
+                reactant.coords,
+                *fragment_indices,
+                masses=reactant.atomic_masses
+            )
+            proj = nput.frame_displacement_projector(dx.T, reactant.atomic_masses, mass_weighted=False)
+            new_modes_gs = new_modes_gs.localize(projections=[proj], allow_mode_mixing=allow_mode_mixing)
+
+            _, dx = nput.transrot_expansion(
+                transition_state.coords,
+                *fragment_indices,
+                masses=transition_state.atomic_masses
+            )
+            proj = nput.frame_displacement_projector(dx.T, transition_state.atomic_masses, mass_weighted=True)
+            new_modes_ts = new_modes_ts.localize(projections=[proj], allow_mode_mixing=allow_mode_mixing)
+
+    if remove_fragment_transrot:
+        _, dx = nput.orientation_expansion(
+            reactant.coords,
+            *reactant.fragment_indices,
+            masses=reactant.atomic_masses
+        )
+        proj = nput.frame_displacement_projector(dx.T, reactant.atomic_masses, mass_weighted=False)
+        new_modes_gs = new_modes_gs.localize(projections=[proj], allow_mode_mixing=allow_mode_mixing)
+
+        _, dx = nput.orientation_expansion(
+            transition_state.coords,
+            *reactant.fragment_indices,
+            masses=transition_state.atomic_masses
+        )
+        proj = nput.frame_displacement_projector(dx.T, transition_state.atomic_masses, mass_weighted=True)
+        new_modes_ts = new_modes_ts.localize(projections=[proj], allow_mode_mixing=allow_mode_mixing)
+
+    if internals is not None:
+        if isinstance(internals, dict):
+            internals = internals['specs']
+        elif all(len(internals) == 4 for internals in internals):
+            internals = coordops.extract_zmatrix_internals(internals)
+        new_modes_gs = new_modes_gs.localize(internals=internals, allow_mode_mixing=allow_mode_mixing)
+        new_modes_ts = new_modes_ts.localize(internals=internals, allow_mode_mixing=allow_mode_mixing)
 
     if extra_localization is not None:
-        extra_localization = extra_localization | dict(allow_mode_mixing=True)
+        extra_localization = extra_localization | dict(allow_mode_mixing=allow_mode_mixing)
         new_modes_gs = new_modes_gs.localize(**extra_localization)
         new_modes_ts = new_modes_ts.localize(**extra_localization)
+
+    return new_modes_gs, new_modes_ts
+
+LOW_FREQUENCY_MODE_CUTOFF = 0.00045
+def reaction_force_dirs(reactant, transition_state,
+                        num_dirs=6,
+                        prepped_modes=None,
+                        fragment_indices=None,
+                        low_frequency_cutoff=None,  # 100 cm-1
+                        return_modes=True,
+                        extra_localization=None,
+                        remove_fragment_transrot=True,
+                        remove_local_transrot=True,
+                        allow_mode_mixing=True,
+                        internals=None,
+                        project_internals=True,
+                        **opts
+                        ):
+
+    if prepped_modes is None:
+        prepped_modes = prep_optimization_modes(reactant, transition_state,
+                                                fragment_indices=fragment_indices,
+                                                extra_localization=extra_localization,
+                                                remove_fragment_transrot=remove_fragment_transrot,
+                                                remove_local_transrot=remove_local_transrot,
+                                                internals=internals if project_internals else None,
+                                                allow_mode_mixing=allow_mode_mixing)
+    new_modes_gs, new_modes_ts = prepped_modes
 
     if low_frequency_cutoff is None:
         low_frequency_cutoff = LOW_FREQUENCY_MODE_CUTOFF
@@ -311,8 +409,8 @@ def reaction_force_dirs(reactant, transition_state,
                                 num_dirs=num_dirs,
                                 idx_start=idx_start,
                                 mols=(reactant, transition_state),
-                                **opts
-                                )
+                                internals=internals,
+                                **opts)
     if return_modes:
         return dirs, (new_modes_gs, new_modes_ts)
     else:
@@ -395,7 +493,8 @@ def reorder_force_dirs(rs_solv, ts_solv, dirs, direction_ts=None,
     else:
         return gamma_list[ord_g,], dirs
 
-def mass_weighted_normalize_displacements(mol, expansion=None, inverse=None, orthogonalize=False, mode='forward'):
+def mass_weighted_normalize_displacements(mol, expansion=None, inverse=None,
+                                          mass_weight=True, orthogonalize=False, mode='forward'):
     if mode == 'forward':
         if expansion is None:
             expansion = mol.get_cartesians_by_internals(1)[0]
@@ -403,7 +502,10 @@ def mass_weighted_normalize_displacements(mol, expansion=None, inverse=None, ort
             expansion = np.asanyarray(expansion) #TODO: why?
             if expansion.ndim == 3:
                 expansion = expansion[0]
-        b = expansion @ mol.get_gmatrix(power=-1/2, use_internals=False)
+        if mass_weight:
+            b = expansion @ mol.get_gmatrix(power=-1/2, use_internals=False)
+        else:
+            b = expansion
         if orthogonalize:
             b, r = np.linalg.qr(b.T)
             b = b.T
@@ -414,7 +516,9 @@ def mass_weighted_normalize_displacements(mol, expansion=None, inverse=None, ort
             b, norms = nput.vec_normalize(b, axis=1, return_norms=True)
             if inverse is not None:
                 inverse = inverse @ np.diag(norms)
-        b = b @ mol.get_gmatrix(power=1/2, use_internals=False)
+        if mass_weight:
+            b = b @ mol.get_gmatrix(power=1/2, use_internals=False)
+
         if inverse is not None:
             return b, inverse
         else:
@@ -427,7 +531,10 @@ def mass_weighted_normalize_displacements(mol, expansion=None, inverse=None, ort
                 expansion = np.asanyarray(expansion)  # TODO: why?
                 if expansion.ndim == 3:
                     expansion = expansion[0]
-            b = mol.get_gmatrix(power=1/2, use_internals=False) @ inverse
+            if mass_weight:
+                b = mol.get_gmatrix(power=1/2, use_internals=False) @ inverse
+            else:
+                b = inverse
             if orthogonalize:
                 b, r = np.linalg.qr(b)
                 pinv = np.linalg.inv(expansion @ mol.get_gmatrix(power=-1/2, use_internals=False) @ b)
@@ -435,7 +542,8 @@ def mass_weighted_normalize_displacements(mol, expansion=None, inverse=None, ort
             else:
                 b, norms = nput.vec_normalize(b, axis=0, return_norms=True)
                 expansion = np.diag(norms) @ expansion
-            b = mol.get_gmatrix(power=-1/2, use_internals=False) @ b
+            if mass_weight:
+                b = mol.get_gmatrix(power=-1/2, use_internals=False) @ b
             return expansion, b
         else:
             if expansion is None:
@@ -444,12 +552,16 @@ def mass_weighted_normalize_displacements(mol, expansion=None, inverse=None, ort
                 expansion = np.asanyarray(expansion)  # TODO: why?
                 if expansion.ndim == 3:
                     expansion = expansion[0]
-            b = mol.get_gmatrix(power=1/2, use_internals=False) @ expansion
+            if mass_weight:
+                b = mol.get_gmatrix(power=1/2, use_internals=False) @ expansion
+            else:
+                b = expansion
             if orthogonalize:
                 b, r = np.linalg.qr(b)
             else:
                 b, norms = nput.vec_normalize(b, axis=0, return_norms=True)
-            b = mol.get_gmatrix(power=-1/2, use_internals=False) @ b
+            if mass_weight:
+                b = mol.get_gmatrix(power=-1/2, use_internals=False) @ b
             return b
     else:
         raise ValueError(mode)
@@ -476,14 +588,20 @@ class ForceOptimizer:
         'method':'cg',
         'max_iterations':100
     }
-    def __init__(self, reactant_mol, ts_mol, optimal_forces=None, reorder=True, inverse_forces=None,
+    def __init__(self, reactant_mol, ts_mol,
+                 optimal_forces=None,
+                 reorder=True,
+                 inverse_forces=None,
                  use_mode_space=True,
                  reembed=True,
+                 prepped_modes=None,
                  **determination_opts):
         if reembed:
+            reactant_mol.get_normal_modes()
             reactant_mol = reactant_mol.get_embedded_molecule(ref=ts_mol)
-        self.rs = reactant_mol
-        self.ts = ts_mol
+        self.rs:Molecule = reactant_mol
+        self.ts:Molecule = ts_mol
+        self._prepped_modes = prepped_modes
         self.opts = dict(self.default_options, **determination_opts)
         self.reorder = reorder
         self._optimal_forces = optimal_forces
@@ -706,13 +824,44 @@ class ForceOptimizer:
 
         return m
 
+    @property
+    def prepped_modes(self):
+        if self._prepped_modes is None:
+            opts = {
+                k:v for k,v in self.opts.items()
+                if k in ['fragment_indices',
+                         'extra_localization',
+                         'remove_fragment_transrot',
+                         'remove_local_transrot',
+                         'internals',
+                         'project_internals',
+                         'allow_mode_mixing']
+            }
+            project_internals = opts.pop('project_internals', None)
+            if project_internals is False:
+                opts.pop('internals', None)
+            self._prepped_modes = prep_optimization_modes(
+                self.rs, self.ts,
+                **opts
+            )
+        return self._prepped_modes
+
+    @property
+    def rs_modes(self):
+        return self.prepped_modes[0]
+    @property
+    def ts_modes(self):
+        return self.prepped_modes[1]
+
     def optimize(self):
         if self.rs.potential_derivatives is None:
             self.rs.potential_derivatives = self.rs.calculate_energy(order=2)[1:]
         if self.ts.potential_derivatives is None:
             self.ts.potential_derivatives = self.ts.calculate_energy(order=2)[1:]
 
-        (dirs, _), modes = reaction_force_dirs(self.rs, self.ts, use_mode_space=self.use_mode_space, **self.opts)
+        (dirs, _), modes = reaction_force_dirs(self.rs, self.ts,
+                                               prepped_modes=self.prepped_modes,
+                                               use_mode_space=self.use_mode_space, **self.opts)
         if self.reorder:
             gammas, dirs = reorder_force_dirs(self.rs, self.ts, dirs, use_mode_space=self.use_mode_space)
         else:
@@ -742,16 +891,6 @@ class ForceOptimizer:
                     mass_weighted_displacement_inverse(self.ts, fds[1])
                 )
         return self._inverse
-    @property
-    def rs_modes(self):
-        if self._optimal_forces is None:
-            self._optimal_forces = self.optimize()
-        return self._optimal_forces[1][0]
-    @property
-    def ts_modes(self):
-        if self._optimal_forces is None:
-            self._optimal_forces = self.optimize()
-        return self._optimal_forces[1][1]
 
     @property
     def mass_weighted_force_dirs(self):
@@ -810,7 +949,10 @@ class ForceOptimizer:
     def overlap_breakdown(self, overlap):
         return np.round(overlap**2 * 100)
 
-    def animate_normed(self, i, expansion=None, modes=None, use_internals=False, mag=.5, mol='ts', **opts):
+    def animate_normed(self, i, expansion=None, modes=None,
+                       use_internals=False, mag=.5, mol='ts',
+                       mass_weight=True,
+                       **opts):
         if expansion is None and not use_internals:
             expansion = self.force_dirs
         if dev.str_is(mol, 'ts'):
@@ -821,7 +963,7 @@ class ForceOptimizer:
             mol = self.rs
             if len(expansion) == 2 and expansion[0].ndim == 2:
                 expansion = expansion[0]
-        exp = mass_weighted_normalize_displacements(mol, expansion=expansion)
+        exp = mass_weighted_normalize_displacements(mol, mass_weight=mass_weight, expansion=expansion)
         return mol.animate_coordinate(i, mag,
                                       coordinate_expansion=[nput.vec_normalize(exp, axis=1)],
                                       **opts
@@ -838,22 +980,60 @@ class ForceOptimizer:
                 modes = self.rs_modes
         return mol.animate_mode(i, modes=modes, **opts)
 
-    def get_displaced_geometries(self, mode, disp_min=-50, disp_max=50, steps=50):
-        scan_coords_r = self.rs.get_scan_coordinates(
-            [[disp_min, disp_max, steps]],
-            which=[mode],
-            coordinate_expansion=[self.force_dirs]
-        )
-        scan_coords_t = self.ts.get_scan_coordinates(
-            [[disp_min, disp_max, steps]],
-            which=[mode],
-            coordinate_expansion=[self.force_dirs]
-        )
+    def _get_default_displacement_steps(self, mass_weight=True):
+        if mass_weight:
+            return [-50, 50]
+        else:
+            return [-.5, .5]
+    def get_displaced_geometries(self, mode,
+                                 disp_min=None, disp_max=None, steps=50,
+                                 scan_values=None,
+                                 mass_weight=True,
+                                 displacements=None
+                                 ):
+        defaults = self._get_default_displacement_steps(mass_weight=mass_weight)
+        if disp_min is None:
+            disp_min = defaults[0]
+        if disp_max is None:
+            disp_max = defaults[1]
+
+        if displacements is None:
+            displacements = self.force_dirs
+        if not mass_weight:
+            displacements = mass_weighted_normalize_displacements(self.rs, mass_weight=mass_weight, expansion=displacements)
+        if scan_values is None:
+            scan_coords_r = self.rs.get_scan_coordinates(
+                [[disp_min, disp_max, steps]],
+                which=[mode],
+                coordinate_expansion=[displacements]
+            )
+            scan_coords_t = self.ts.get_scan_coordinates(
+                [[disp_min, disp_max, steps]],
+                which=[mode],
+                coordinate_expansion=[displacements]
+            )
+        else:
+            scan_values = np.asanyarray(scan_values)
+            if scan_values.ndim == 1: scan_values = scan_values[:, np.newaxis]
+            scan_coords_r = self.rs.get_displaced_coordinates(
+                scan_values,
+                which=[mode],
+                coordinate_expansion=[displacements]
+            )
+            scan_coords_t = self.ts.get_displaced_coordinates(
+                scan_values,
+                which=[mode],
+                coordinate_expansion=[displacements]
+            )
 
         return np.linspace(disp_min, disp_max, steps), scan_coords_r, scan_coords_t
 
-    def get_distortion_energies(self, mode, disp_min=-50, disp_max=50, steps=50, order=None, shift=True):
-        x, sr, st = self.get_displaced_geometries(mode, disp_min=disp_min, disp_max=disp_max, steps=steps)
+    def get_distortion_energies(self, mode, disp_min=None, disp_max=None, steps=50,
+                                order=None,
+                                shift=True,
+                                mass_weight=True):
+        x, sr, st = self.get_displaced_geometries(mode, disp_min=disp_min, disp_max=disp_max, steps=steps,
+                                                  mass_weight=mass_weight)
         eng_r = self.rs.calculate_energy(coords=sr, order=order)
         eng_ts = self.ts.calculate_energy(coords=st, order=order)
         if order is None:
@@ -868,8 +1048,9 @@ class ForceOptimizer:
 
         return x, eng_r, eng_ts
 
-    def get_distortion_forces(self, mode, disp_min=-50, disp_max=50, steps=50):
-        x, sr, st = self.get_displaced_geometries(mode, disp_min=disp_min, disp_max=disp_max, steps=steps)
+    def get_distortion_forces(self, mode, disp_min=None, disp_max=None, steps=50, mass_weight=True):
+        x, sr, st = self.get_displaced_geometries(mode, disp_min=disp_min, disp_max=disp_max, steps=steps,
+                                                  mass_weight=mass_weight)
         eng_r = self.rs.calculate_energy(coords=sr)
         eng_ts = self.ts.calculate_energy(coords=st)
 
@@ -877,6 +1058,10 @@ class ForceOptimizer:
 
     @classmethod
     def plot_eng_comp(cls, x, eng_r, eng_ts, **opts):
+        if not nput.is_numeric(eng_r[0]):
+            eng_r = eng_r[0]
+        if not nput.is_numeric(eng_ts[0]):
+            eng_ts = eng_ts[0]
         return plt.plot_multi(
             {'y': eng_r * UnitsData.convert("Hartrees", "Kilocalories/Mole"), 'label': 'gs'},
             {'y': eng_ts * UnitsData.convert("Hartrees", "Kilocalories/Mole"), 'label': 'ts'},
@@ -895,15 +1080,12 @@ class ForceOptimizer:
             )
         )
 
-    def plot_distortion_energies(self, mode, disp_min=-50, disp_max=50, steps=50, **opts):
-        x, eng_r, eng_ts = self.get_distortion_energies(mode, disp_min=disp_min, disp_max=disp_max, steps=steps)
-        return self.plot_eng_comp(x, eng_r, eng_ts, **opts)
-
-    def plot_distortion_forces(self, mode, disp_min=-50, disp_max=50, steps=50,
-                               units=None,
-                               force_unit='kcal mol$^{-1}$/a$_0$-ish',
-                               **opts):
-        x, exp_r, exp_t = self.get_distortion_energies(mode, disp_min=disp_min, disp_max=disp_max, steps=steps, order=1)
+    @classmethod
+    def plot_force_comp(cls, mode, x, exp_r, exp_t,
+                        units=None,
+                        force_unit='kcal mol$^{-1}$/a$_0$-ish',
+                        **opts
+                        ):
         e_r = exp_r[1][:, mode]
         e_t = exp_t[1][:, mode]
         if units is not None:
@@ -915,12 +1097,29 @@ class ForceOptimizer:
             e_r = e_r * conv
             e_t = e_t * conv
 
-        return self.plot_eng_comp(x,
-                                  e_r,
-                                  e_t,
-                                  axes_labels=["x ($a_0$-ish)", fr"$\partial E/\partial x$ ({force_unit})"],
-                                  **opts
-                                  )  # .savefig('/Users/Mark/Desktop/sample_distortion_forces.png')
+        return cls.plot_eng_comp(x,
+                                 e_r,
+                                 e_t,
+                                 axes_labels=["x ($a_0$-ish)", fr"$\partial E/\partial x$ ({force_unit})"],
+                                 **opts
+                                 )
+    def plot_distortion_energies(self, mode, disp_min=None, disp_max=None, steps=50, mass_weight=True, **opts):
+        x, eng_r, eng_ts = self.get_distortion_energies(mode, disp_min=disp_min, disp_max=disp_max, steps=steps,
+                                                        mass_weight=mass_weight)
+        return self.plot_eng_comp(x, eng_r, eng_ts, **opts)
+
+    def plot_distortion_forces(self, mode, disp_min=None, disp_max=None, steps=50,
+                               units=None,
+                               force_unit='kcal mol$^{-1}$/a$_0$-ish',
+                               mass_weight=True,
+                               **opts):
+        x, exp_r, exp_t = self.get_distortion_energies(mode, disp_min=disp_min, disp_max=disp_max, steps=steps, order=1,
+                                                       mass_weight=mass_weight)
+        return self.plot_force_comp(mode, x, exp_r, exp_t,
+                                    units=units,
+                                    force_unit=force_unit,
+                                    **opts)
+
     @classmethod
     def _extrap_solve_insertion(cls, forces, force_r):
         dr_pos = np.searchsorted(force_r, forces)
@@ -1035,20 +1234,116 @@ class ForceOptimizer:
                                     mode,
                                     forces,
                                     units=None,
-                                    disp_min=-50,
-                                    disp_max=50,
+                                    disp_min=None,
+                                    disp_max=None,
                                     steps=50,
-                                    nearest=False
-                                    ):
-        x, exp_r, exp_t = self.get_distortion_energies(mode,
-                                                       disp_min=disp_min, disp_max=disp_max, steps=steps, order=1)
+                                    nearest=False,
+                                    mass_weight=True,
+                                    max_recursion=5,
+                                    max_disp_mag=5000,
+                                    prev_expansion=None):
+        if disp_min is None or nput.is_numeric(disp_min):
+            x, exp_r, exp_t = self.get_distortion_energies(mode,
+                                                           disp_min=disp_min, disp_max=disp_max, steps=steps, order=1,
+                                                           mass_weight=mass_weight)
+        else:
+            d1, D1 = disp_min
+            d2, D2 = disp_max
 
-        preds = self.predicted_deltas_from_expansion_energies(
+            if d1 is not None:
+                x1, exp_r1, exp_t1 = self.get_distortion_energies(mode,
+                                                               disp_min=d1, disp_max=D1, steps=steps, order=1,
+                                                               mass_weight=mass_weight)
+            else:
+                x1 = None
+            if d2 is not None:
+                x2, exp_r2, exp_t2 = self.get_distortion_energies(mode,
+                                                               disp_min=d2, disp_max=D2, steps=steps, order=1,
+                                                               mass_weight=mass_weight)
+            else:
+                x2 = None
+
+            x_bits = []
+            e_r_bits = []
+            e_t_bits = []
+
+            if x1 is not None:
+                if prev_expansion is not None:
+                    x1 = x1[:-1]
+                x_bits.append(x1)
+                if prev_expansion is not None: # shift for continuitiy
+                    exp_r1 = list(exp_r1)
+                    exp_r1[0] +=  prev_expansion[1][0][0] - exp_r1[0][-1]
+                    exp_r1 = [e[:-1] for e in exp_r1]
+                e_r_bits.append(exp_r1)
+                if prev_expansion is not None:
+                    exp_t1 = list(exp_t1)
+                    exp_t1[0] +=  prev_expansion[2][0][0] - exp_t1[0][-1]
+                    exp_t1 = [e[:-1] for e in exp_t1]
+                e_t_bits.append(exp_t1)
+            if prev_expansion is not None:
+                x_bits.append(prev_expansion[0])
+                e_r_bits.append(prev_expansion[1])
+                e_t_bits.append(prev_expansion[2])
+            if x2 is not None:
+                if prev_expansion is not None:
+                    x2 = x2[1:]
+                x_bits.append(x2)
+                if prev_expansion is not None: # shift for continuitiy
+                    exp_r2 = list(exp_r2)
+                    exp_r2[0] +=  prev_expansion[1][0][-1] - exp_r2[0][0]
+                    exp_r2 = [e[1:] for e in exp_r2]
+                e_r_bits.append(exp_r2)
+                if prev_expansion is not None: # shift for continuitiy
+                    exp_t2 = list(exp_t2)
+                    exp_t2[0] +=  prev_expansion[2][0][-1] - exp_t2[0][0]
+                    exp_t2 = [e[1:] for e in exp_t2]
+                e_t_bits.append(exp_t2)
+
+            x = np.concatenate(x_bits, axis=0)
+            exp_r = [
+                np.concatenate(b, axis=0)
+                for b in zip(*e_r_bits)
+            ]
+            exp_t = [
+                np.concatenate(b, axis=0)
+                for b in zip(*e_t_bits)
+            ]
+
+        r_data, ts_data = self.predicted_deltas_from_expansion_energies(
             mode,
             forces,
             x, exp_r, exp_t,
             units=units,
             nearest=nearest
         )
+        extrap_pos_r = r_data[1]
+        extrap_pos_t = ts_data[1]
+        d1 = None
+        D1 = None
+        d2 = None
+        D2 = None
+        if (extrap_pos_r < x[0] or extrap_pos_t < x[0]):
+            d1 = np.min([extrap_pos_r, extrap_pos_t])
+            D1 = x[0]
 
-        return preds + ((x, exp_r, exp_t),)
+        if (extrap_pos_r > x[-1] or extrap_pos_t > x[-1]):
+            d2 = x[-1]
+            D2 = np.max([extrap_pos_r, extrap_pos_t])
+
+        if d1 is not None or d2 is not None and max_recursion > 0:
+            return self.predicted_delta_from_forces(
+                mode,
+                forces,
+                units=units,
+                disp_min=[d1, D1],
+                disp_max=[d2, D2],
+                steps=steps,
+                nearest=nearest,
+                mass_weight=mass_weight,
+                max_recursion=max_recursion-1,
+                max_disp_mag=max_disp_mag,
+                prev_expansion=[x, exp_r, exp_t]
+            )
+
+        return ((ts_data[0] - r_data[0]), (r_data, ts_data)) + ((x, exp_r, exp_t),)

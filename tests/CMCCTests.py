@@ -21,6 +21,7 @@ import cmcc_reactions.reaction_data_schema as schema
 import cmcc_reactions.generate_reaction_products as gen_prods
 import cmcc_reactions.reaction_data_analysis as rda
 import cmcc_reactions.coordinate_choice as cocho
+import cmcc_reactions.optimal_directions as fopt
 import cmcc_reactions.utils as utils
 
 __all__ = [
@@ -213,7 +214,7 @@ class CMCCTests(unittest.TestCase):
             output_dir=test_data()
         )
 
-    # @unittest.skip
+    @unittest.skip
     def test_RefinedSampling(self):
         import warnings
         warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -234,15 +235,37 @@ class CMCCTests(unittest.TestCase):
 
         new_traj = gen_prods.refine_trajectory(
             traj_data,
-            profile_generator='pys-dimer',
+            profile_generator='pys-gsm',
+            coord_type='cartesian',
             # num_images=30,
+            # max_iterations=5,
             # param='energy',
             # optimizer='lbfgs'
-            ts_opt_generator=None
+            # ts_opt_generator=None
             # ts_opt_settings={}
         )
 
         rda.compare_profiles(new_traj, marker='.').show()
+
+
+    def test_LocalizedOptimization(self):
+        import warnings
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+        traj_file = test_data('profile_problem.json')
+        if not os.path.exists(traj_file):
+            pre_string = utils.read_namedtuple(
+                test_data('trajectory_problem.json'),
+            )
+            new_traj = gen_prods.refine_trajectory(pre_string, optimizer_settings=dict(thresh='gau_tight'))
+            # new_traj = gen_prods.refine_trajectory(pre_string)
+            ref1 = rda.DielsAlderReactionTrajectory.from_trajectory_data(new_traj)
+            ref1.save(traj_file)
+        else:
+            ref1 = rda.DielsAlderReactionTrajectory.from_file(traj_file)
+        opt = fopt.ForceOptimizer(ref1.reactant, ref1.transition_state, fragment_indices=1)
+        opt.animate_normed(0, backend='x3d', mag=2).show()
 
     @unittest.skip
     def test_CoordinateSystemGen(self):

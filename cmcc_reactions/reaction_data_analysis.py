@@ -1,5 +1,7 @@
 
 import collections
+import os.path
+
 import numpy as np
 
 from . import reaction_data_schema as schema
@@ -273,7 +275,7 @@ class DielsAlderReactionTrajectory:
         self.atoms = atoms
         self.structures = np.asanyarray(structures)
         self._energies = energies
-        self._mols = [None] * len(self.atoms)
+        self._mols = [None] * len(self.structures)
         self._ts_idx = ts_index
         self._reactant_idx = reactant_index
         self._product_idx = product_index
@@ -283,14 +285,16 @@ class DielsAlderReactionTrajectory:
         self.dienophile_atoms = dienophile_atoms
 
     def load_mol(self, i):
-        struct = self.structures[i]
-        if self.distance_units is not None:
-            struct = struct * UnitsData.convert(self.distance_units, "BohrRadius")
-        return Molecule(
-            self.atoms,
-            struct,
-            energy_evaluator=self.energy_evaluator
-        )
+        if self._mols[i] is None:
+            struct = self.structures[i]
+            if self.distance_units is not None:
+                struct = struct * UnitsData.convert(self.distance_units, "BohrRadius")
+            self._mols[i] = Molecule(
+                self.atoms,
+                struct,
+                energy_evaluator=self.energy_evaluator
+            )
+        return self._mols[i]
 
     @property
     def energies(self):
@@ -300,9 +304,34 @@ class DielsAlderReactionTrajectory:
 
     @property
     def mols(self):
-        if self._mols is None:
-            self._mols = [self.load_mol(i) for i in range(len(self.structures))]
+        for i in range(len(self.structures)):
+            self.load_mol(i)
         return self._mols
+
+    @property
+    def ts_index(self):
+        if self._ts_idx is None:
+            _, (self._ts_idx, self._reactant_idx, self._product_idx) = get_critical_points(None, self.energies)
+        return self._ts_idx
+    @property
+    def reactant_index(self):
+        if self._reactant_idx is None:
+            _, (self._ts_idx, self._reactant_idx, self._product_idx) = get_critical_points(None, self.energies)
+        return self._reactant_idx
+    @property
+    def product_index(self):
+        if self._product_idx is None:
+            _, (self._ts_idx, self._reactant_idx, self._product_idx) = get_critical_points(None, self.energies)
+        return self._product_idx
+    @property
+    def transition_state(self):
+        return self.load_mol(self.ts_index)
+    @property
+    def reactant(self):
+        return self.load_mol(self.reactant_index)
+    @property
+    def product(self):
+        return self.load_mol(self.product_index)
 
     @classmethod
     def from_trajectory_data(cls,
@@ -316,16 +345,22 @@ class DielsAlderReactionTrajectory:
             trajectory_data = utils.read_namedtuple(trajectory_data, gen_prods.ReoptimizedTrajectoryData)
 
         if energies is None:
-            if which == 'final':
-                energies = trajectory_data.final_energies
+            if hasattr(trajectory_data, 'final_energies'):
+                if which == 'final':
+                    energies = trajectory_data.final_energies
+                else:
+                    energies = trajectory_data.initial_energies
             else:
-                energies = trajectory_data.initial_energies
+                energies = trajectory_data.energies
 
         if structures is None:
-            if which == 'final':
-                structures = trajectory_data.final_trajectory
+            if hasattr(trajectory_data, 'final_energies'):
+                if which == 'final':
+                    structures = trajectory_data.final_trajectory
+                else:
+                    structures = trajectory_data.initial_trajectory
             else:
-                structures = trajectory_data.initial_trajectory
+                structures = trajectory_data.coordinates
 
         if energy_evaluator is None:
             energy_evaluator = trajectory_data.evaluator
@@ -340,9 +375,23 @@ class DielsAlderReactionTrajectory:
     @classmethod
     def from_file(cls, file, **etc):
         return cls.from_trajectory_data(
-            utils.read_namedtuple(file, 'ReoptimizedTrajectoryData'),
+            utils.read_namedtuple(file),
             **etc
         )
+
+    def save(self, output_dir, info_file='profile.json', **etc):
+        if os.path.splitext(output_dir)[-1].startswith('.'):
+            output_dir, info_file = os.path.split(output_dir)
+        data = gen_prods.write_trajectory(
+            output_dir,
+            self.mols,
+            **(
+                    dict(
+                        energies=self.energies,
+                        info_file=info_file) | etc
+            )
+        )
+        return os.path.join(output_dir, info_file)
 
     def plot_profile(self,
                      distance_metric=None,

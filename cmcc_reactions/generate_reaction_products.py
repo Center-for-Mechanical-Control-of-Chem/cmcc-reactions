@@ -597,6 +597,49 @@ def get_critical_points(trajectory, energies=None, initial='product'):
         prod_idx = ts_idx + np.argmin(energies[ts_idx:])
     return energies, (ts_idx, react_idx, prod_idx)
 
+TrajectoryData = collections.namedtuple(
+    "TrajectoryData",
+    [
+        "atoms",
+        "coordinates",
+        "energies",
+        "rmsds",
+        "evaluator"
+    ]
+)
+utils.register_namedtuple(TrajectoryData)
+
+def create_trajectory_data(structures, energies=None, energy_evaluator=None, rmsds=None):
+    if energy_evaluator is None:
+        energy_evaluator = structures[0].energy_evaluator
+        if energies is None:
+            energies = [g.calculate_energy() for g in structures]
+    else:
+        if energies is None:
+            energies = [g.modify(energy_evaluator=energy_evaluator).calculate_energy() for g in structures]
+
+    coords = [s.coords for s in structures]
+    if rmsds is None:
+        rmsds = nput.incremental_eckart_rmsd(coords, masses=structures[0].masses, mass_weighted=False)
+
+    return TrajectoryData(
+        atoms=structures[0].atoms,
+        coordinates=coords,
+        energies=energies,
+        rmsds=rmsds,
+        evaluator=energy_evaluator
+    )
+def write_trajectory(output_dir, structures, energies=None, energy_evaluator=None, rmsds=None,
+                     info_file='profile.json'
+                     ):
+    os.makedirs(output_dir, exist_ok=True)
+    traj_data = create_trajectory_data(structures, energies=energies, energy_evaluator=energy_evaluator, rmsds=rmsds)
+    utils.write_namedtuple(
+        os.path.join(output_dir, info_file),
+        traj_data
+    )
+    return traj_data
+
 ReoptimizedTrajectoryData = collections.namedtuple(
     "ReoptimizedTrajectoryData",
     [
@@ -614,6 +657,69 @@ ReoptimizedTrajectoryData = collections.namedtuple(
 )
 utils.register_namedtuple(ReoptimizedTrajectoryData)
 
+def create_refined_trajectory_data(initial_trajectory:TrajectoryData,
+                                   final_trajectory:TrajectoryData,
+                                   initial_energies=None,
+                                   initial_rmsds=None,
+                                   final_energies=None,
+                                   final_rmsds=None,
+                                   pre_sampling=None,
+                                   pre_sampling_energies=None,
+                                   energy_evaluator=None,
+                                   ):
+    if not hasattr(initial_trajectory, 'atoms'):
+        initial_trajectory = create_trajectory_data(initial_trajectory,
+                                                    energies=initial_energies,
+                                                    rmsds=initial_rmsds,
+                                                    energy_evaluator=energy_evaluator)
+    if not hasattr(final_trajectory, 'atoms'):
+        final_trajectory = create_trajectory_data(final_trajectory,
+                                                    energies=final_energies,
+                                                    rmsds=final_rmsds,
+                                                    energy_evaluator=energy_evaluator)
+    if pre_sampling is not None and not hasattr(pre_sampling, 'atoms'):
+        pre_sampling = create_trajectory_data(pre_sampling,
+                                              energies=pre_sampling_energies)
+    return ReoptimizedTrajectoryData(
+        atoms=initial_trajectory.atoms,
+        final_trajectory=final_trajectory.coordinates,
+        final_energies=final_trajectory.energies,
+        final_rmsds=final_trajectory.rmsds,
+        initial_trajectory=initial_trajectory.coordinates,
+        initial_energies=initial_trajectory.energies,
+        initial_rmsds=initial_trajectory.rmsds,
+        raw_pre_sampling=pre_sampling.coordinates if pre_sampling is not None else None,
+        raw_pre_energies=pre_sampling.energies if pre_sampling is not None else None,
+        evaluator=energy_evaluator
+    )
+def write_refined_trajectory(output_dir,
+                             initial_trajectory: TrajectoryData,
+                             final_trajectory: TrajectoryData,
+                             initial_energies=None,
+                             initial_rmsds=None,
+                             final_energies=None,
+                             final_rmsds=None,
+                             pre_sampling=None,
+                             pre_sampling_energies=None,
+                             energy_evaluator=None,
+                             info_file='refined.json'):
+    os.makedirs(output_dir, exist_ok=True)
+    traj_data = create_refined_trajectory_data(
+        initial_trajectory,
+        final_trajectory,
+        initial_energies=initial_energies,
+        initial_rmsds=initial_rmsds,
+        final_energies=final_energies,
+        final_rmsds=final_rmsds,
+        pre_sampling=pre_sampling,
+        pre_sampling_energies=pre_sampling_energies,
+        energy_evaluator=energy_evaluator
+    )
+    utils.write_namedtuple(
+        os.path.join(output_dir, info_file),
+        traj_data
+    )
+    return traj_data
 def reoptimize_trajectory(mol,
                           init_traj,
                           max_iterations=500,
@@ -710,15 +816,17 @@ def generate_reactants_from_products(
 def refine_trajectory(product_data: InitialProductData|ReoptimizedTrajectoryData,
                       trajectory_data: ReoptimizedTrajectoryData = None,
                       energy_evaluator=None,
-                      profile_generator='pys-string',
+                      profile_generator='pys-dimer',
                       output_dir=None,
                       info_file='refined.json',
                       method_options=None,
                       climb=True,
-                      ts_opt_generator='pys-dimer',
+                      ts_opt_generator=None,#'pys-dimer',
                       ts_opt_settings=None,
                       ts_opt_optimizer=None,
-                      **optimization_settings
+                      thresh='gau_tight',
+                      optimizer_settings=None,
+                      **calc_options
                       ):
     if trajectory_data is None:
         trajectory_data = product_data
@@ -726,6 +834,11 @@ def refine_trajectory(product_data: InitialProductData|ReoptimizedTrajectoryData
     # new_js = dev.read_json(TestManager.test_data('trajectory.json'))
     if energy_evaluator is None:
         energy_evaluator = product_data.evaluator
+
+    if optimizer_settings is None:
+        optimizer_settings = {}
+    if 'thresh' not in optimizer_settings:
+        optimizer_settings['thresh'] = thresh
 
     traj = [
         Molecule(product_data.atoms, c)
@@ -740,7 +853,8 @@ def refine_trajectory(product_data: InitialProductData|ReoptimizedTrajectoryData
                                      climb=climb,
                                      **method_options)
     new_images = prof.generate(base_images=traj,
-                               **optimization_settings)
+                               optimizer_settings=optimizer_settings,
+                               **calc_options)
 
     if ts_opt_generator is not None:
         rxn = Reaction([new_images[0]], [new_images[-1]])
