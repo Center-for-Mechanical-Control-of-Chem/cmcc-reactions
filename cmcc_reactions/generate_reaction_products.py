@@ -813,8 +813,8 @@ def generate_reactants_from_products(
 
     return new_traj
 
-def refine_trajectory(product_data: InitialProductData|ReoptimizedTrajectoryData,
-                      trajectory_data: ReoptimizedTrajectoryData = None,
+def refine_trajectory(product_data: InitialProductData|ReoptimizedTrajectoryData|TrajectoryData,
+                      trajectory_data: ReoptimizedTrajectoryData|TrajectoryData = None,
                       energy_evaluator=None,
                       profile_generator='pys-dimer',
                       output_dir=None,
@@ -825,6 +825,8 @@ def refine_trajectory(product_data: InitialProductData|ReoptimizedTrajectoryData
                       ts_opt_settings=None,
                       ts_opt_optimizer=None,
                       thresh='gau_tight',
+                      refine_endpoints=False,
+                      refine_ts=True,
                       optimizer_settings=None,
                       **calc_options
                       ):
@@ -841,42 +843,81 @@ def refine_trajectory(product_data: InitialProductData|ReoptimizedTrajectoryData
         optimizer_settings['thresh'] = thresh
 
     traj = [
-        Molecule(product_data.atoms, c)
-        for c in trajectory_data.final_trajectory
+        Molecule(product_data.atoms,
+                 c,
+                 energy_evaluator=energy_evaluator)
+        for c in (
+            trajectory_data.final_trajectory
+                if hasattr(trajectory_data, 'final_trajectory') else
+            trajectory_data.coordinates
+        )
     ]
 
-    rxn = Reaction([traj[0]], [traj[-1]])
-    if method_options is None:
-        method_options = {}
-    prof = rxn.get_profile_generator(profile_generator,
-                                     energy_evaluator=energy_evaluator,
-                                     climb=climb,
-                                     **method_options)
-    new_images = prof.generate(base_images=traj,
-                               optimizer_settings=optimizer_settings,
-                               **calc_options)
+    if refine_endpoints:
+        # uh = traj[0]
+        traj[0] = traj[0].optimize()
+        # print(traj[0].calculate_energy() - uh.calculate_energy())
+        # uh2 = traj[-1]
+        traj[-1] = traj[-1].optimize()
+        # print(traj[-1].calculate_energy() - uh2.calculate_energy())
 
-    if ts_opt_generator is not None:
-        rxn = Reaction([new_images[0]], [new_images[-1]])
-        prof = rxn.get_profile_generator(ts_opt_generator,
+
+    if refine_ts:
+        rxn = Reaction([traj[0]], [traj[-1]])
+        if method_options is None:
+            method_options = {}
+        prof = rxn.get_profile_generator(profile_generator,
                                          energy_evaluator=energy_evaluator,
                                          climb=climb,
                                          **method_options)
-        if ts_opt_settings is None:
-            ts_opt_settings = optimization_settings | dict(optimizer=ts_opt_optimizer)
-        new_images = prof.generate(base_images=new_images,
-                                   **ts_opt_settings)
+        new_images = prof.generate(base_images=traj,
+                                   optimizer_settings=optimizer_settings,
+                                   **calc_options)
 
+        if ts_opt_generator is not None:
+            rxn = Reaction([new_images[0]], [new_images[-1]])
+            prof = rxn.get_profile_generator(ts_opt_generator,
+                                             energy_evaluator=energy_evaluator,
+                                             climb=climb,
+                                             **method_options)
+            if ts_opt_settings is None:
+                ts_opt_settings = optimizer_settings | dict(optimizer=ts_opt_optimizer)
+            new_images = prof.generate(base_images=new_images,
+                                       **ts_opt_settings)
+    else:
+        new_images = traj
+
+    new_coords = np.array([t.coords for t in new_images])
     new_traj = ReoptimizedTrajectoryData(
         atoms=product_data.atoms,
         final_trajectory=np.array([t.coords for t in new_images]),
-        final_energies=prof.evaluate_profile_energies(new_images),
-        final_rmsds=prof.evaluate_profile_distances(new_images),
-        initial_trajectory=trajectory_data.final_trajectory,
-        initial_energies=trajectory_data.final_energies,
-        initial_rmsds=trajectory_data.final_rmsds,
-        raw_pre_sampling=trajectory_data.raw_pre_sampling,
-        raw_pre_energies=trajectory_data.raw_pre_energies,
+        final_energies=[i.calculate_energy() for i in new_images],
+        final_rmsds=nput.incremental_eckart_rmsd(new_coords, masses=new_images[0].masses, mass_weighted=False),
+        initial_trajectory=(
+            trajectory_data.final_trajectory
+                if hasattr(trajectory_data, 'final_trajectory') else
+            trajectory_data.coordinates
+        ),
+        initial_energies=(
+            trajectory_data.final_energies
+                if hasattr(trajectory_data, 'final_trajectory') else
+            trajectory_data.energies
+        ),
+        initial_rmsds=(
+            trajectory_data.final_rmsds
+                if hasattr(trajectory_data, 'final_trajectory') else
+            trajectory_data.rmsds
+        ),
+        raw_pre_sampling=(
+            trajectory_data.raw_pre_sampling
+                if hasattr(trajectory_data, 'final_trajectory') else
+            None
+        ),
+        raw_pre_energies=(
+            trajectory_data.raw_pre_energies
+                if hasattr(trajectory_data, 'final_trajectory') else
+            None
+        ),
         evaluator=energy_evaluator
     )
 

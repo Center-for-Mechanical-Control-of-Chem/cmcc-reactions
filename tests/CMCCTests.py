@@ -254,11 +254,22 @@ class CMCCTests(unittest.TestCase):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         traj_file = test_data('profile_problem.json')
-        if not os.path.exists(traj_file):
-            pre_string = utils.read_namedtuple(
-                test_data('trajectory_problem.json'),
-            )
-            new_traj = gen_prods.refine_trajectory(pre_string, optimizer_settings=dict(thresh='gau_tight'))
+        base_file = test_data('trajectory_problem.json')
+        reoptimize = False
+        use_original = False
+        if (reoptimize and use_original) or not os.path.exists(traj_file):
+            pre_string = utils.read_namedtuple(base_file)
+            new_traj = gen_prods.refine_trajectory(pre_string,
+                                                   refine_endpoints=True,
+                                                   optimizer_settings=dict(thresh='gau_tight'))
+            # new_traj = gen_prods.refine_trajectory(pre_string)
+            ref1 = rda.DielsAlderReactionTrajectory.from_trajectory_data(new_traj)
+            ref1.save(traj_file)
+        elif reoptimize:
+            pre_string = utils.read_namedtuple(traj_file)
+            new_traj = gen_prods.refine_trajectory(pre_string,
+                                                   refine_endpoints=True,
+                                                   optimizer_settings=dict(thresh='gau_tight'))
             # new_traj = gen_prods.refine_trajectory(pre_string)
             ref1 = rda.DielsAlderReactionTrajectory.from_trajectory_data(new_traj)
             ref1.save(traj_file)

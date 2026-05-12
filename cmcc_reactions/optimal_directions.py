@@ -1,5 +1,5 @@
 import collections
-
+import os
 import numpy as np
 from scipy.optimize import minimize as scipy_opt
 from McUtils.Data import UnitsData
@@ -10,6 +10,9 @@ import McUtils.Coordinerds as coordops
 from Psience.Molecools import Molecule
 from Psience.Modes import MixtureModes
 import McUtils.Plots as plt
+from Psience.Reactions import Reaction
+
+from . import utils
 
 __all__ = [
     "find_optimal_displacement_coordinate",
@@ -595,6 +598,23 @@ def gamma_to_force_conversions(energy_units="Kilocalories/Mole", force_units="Pi
             / UnitsData.convert("Hartrees/BohrRadius", force_units) ** 2
     )
 
+OptimizedForceData = collections.namedtuple(
+    'OptimizedForceData',
+    [
+        'atoms',
+        'reactant_geom',
+        'transition_state_geom',
+        'reactant_hessian',
+        'transition_state_hessian',
+        'energy_evaluator',
+        'force_coeffs',
+        'internals',
+        'use_mode_space',
+        'optimizer_settings'
+    ]
+)
+utils.register_namedtuple(OptimizedForceData)
+
 class ForceOptimizer:
     default_options = {
         'num_dirs':50,
@@ -611,6 +631,7 @@ class ForceOptimizer:
                  prepped_modes=None,
                  internals=None,
                  projection_internals=None,
+                 force_coeffs=None,
                  **determination_opts):
         if reembed:
             reactant_mol.get_normal_modes()
@@ -624,13 +645,81 @@ class ForceOptimizer:
             determination_opts = determination_opts | dict(internals=projection_internals)
         self.opts = self.default_options | determination_opts
         self.reorder = reorder
-        self._optimal_forces = optimal_forces
-        self._inverse = inverse_forces
         self.use_mode_space = use_mode_space
         self.internals = internals
+        if optimal_forces is None and force_coeffs is not None:
+            optimal_forces = self.get_forces_from_coeffs(force_coeffs)
+        self._optimal_forces = optimal_forces
+        self._inverse = inverse_forces
         self._internal_mols = None
         self._internal_modes = None
         self._internal_dirs = None
+
+    def get_forces_from_coeffs(self, coeffs):
+        coeffs = np.asanyarray(coeffs)
+        if self.use_mode_space:
+            cart_force_dirs = coeffs.T @ self.prepped_modes[1].coords_by_modes
+        elif self.internals is not None:
+            cart_force_dirs = coeffs.T @ self.ts.get_cartesians_by_internals(order=1)[0]
+        else:
+            cart_force_dirs = coeffs
+
+        gammas = compute_reaction_gamma(self.rs, self.ts, cart_force_dirs, use_mode_space=self.use_mode_space)
+        return (gammas, cart_force_dirs), self.prepped_modes, coeffs
+
+    def to_data(self) -> OptimizedForceData:
+        fcs = self.force_coeffs
+        return OptimizedForceData(
+            atoms=self.rs.atoms,
+            reactant_geom=self.rs.coords,
+            transition_state_geom=self.ts.coords,
+            reactant_hessian=self.rs.potential_derivatives[1],
+            transition_state_hessian=self.ts.potential_derivatives[1],
+            energy_evaluator=self.rs.energy_evaluator,
+            force_coeffs=fcs,
+            internals=self.internals,
+            use_mode_space=self.use_mode_space,
+            optimizer_settings=self.opts
+        )
+    def save(self, output_dir, info_file='optimized_forces.json'):
+        if os.path.splitext(output_dir)[-1].startswith('.'):
+            output_dir, info_file = os.path.split(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
+        traj_data = self.to_data()
+        utils.write_namedtuple(
+            os.path.join(output_dir, info_file),
+            traj_data
+        )
+        return os.path.join(output_dir, info_file)
+
+    @classmethod
+    def from_data(cls, force_data:OptimizedForceData):
+        reactant = Molecule(
+            force_data.atoms,
+            force_data.reactant_geom,
+            potential_derivatives=[0, np.asanyarray(force_data.reactant_hessian)],
+            energy_evaluator=force_data.energy_evaluator
+        )
+        ts = Molecule(
+            force_data.atoms,
+            force_data.transition_state_geom,
+            potential_derivatives=[0, np.asanyarray(force_data.transition_state_hessian)],
+            energy_evaluator=force_data.energy_evaluator
+        )
+        opts = force_data.optimizer_settings.copy()
+        if 'internals' in opts:
+            opts['projection_internals'] = opts.pop('internals')
+        return cls(
+            reactant, ts,
+            force_coeffs=force_data.force_coeffs,
+            internals=force_data.internals,
+            use_mode_space=force_data.use_mode_space,
+            **opts
+        )
+    @classmethod
+    def from_file(cls, force_data):
+        return cls.from_data(utils.read_namedtuple(force_data))
+
 
     @classmethod
     def from_displacements(cls,
@@ -920,7 +1009,9 @@ class ForceOptimizer:
                                                prepped_modes=self.prepped_modes,
                                                use_mode_space=self.use_mode_space, **self.opts)
         if self.reorder:
-            gammas, dirs = reorder_force_dirs(self.rs, self.ts, dirs, use_mode_space=self.use_mode_space)
+            gammas, dirs, ord = reorder_force_dirs(self.rs, self.ts, dirs, use_mode_space=self.use_mode_space,
+                                                   return_ordering=True)
+            coeffs = coeffs[:, ord]
         else:
             gammas = compute_reaction_gamma(self.rs, self.ts, dirs, use_mode_space=self.use_mode_space)
 
@@ -983,6 +1074,107 @@ class ForceOptimizer:
         return UnitsData.convert("Hartrees", "Kilocalories/Mole") * (
             UnitsData.convert(("NanoJoules", "InverseMeters"), ("Hartrees", "InverseBohrRadius"))
         ) ** 2
+
+    def mode_force_function(self, mode, magnitude=1, use_internals=False, mass_weight=True):
+        displacements = self.get_displacement_dirs(mass_weight=mass_weight, use_internals=use_internals)
+        d = displacements[mode] * magnitude
+
+        if use_internals:
+            def force_modification(coords, base_grad):
+                force_mol = self.internal_mols[0].modify(coords=coords).get_cartesians_by_internals(1)[0]
+                return np.dot(d, force_mol)
+        else:
+            def force_modification(coords, base_grad):
+                coords = coords.reshape((-1,) + self.ts.coords.shape)
+                emb = self.ts.get_embedding_data(coords)
+                tf = (
+                        emb.coord_data.axes
+                        @ np.moveaxis(emb.rotations, -1, -2)
+                        @ np.moveaxis(emb.reference_data.axes, -1, -2)
+                )
+                rot = d.reshape(self.ts.coords.shape)[np.newaxis] @ np.moveaxis(tf, -1, -2)
+                rot = rot.reshape(base_grad.shape)
+                # self.ts.modify(coords=coords[0]).animate_coordinate(
+                #     0,
+                #     coordinate_expansion=[rot[np.newaxis] * 100],
+                #     backend='x3d'
+                # ).show()
+                return rot
+        return force_modification
+
+    def reoptimize_with_force(self, mode,
+                              magnitude=1,
+                              units='PicoJoules/Meters',
+                              use_internals=False,
+                              mass_weight=True,
+                              optimizer_method='ase',
+                              profile_generator='pys-dimer',
+                              climb=True,
+                              ts_opt_settings=None,
+                              max_iterations=100,
+                              reoptimize_reactants=True,
+                              reoptimize_ts=True,
+                              initial_ts_step=1,
+                              num_ts_steps=3,
+                              **opts):
+        if units is not None:
+            if isinstance(units, str):
+                units = units.split("/")
+            conv = UnitsData.convert(units[0], "Hartrees") / (
+                UnitsData.convert(units[1], "BohrRadius")
+            )
+            magnitude = conv * magnitude
+
+        gradient_modification_function = self.mode_force_function(mode,
+                                                                  magnitude=magnitude,
+                                                                  use_internals=use_internals,
+                                                                  mass_weight=mass_weight)
+
+        if reoptimize_ts:
+            disp_t = self.ts.get_scan_coordinates(
+                [[-initial_ts_step, initial_ts_step, num_ts_steps]],
+                which=[0],
+                coordinate_expansion=[self.ts.get_normal_modes().coords_by_modes],
+                internals='reembed' if use_internals else False,
+                strip_embedding=True if use_internals else False
+            )
+
+            if ts_opt_settings is None:
+                ts_opt_settings = {}
+            ts_opt_settings = dict(max_iterations=max_iterations) | ts_opt_settings
+
+            images = [self.ts.modify(coords=t) for t in disp_t]
+            rxn = Reaction(
+                [images[0]],
+                [images[-1]]
+            )
+
+            if 'dimer' in profile_generator:
+                ts_opt_settings['image_guess'] = ts_opt_settings.get('image_guess', num_ts_steps//2 - 1)
+            if profile_generator == 'ase-dimer':
+                ts_opt_settings['method_options'] = {
+                                                        'image_guess': ts_opt_settings.pop('image_guess', num_ts_steps//2 - 1)
+                                                    } | ts_opt_settings.get('method_options', {})
+            prof = rxn.get_profile_generator(profile_generator,
+                                             climb=climb,
+                                             energy_evaluator=self.ts.energy_evaluator)
+
+            new_images = prof.generate(base_images=[images[0], images[-1]],
+                                       gradient_modification_function=gradient_modification_function,
+                                       **ts_opt_settings)
+            ts = new_images[0]
+        else:
+            ts = self.ts
+
+        if reoptimize_reactants:
+            r = self.rs.optimize(gradient_modification_function=gradient_modification_function,
+                                 max_iterations=max_iterations,
+                                 mode=optimizer_method,
+                                 **opts)
+        else:
+            r = self.rs
+
+        return r, ts
 
     def direction_overlap(self, other, mol='ts'):
         fds = self.force_dirs
@@ -1048,6 +1240,24 @@ class ForceOptimizer:
             return [-50, 50]
         else:
             return [-.5, .5]
+    def get_displacement_dirs(self,
+                              mass_weight=True,
+                              use_internals=False):
+        if use_internals:
+            displacements = self.internal_dirs
+            if not mass_weight:
+                _, norms = mass_weighted_normalize_displacements(self.ts,
+                                                                 mass_weight=mass_weight,
+                                                                 expansion=self.force_dirs,
+                                                                 return_norms=True)
+                displacements = displacements / norms[:, np.newaxis]
+        else:
+            displacements = self.force_dirs
+            if not mass_weight:
+                displacements = mass_weighted_normalize_displacements(self.rs,
+                                                                      mass_weight=mass_weight,
+                                                                      expansion=displacements)
+        return displacements
     def get_displaced_geometries(self, mode,
                                  disp_min=None, disp_max=None, steps=50,
                                  scan_values=None,
@@ -1061,20 +1271,7 @@ class ForceOptimizer:
             disp_max = defaults[1]
 
         if displacements is None:
-            if use_internals:
-                displacements = self.internal_dirs
-                if not mass_weight:
-                    _, norms = mass_weighted_normalize_displacements(self.ts,
-                                                                     mass_weight=mass_weight,
-                                                                     expansion=self.force_dirs,
-                                                                     return_norms=True)
-                    displacements = displacements / norms[:, np.newaxis]
-            else:
-                displacements = self.force_dirs
-                if not mass_weight:
-                    displacements = mass_weighted_normalize_displacements(self.rs,
-                                                                          mass_weight=mass_weight, expansion=displacements
-                                                                          )
+            displacements = self.get_displacement_dirs(mass_weight=mass_weight, use_internals=use_internals)
 
         if use_internals:
             r, t = self.internal_mols
@@ -1149,7 +1346,7 @@ class ForceOptimizer:
                 disps_t = self.internal_dirs[np.newaxis] @ ft
                 disps_r = self.internal_dirs[np.newaxis] @ fr
             else:
-                disps_r, disps_t = self.force_dirs
+                disps_r = disps_t = self.force_dirs
             eng_r = eng_r[:1] + nput.tensor_reexpand([disps_r], eng_r[1:], axes=[-1, -1])
             eng_ts = eng_ts[:1] + nput.tensor_reexpand([disps_t], eng_ts[1:], axes=[-1, -1])
 
