@@ -707,13 +707,15 @@ class ForceOptimizer:
     def save(self, output_dir, info_file='optimized_forces.json'):
         if os.path.splitext(output_dir)[-1].startswith('.'):
             output_dir, info_file = os.path.split(output_dir)
-        os.makedirs(output_dir, exist_ok=True)
+        if len(output_dir) > 0:
+            os.makedirs(output_dir, exist_ok=True)
+            info_file = os.path.join(output_dir, info_file)
         traj_data = self.to_data()
         utils.write_namedtuple(
-            os.path.join(output_dir, info_file),
+            info_file,
             traj_data
         )
-        return os.path.join(output_dir, info_file)
+        return info_file
 
     @classmethod
     def from_data(cls, force_data:OptimizedForceData):
@@ -1330,9 +1332,11 @@ class ForceOptimizer:
                 output_dir, info_file = os.path.split(output_dir)
             output_dir = output_dir.format(mode=mode)
             info_file = info_file.format(mode=mode)
-            os.makedirs(output_dir, exist_ok=True)
+            if len(output_dir) > 0:
+                os.makedirs(output_dir, exist_ok=True)
+                info_file = os.path.join(output_dir, info_file)
             utils.write_namedtuple(
-                os.path.join(output_dir, info_file),
+                info_file,
                 fmrd
             )
 
