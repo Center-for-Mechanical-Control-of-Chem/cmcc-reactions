@@ -1167,7 +1167,8 @@ class ForceOptimizer:
                               profile_generator='pys-dimer',
                               climb=True,
                               ts_opt_settings=None,
-                              max_iterations=100,
+                              max_iterations=500,
+                              max_displacement=.05,
                               reoptimize_reactants=True,
                               reoptimize_ts=True,
                               initial_ts_step=1,
@@ -1203,40 +1204,68 @@ class ForceOptimizer:
             gradient_modification_function, force_vector = None, None
 
         if reoptimize_ts:
-            disp_t = self.ts.get_scan_coordinates(
-                [[-initial_ts_step, initial_ts_step, num_ts_steps]],
-                which=[0],
-                coordinate_expansion=[self.ts.get_normal_modes().coords_by_modes],
-                internals='reembed' if use_internals else False,
-                strip_embedding=True if use_internals else False
-            )
+            if profile_generator == 'relaxed':
+                if ts_opt_settings is None:
+                    ts_opt_settings = {}
+                if optimizer_method is not None:
+                    ts_opt_settings['method'] = ts_opt_settings.get('method', optimizer_method)
+                ts_opt_settings = dict(
+                    max_displacement=max_displacement,
+                    coordinate_constraints=[
+                        (0, 2),
+                        (1, 3)
+                    ]) | ts_opt_settings
 
-            if ts_opt_settings is None:
-                ts_opt_settings = {}
-            ts_opt_settings = dict(max_iterations=max_iterations) | ts_opt_settings
+                def pre_displace(coords):
+                    displacements = self.get_displacement_dirs(mass_weight=mass_weight, use_internals=use_internals)
+                    d = displacements[mode] * initial_reactants_step
+                    if use_internals:
+                        force_mol = self.internal_mols[1].modify(coords=coords)
+                        dx = force_mol.get_cartesians_by_internals(1, strip_embedding=True)[0]
+                        d = np.dot(d, dx)
+                    return coords + d.reshape(-1, 3)
 
-            images = [self.ts.modify(coords=t) for t in disp_t]
-            rxn = Reaction(
-                [images[0]],
-                [images[-1]],
-                optimize=False
-            )
+                ts = self.ts.optimize(gradient_modification_function=gradient_modification_function,
+                                      max_iterations=max_iterations,
+                                      mode=optimizer_mode,
+                                      initialization_function=pre_displace,
+                                      # logger=True,
+                                      **ts_opt_settings)
+            else:
+                disp_t = self.ts.get_scan_coordinates(
+                    [[-initial_ts_step, initial_ts_step, num_ts_steps]],
+                    which=[0],
+                    coordinate_expansion=[self.ts.get_normal_modes().coords_by_modes],
+                    internals='reembed' if use_internals else False,
+                    strip_embedding=True if use_internals else False
+                )
 
-            if 'dimer' in profile_generator:
-                ts_opt_settings['image_guess'] = ts_opt_settings.get('image_guess', 0)
-                images = [images[0], images[-1]]
-            if profile_generator == 'ase-dimer':
-                ts_opt_settings['method_options'] = {
-                                                        'image_guess': ts_opt_settings.pop('image_guess', 0)
-                                                    } | ts_opt_settings.get('method_options', {})
-            prof = rxn.get_profile_generator(profile_generator,
-                                             climb=climb,
-                                             energy_evaluator=self.ts.energy_evaluator)
+                if ts_opt_settings is None:
+                    ts_opt_settings = {}
+                ts_opt_settings = dict(max_iterations=max_iterations, max_displacement=max_displacement) | ts_opt_settings
 
-            new_images = prof.generate(base_images=[images[0], images[-1]],
-                                       gradient_modification_function=gradient_modification_function,
-                                       **ts_opt_settings)
-            ts = new_images[0]
+                images = [self.ts.modify(coords=t) for t in disp_t]
+                rxn = Reaction(
+                    [images[0]],
+                    [images[-1]],
+                    optimize=False
+                )
+
+                if 'dimer' in profile_generator:
+                    ts_opt_settings['image_guess'] = ts_opt_settings.get('image_guess', 0)
+                    images = [images[0], images[-1]]
+                if profile_generator == 'ase-dimer':
+                    ts_opt_settings['method_options'] = {
+                                                            'image_guess': ts_opt_settings.pop('image_guess', 0)
+                                                        } | ts_opt_settings.get('method_options', {})
+                prof = rxn.get_profile_generator(profile_generator,
+                                                 climb=climb,
+                                                 energy_evaluator=self.ts.energy_evaluator)
+
+                new_images = prof.generate(base_images=[images[0], images[-1]],
+                                           gradient_modification_function=gradient_modification_function,
+                                           **ts_opt_settings)
+                ts = new_images[0]
         else:
             ts = self.ts
 
@@ -1262,6 +1291,7 @@ class ForceOptimizer:
                                  max_iterations=max_iterations,
                                  mode=optimizer_mode,
                                  initialization_function=pre_displace,
+                                 max_displacement=max_displacement,
                                  # logger=True,
                                  **opts)
         else:

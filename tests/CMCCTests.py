@@ -328,12 +328,13 @@ class CMCCTests(unittest.TestCase):
         opt = fopt.ForceOptimizer.from_file(test_data('optimized_forces.json'))
 
         r, ts, fmrd = opt.reoptimize_with_force(0,
-                                                200,
+                                                -100,
                                                 units='PicoJoules/Meters',
                                                 # units=None,
                                                 optimizer_mode='pysis',
                                                 optimizer_method='lbfgs',
                                                 profile_generator='pys-dimer',
+                                                # profile_generator='relaxed',
                                                 # profile_generator='pys-cos',
                                                 # optimizer_mode='ase',
                                                 # optimizer_method='bfgs',
@@ -348,11 +349,11 @@ class CMCCTests(unittest.TestCase):
                                                 mass_weight=False,
                                                 reoptimize_reactants=True,
                                                 reoptimize_ts=True,
-                                                initial_ts_step=5,
+                                                initial_ts_step=1,
                                                 initial_reactants_step=1,
                                                 # num_ts_steps=3,
-                                                max_iterations=200,
-                                                max_displacement=.1,
+                                                max_iterations=500,
+                                                max_displacement=.05,
                                                 track_best=False)
         fmrd: fopt.ForceModifiedReactionData
 
@@ -376,6 +377,12 @@ class CMCCTests(unittest.TestCase):
             sel=r.fragment_indices[0]
         )
         r.plot(scan).show()
+
+        scan = ts.embed_coords(
+            [fmrd.transition_state_geom, fmrd.force_modified_transition_state_geom],
+            sel=r.fragment_indices[0]
+        )
+        ts.plot(scan).show()
 
     @unittest.skip
     def test_CoordinateSystemGen(self):
