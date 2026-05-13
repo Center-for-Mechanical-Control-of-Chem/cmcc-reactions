@@ -1087,16 +1087,25 @@ class ForceOptimizer:
             def force_modification(coords, base_grad):
                 coords = coords.reshape((-1,) + self.ts.coords.shape)
                 emb = self.ts.get_embedding_data(coords)
+                # tf = (
+                #         emb.coord_data.axes
+                #         @ np.moveaxis(emb.rotations, -1, -2)
+                #         @ np.moveaxis(emb.reference_data.axes, -1, -2)
+                # )
                 tf = (
-                        emb.coord_data.axes
-                        @ np.moveaxis(emb.rotations, -1, -2)
-                        @ np.moveaxis(emb.reference_data.axes, -1, -2)
+                        np.moveaxis(emb.coord_data.axes, -1, -2)
+                        @ emb.rotations
+                        @ emb.reference_data.axes
                 )
-                rot = d.reshape(self.ts.coords.shape)[np.newaxis] @ np.moveaxis(tf, -1, -2)
+                rot = d.reshape(self.ts.coords.shape)[np.newaxis] @ tf
+                rot = rot.reshape(rot.shape[:-2] + (1, -1))
+                # proj = nput.translation_rotation_projector(coords, self.ts.masses,
+                #                                            mass_weighted=False, orthonormal=False)
+                # rot = rot @ proj
                 rot = rot.reshape(base_grad.shape)
                 # self.ts.modify(coords=coords[0]).animate_coordinate(
                 #     0,
-                #     coordinate_expansion=[rot[np.newaxis] * 100],
+                #     coordinate_expansion=[nput.vec_normalize(rot[np.newaxis])],
                 #     backend='x3d'
                 # ).show()
                 return rot
@@ -1107,7 +1116,8 @@ class ForceOptimizer:
                               units='PicoJoules/Meters',
                               use_internals=False,
                               mass_weight=True,
-                              optimizer_method='ase',
+                              optimizer_mode='ase',
+                              optimizer_method=None,
                               profile_generator='pys-dimer',
                               climb=True,
                               ts_opt_settings=None,
@@ -1116,6 +1126,8 @@ class ForceOptimizer:
                               reoptimize_ts=True,
                               initial_ts_step=1,
                               num_ts_steps=3,
+                              modify_forces=True,
+                              apply_constraints=True,
                               **opts):
         if units is not None:
             if isinstance(units, str):
@@ -1125,10 +1137,13 @@ class ForceOptimizer:
             )
             magnitude = conv * magnitude
 
-        gradient_modification_function = self.mode_force_function(mode,
-                                                                  magnitude=magnitude,
-                                                                  use_internals=use_internals,
-                                                                  mass_weight=mass_weight)
+        if modify_forces:
+            gradient_modification_function = self.mode_force_function(mode,
+                                                                      magnitude=magnitude,
+                                                                      use_internals=use_internals,
+                                                                      mass_weight=mass_weight)
+        else:
+            gradient_modification_function = None
 
         if reoptimize_ts:
             disp_t = self.ts.get_scan_coordinates(
@@ -1167,9 +1182,24 @@ class ForceOptimizer:
             ts = self.ts
 
         if reoptimize_reactants:
+            if optimizer_method is not None:
+                opts['method'] = opts.get('method', optimizer_method)
+            if apply_constraints:
+                opts['coordinate_constraints'] = [
+                    (0, 2),
+                    (1, 3)
+                ]
+
+            def pre_displace(coords):
+                displacements = self.get_displacement_dirs(mass_weight=mass_weight, use_internals=use_internals)
+                d = displacements[mode] * 1
+                return coords + d.reshape(-1, 3)
+
             r = self.rs.optimize(gradient_modification_function=gradient_modification_function,
                                  max_iterations=max_iterations,
-                                 mode=optimizer_method,
+                                 mode=optimizer_mode,
+                                 initialization_function=pre_displace,
+                                 # logger=True,
                                  **opts)
         else:
             r = self.rs

@@ -248,6 +248,7 @@ class CMCCTests(unittest.TestCase):
         rda.compare_profiles(new_traj, marker='.').show()
 
 
+    @unittest.skip
     def test_LocalizedOptimization(self):
         import warnings
         warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -277,6 +278,90 @@ class CMCCTests(unittest.TestCase):
             ref1 = rda.DielsAlderReactionTrajectory.from_file(traj_file)
         opt = fopt.ForceOptimizer(ref1.reactant, ref1.transition_state, fragment_indices=1)
         opt.animate_normed(0, backend='x3d', mag=2).show()
+
+    @unittest.skip
+    def test_AdjustedForceOptimizer(self):
+        import warnings
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+        import McUtils.Coordinerds as coordops
+
+        ref1 = rda.DielsAlderReactionTrajectory.from_file(test_data('trajectory_problem.json'))
+
+        zm_coords = [
+            coordops.extract_zmatrix_internals(z)
+            for z in ref1.reactant.get_bond_zmatrix(connect_fragments=False,
+                                                    fragment_ordering=[0, 1],
+                                                    attachment_points={0: 2}
+                                                    )
+        ]
+        all_ints = sum(zm_coords, [])
+        zm_full = ref1.reactant.get_bond_zmatrix(
+            connect_fragments=True,
+            fragment_ordering=[0, 1],
+            attachment_points={0: 2}
+        )
+
+        opt = fopt.ForceOptimizer(ref1.reactant, ref1.transition_state,
+                                  # fragment_indices=list(range(len(ref1.reactant.atoms)))[4:],
+                                  # fragment_indices=1,
+                                  fragment_indices=ref1.reactant.fragment_indices[1][3:],
+                                  remove_fragment_transrot=False,
+                                  remove_local_transrot=True,
+                                  allow_mode_mixing=True,
+                                  projection_internals=zm_coords[1],
+                                  internals=zm_full
+                                  # project_internals=False,
+                                  # use_mode_space=False
+                                  )
+
+        opt.save(test_data('optimized_forces.json'))
+
+    def test_ForceAdjustedProfile(self):
+        import warnings
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+        from McUtils.Data import UnitsData
+
+        opt = fopt.ForceOptimizer.from_file(test_data('optimized_forces.json'))
+
+        r = opt.reoptimize_with_force(0,
+                                      -200,#/UnitsData.convert("Hartrees", "ElectronVolts"),
+                                      units='PicoJoules/Meters',
+                                      # units=None,
+                                      # optimizer_mode='default',
+                                      # optimizer_mode='pysis',
+                                      # optimizer_method='lbfgs',
+                                      # profile_generator='pys-dimer',
+                                      optimizer_mode='ase',
+                                      optimizer_method='bfgs',
+                                      profile_generator='ase-dimer',
+                                      apply_constraints=True,
+                                      # modify_forces=True,
+                                      # optimizer_mode='quasi-newton',
+                                      # optimizer_method='bfgs',
+                                      mass_weight=False,
+                                      reoptimize_reactants=True,
+                                      reoptimize_ts=True,
+                                      initial_ts_step=1,
+                                      max_iterations=500,
+                                      max_displacement=.1,
+                                      track_best=False)
+
+
+        rf, tf, r0, t0 = [
+            m.calculate_energy() * UnitsData.convert("Hartrees", "Kilocalories/Mole")
+            for m in r + (opt.rs, opt.ts)
+        ]
+        # print([
+        #     rf, tf, r0, t0,
+        # ])
+        print(rf - r0)
+        print(tf - t0)
+
+        r[0].plot([opt.rs.coords, r[0].coords]).show()
 
     @unittest.skip
     def test_CoordinateSystemGen(self):
