@@ -327,33 +327,43 @@ class CMCCTests(unittest.TestCase):
 
         opt = fopt.ForceOptimizer.from_file(test_data('optimized_forces.json'))
 
-        r = opt.reoptimize_with_force(0,
-                                      -200,#/UnitsData.convert("Hartrees", "ElectronVolts"),
-                                      units='PicoJoules/Meters',
-                                      # units=None,
-                                      # optimizer_mode='default',
-                                      # optimizer_mode='pysis',
-                                      # optimizer_method='lbfgs',
-                                      # profile_generator='pys-dimer',
-                                      optimizer_mode='ase',
-                                      optimizer_method='bfgs',
-                                      profile_generator='ase-dimer',
-                                      apply_constraints=True,
-                                      # modify_forces=True,
-                                      # optimizer_mode='quasi-newton',
-                                      # optimizer_method='bfgs',
-                                      mass_weight=False,
-                                      reoptimize_reactants=True,
-                                      reoptimize_ts=True,
-                                      initial_ts_step=1,
-                                      max_iterations=500,
-                                      max_displacement=.1,
-                                      track_best=False)
-
+        r, ts, fmrd = opt.reoptimize_with_force(0,
+                                                200,
+                                                units='PicoJoules/Meters',
+                                                # units=None,
+                                                optimizer_mode='pysis',
+                                                optimizer_method='lbfgs',
+                                                profile_generator='pys-dimer',
+                                                # profile_generator='pys-cos',
+                                                # optimizer_mode='ase',
+                                                # optimizer_method='bfgs',
+                                                # profile_generator='ase-dimer',
+                                                # apply_constraints=False,
+                                                # modify_forces=True,
+                                                # optimizer_mode='default',
+                                                # optimizer_method='quasi-newton',
+                                                # optimizer_mode='scipy',
+                                                # optimizer_method='bfgs',
+                                                use_internals=False,
+                                                mass_weight=False,
+                                                reoptimize_reactants=True,
+                                                reoptimize_ts=True,
+                                                initial_ts_step=5,
+                                                initial_reactants_step=1,
+                                                # num_ts_steps=3,
+                                                max_iterations=200,
+                                                max_displacement=.1,
+                                                track_best=False)
+        fmrd: fopt.ForceModifiedReactionData
 
         rf, tf, r0, t0 = [
-            m.calculate_energy() * UnitsData.convert("Hartrees", "Kilocalories/Mole")
-            for m in r + (opt.rs, opt.ts)
+            e * UnitsData.convert("Hartrees", "Kilocalories/Mole")
+            for e in [
+                fmrd.force_modified_reactant_energy,
+                fmrd.force_modified_transition_state_energy,
+                fmrd.reactant_energy,
+                fmrd.transition_state_energy
+            ]
         ]
         # print([
         #     rf, tf, r0, t0,
@@ -361,7 +371,11 @@ class CMCCTests(unittest.TestCase):
         print(rf - r0)
         print(tf - t0)
 
-        r[0].plot([opt.rs.coords, r[0].coords]).show()
+        scan = r.embed_coords(
+            [fmrd.reactant_geom, fmrd.force_modified_reactant_geom],
+            sel=r.fragment_indices[0]
+        )
+        r.plot(scan).show()
 
     @unittest.skip
     def test_CoordinateSystemGen(self):
