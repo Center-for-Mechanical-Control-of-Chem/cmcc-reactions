@@ -1289,13 +1289,14 @@ class ForceOptimizer:
                     d = np.dot(d, dx)
                 return coords + d.reshape(-1, 3)
 
-            r = self.rs.optimize(gradient_modification_function=gradient_modification_function,
-                                 max_iterations=max_iterations,
-                                 mode=optimizer_mode,
-                                 initialization_function=pre_displace,
-                                 max_displacement=max_displacement,
-                                 # logger=True,
-                                 **opts)
+            r = self.rs.modify(internals=None).optimize(
+                gradient_modification_function=gradient_modification_function,
+                max_iterations=max_iterations,
+                mode=optimizer_mode,
+                initialization_function=pre_displace,
+                max_displacement=max_displacement,
+                # logger=True,
+                **opts)
         else:
             r = self.rs
 
@@ -1565,8 +1566,11 @@ class ForceOptimizer:
                                  axes_labels=["x ($a_0$-ish)", fr"$\partial E/\partial x$ ({force_unit})"],
                                  **opts
                                  )
-    def plot_distortion_energies(self, mode, disp_min=None, disp_max=None, steps=50, mass_weight=True, **opts):
+    def plot_distortion_energies(self, mode, disp_min=None, disp_max=None, steps=50, mass_weight=True,
+                                 use_internals=False,
+                                 **opts):
         x, eng_r, eng_ts = self.get_distortion_energies(mode, disp_min=disp_min, disp_max=disp_max, steps=steps,
+                                                        use_internals=use_internals,
                                                         mass_weight=mass_weight)
         return self.plot_eng_comp(x, eng_r, eng_ts, **opts)
 
@@ -1574,9 +1578,10 @@ class ForceOptimizer:
                                units=None,
                                force_unit='kcal mol$^{-1}$/a$_0$-ish',
                                mass_weight=True,
+                               use_internals=False,
                                **opts):
         x, exp_r, exp_t = self.get_distortion_energies(mode, disp_min=disp_min, disp_max=disp_max, steps=steps, order=1,
-                                                       mass_weight=mass_weight)
+                                                       mass_weight=mass_weight, use_internals=use_internals)
         return self.plot_force_comp(mode, x, exp_r, exp_t,
                                     units=units,
                                     force_unit=force_unit,

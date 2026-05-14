@@ -331,28 +331,29 @@ class CMCCTests(unittest.TestCase):
                                                 -100,
                                                 units='PicoJoules/Meters',
                                                 # units=None,
-                                                optimizer_mode='pysis',
-                                                optimizer_method='lbfgs',
-                                                profile_generator='pys-dimer',
+                                                # optimizer_mode='pysis',
+                                                # optimizer_method='lbfgs',
+                                                # profile_generator='pys-dimer',
                                                 # profile_generator='relaxed',
                                                 # profile_generator='pys-cos',
                                                 # optimizer_mode='ase',
                                                 # optimizer_method='bfgs',
-                                                # profile_generator='ase-dimer',
+                                                profile_generator='ase-dimer',
                                                 # apply_constraints=False,
                                                 # modify_forces=True,
                                                 # optimizer_mode='default',
                                                 # optimizer_method='quasi-newton',
-                                                # optimizer_mode='scipy',
-                                                # optimizer_method='bfgs',
+                                                optimizer_mode='scipy',
+                                                optimizer_method='bfgs',
+                                                apply_constraints=True,
                                                 use_internals=False,
                                                 mass_weight=False,
                                                 reoptimize_reactants=True,
-                                                reoptimize_ts=True,
+                                                reoptimize_ts=False,
                                                 initial_ts_step=1,
                                                 initial_reactants_step=1,
                                                 # num_ts_steps=3,
-                                                max_iterations=500,
+                                                max_iterations=1000,
                                                 max_displacement=.05,
                                                 track_best=False)
         fmrd: fopt.ForceModifiedReactionData
@@ -376,13 +377,13 @@ class CMCCTests(unittest.TestCase):
             [fmrd.reactant_geom, fmrd.force_modified_reactant_geom],
             sel=r.fragment_indices[0]
         )
-        r.plot(scan).show()
+        r.plot(scan, include_save_buttons=True, background='white').show()
 
         scan = ts.embed_coords(
             [fmrd.transition_state_geom, fmrd.force_modified_transition_state_geom],
             sel=r.fragment_indices[0]
         )
-        ts.plot(scan).show()
+        ts.plot(scan, include_save_buttons=True, background='white').show()
 
     @unittest.skip
     def test_CoordinateSystemGen(self):

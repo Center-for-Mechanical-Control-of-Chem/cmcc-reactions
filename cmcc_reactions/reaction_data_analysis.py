@@ -414,13 +414,14 @@ class DielsAlderReactionTrajectory:
                          bonds=((0, 2), (1, 3)),
                          figure=None,
                          comparison_styles=None,
+                         labels=None,
                          **opts):
         figure = self.plot_profile(
             distance_metric=distance_metric,
             metric_label=metric_label,
             bonds=bonds,
             figure=figure,
-            **opts
+            **(opts | dict(label=labels[0] if labels is not None else None))
         )
         if comparison_styles is None:
             comparison_styles = {'linestyle':'dashed'}
@@ -429,7 +430,7 @@ class DielsAlderReactionTrajectory:
             metric_label=metric_label,
             bonds=bonds,
             figure=figure,
-            **(opts | comparison_styles)
+            **(opts | comparison_styles | dict(label=labels[1] if labels is not None else None))
         )
         return figure
 
