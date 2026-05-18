@@ -543,6 +543,7 @@ def generate_from_product_library(
                 tol=tol,
                 energy_evaluator=energy_evaluator,
                 verbose=verbose,
+                sbatch_kwargs={}, # disable stuff
                 **global_options
             )
             if verbose:
