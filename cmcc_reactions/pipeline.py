@@ -531,40 +531,44 @@ def generate_from_product_library(
     def callback(product_data, product_file):
         targ_dir = os.path.dirname(product_file)
         product_file = os.path.basename(product_file)
-        os.chdir(targ_dir)
-        out_file = output_file
-        if submit:
-            script, _ = sbatch_python_job(
-                run_optimization_pipeline,
-                product_file,
-                out_file,
-                steps=steps,
-                trajectory_optimization_settings=trajectory_optimization_settings,
-                optimized_force_settings=optimized_force_settings,
-                force_modification_settings=force_modification_settings,
-                max_iterations=max_iterations,
-                tol=tol,
-                energy_evaluator=energy_evaluator,
-                verbose=verbose,
-                sbatch_kwargs={}, # disable stuff
-                **global_options
-            )
-            if verbose:
-                print(script.run())
-        else:
-            run_optimization_pipeline(
-                product_data,
-                out_file,
-                steps=steps,
-                trajectory_optimization_settings=trajectory_optimization_settings,
-                optimized_force_settings=optimized_force_settings,
-                force_modification_settings=force_modification_settings,
-                max_iterations=max_iterations,
-                tol=tol,
-                energy_evaluator=energy_evaluator,
-                verbose=verbose,
-                **global_options
-            )
+        curdir = os.getcwd()
+        try:
+            os.chdir(targ_dir)
+            out_file = output_file
+            if submit:
+                script, _ = sbatch_python_job(
+                    run_optimization_pipeline,
+                    product_file,
+                    out_file,
+                    steps=steps,
+                    trajectory_optimization_settings=trajectory_optimization_settings,
+                    optimized_force_settings=optimized_force_settings,
+                    force_modification_settings=force_modification_settings,
+                    max_iterations=max_iterations,
+                    tol=tol,
+                    energy_evaluator=energy_evaluator,
+                    verbose=verbose,
+                    sbatch_kwargs={}, # disable stuff
+                    **global_options
+                )
+                if verbose:
+                    print(script.run())
+            else:
+                run_optimization_pipeline(
+                    product_data,
+                    out_file,
+                    steps=steps,
+                    trajectory_optimization_settings=trajectory_optimization_settings,
+                    optimized_force_settings=optimized_force_settings,
+                    force_modification_settings=force_modification_settings,
+                    max_iterations=max_iterations,
+                    tol=tol,
+                    energy_evaluator=energy_evaluator,
+                    verbose=verbose,
+                    **global_options
+                )
+        finally:
+            os.chdir(curdir)
 
     if steps is None or 'products' in steps:
         gen_prods.generate_products_and_optimize(
