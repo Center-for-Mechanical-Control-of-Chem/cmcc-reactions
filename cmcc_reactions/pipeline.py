@@ -614,6 +614,21 @@ def generate_from_product_library(
             product_data = utils.read_namedtuple(f)
             callback(product_data, f)
 
+def compress_pipeline_data(
+        top_dir, js_patterns="**/pipline_data.json", recursive=True,
+        output_file=None
+):
+    tree = utils.construct_json_file_tree(
+        top_dir,
+        js_patterns=js_patterns,
+        recursive=recursive
+    )
+    tree = {
+        a:{b:v['pipeline_data'] for b,v in v1.items()} for a,v1 in tree.items()
+    }
+    if output_file is not None:
+        dev.write_json(output_file, tree)
+    return tree
 
 # def submit_if_not_found(glob_pattern, target_file,
 #                         overwrite=False,
