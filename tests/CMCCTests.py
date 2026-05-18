@@ -463,6 +463,18 @@ class CMCCTests(unittest.TestCase):
             if n >= 4:
                 break
 
+    def test_ReoptZMIssues(self):
+        import warnings
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+        uuh = pipeline.run_optimization_pipeline(
+            test_data('problem_product2.json'),
+            output_file=test_data('problem_pipline_output2.json'),
+            max_iterations=5
+        )
+        print(uuh)
+
 
 if __name__ == '__main__':
     os.chdir(root)
