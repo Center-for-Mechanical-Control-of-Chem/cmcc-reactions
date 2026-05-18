@@ -682,6 +682,7 @@ def generate_products_and_optimize(
         active_sites,
         chiralities=None,
         output_dir=None,
+        max_products=None,
         **opt_args
 ):
     base_iterator = fragment_to_smiles_iterator(
@@ -699,6 +700,8 @@ def generate_products_and_optimize(
                 'chiralities': chiralities
             }
         )
+    if max_products is not None:
+        base_iterator = itertools.islice(base_iterator, max_products)
     return generate_products_and_optimize_from_iterator(
         base_iterator,
         output_dir=output_dir,

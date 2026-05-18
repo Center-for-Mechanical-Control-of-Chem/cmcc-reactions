@@ -542,6 +542,7 @@ def generate_from_product_library(
         max_iterations=500,
         tol=1e-8,
         submit=True,
+        max_products=None,
         **global_options
 ):
     def callback(product_data, product_file):
@@ -605,14 +606,17 @@ def generate_from_product_library(
             parallelizer=parallelizer,
             batch_size=batch_size,
             verbose=verbose,
+            max_products=max_products,
             callback=callback
         )
     else:
         if output_dir is None:
             output_dir = '.'
-        for f in glob.glob(f"{output_dir}/*/*/product.json"):
+        for n,f in enumerate(glob.glob(f"{output_dir}/*/*/product.json")):
             product_data = utils.read_namedtuple(f)
             callback(product_data, f)
+            if max_products is not None and n >= max_products:
+                break
 
 def compress_pipeline_data(
         top_dir, js_patterns="**/pipline_data.json", recursive=True,
