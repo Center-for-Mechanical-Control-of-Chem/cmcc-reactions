@@ -3,6 +3,7 @@ import multiprocessing
 import functools
 import scipy.sparse
 import collections
+import glob
 
 from McUtils.ExternalPrograms import RDMolecule
 import McUtils.Devutils as dev
@@ -466,7 +467,12 @@ def _generate_products_and_optimize(smiles_iterator,
                     smiles_label = smiles_hash_generator(u_smiles)
                 else:
                     smiles_label = str(smiles_index)
-                if os.path.isfile(os.path.join(output_dir, smiles_label, 'conformer_info.json')): continue
+                if os.path.isfile(os.path.join(output_dir, smiles_label, 'conformer_info.json')):
+                    if callback is not None:
+                        for f in glob.glob(os.path.join(output_dir, smiles_label, '*', '*.json')):
+                            product_data = utils.read_namedtuple(f)
+                            callback(product_data, f)
+                    continue
             smiles_cache.add(u_smiles)
 
         if verbose:
