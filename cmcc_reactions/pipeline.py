@@ -531,7 +531,7 @@ def generate_from_product_library(
     def callback(product_data, product_file):
         out_file = os.path.join(os.path.dirname(product_file), output_file)
         if submit:
-            sbatch_python_job(
+            script, _ = sbatch_python_job(
                 run_optimization_pipeline,
                 product_data,
                 out_file,
@@ -545,6 +545,7 @@ def generate_from_product_library(
                 verbose=verbose,
                 **global_options
             )
+            script.run()
         else:
             run_optimization_pipeline(
                 product_data,
