@@ -448,7 +448,8 @@ def _generate_products_and_optimize(smiles_iterator,
                                     output_dir,
                                     rmsd_cutoff=.025,
                                     preopt_iterations=50,
-                                    verbose=False
+                                    verbose=False,
+                                    callback=None
                                     ):
     final_structures = []
     products = []
@@ -492,7 +493,7 @@ def _generate_products_and_optimize(smiles_iterator,
             if optimizer_settings is None:
                 optimizer_settings = {}
             os2 = optimizer_settings | {'max_iterations':preopt_iterations}
-            structs = [struct.optimize(**optimizer_settings) for struct in structs]
+            structs = [struct.optimize(**os2) for struct in structs]
             if rmsd_cutoff is not None:
                 structs = get_rmsd_pruned_structs(structs, rmsd_cutoff=rmsd_cutoff)
         if evaluate_energy:
@@ -527,6 +528,8 @@ def _generate_products_and_optimize(smiles_iterator,
                     smiles=smiles,
                     energy_evaluator=energy_evaluator
                 )
+                if callback is not None:
+                    callback(product_data, os.path.join(output_dir, smiles_label, str(i)))
             else:
                 product_data = create_product_data(
                     struct, diene_inds,
@@ -534,6 +537,8 @@ def _generate_products_and_optimize(smiles_iterator,
                     smiles=smiles,
                     energy_evaluator=energy_evaluator
                 )
+                if callback is not None:
+                    callback(product_data, None)
 
             products.append(product_data)
             final_structures.append(struct)
@@ -580,6 +585,7 @@ def generate_products_and_optimize_from_iterator(
         parallelizer=None,
         batch_size=50,
         verbose=False,
+        callback=None
 ):
     base_iterator = enumerate(base_iterator)
     if parallelizer is None:
@@ -595,7 +601,8 @@ def generate_products_and_optimize_from_iterator(
             optimizer_settings=optimizer_settings,
             smiles_hash_generator=smiles_hash_generator,
             output_dir=output_dir,
-            verbose=verbose
+            verbose=verbose,
+            callback=callback
         )
     else:
         if parallelizer is True:
@@ -621,7 +628,8 @@ def generate_products_and_optimize_from_iterator(
                     optimizer_settings=optimizer_settings,
                     smiles_hash_generator=smiles_hash_generator,
                     output_dir=output_dir,
-                    verbose=verbose
+                    verbose=verbose,
+                    callback=callback
                 ),
                 batches
             ):

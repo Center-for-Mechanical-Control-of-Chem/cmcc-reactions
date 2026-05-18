@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import tempfile
+import glob
+
 import numpy as np
 from dataclasses import dataclass
 import collections
@@ -9,6 +12,7 @@ import McUtils.Devutils as dev
 import McUtils.Coordinerds as coordops
 import McUtils.Iterators as itut
 import McUtils.Numputils as nput
+from McUtils.ExternalPrograms import sbatch_python_job
 
 from . import utils
 from . import generate_reaction_products as gen_prods
@@ -496,8 +500,90 @@ def run_optimization_pipeline(
 
     return input_data
 
-def generate_product_library():
-    ...
+def generate_from_product_library(
+        template=None,
+        fragments=None,
+        active_sites=None,
+        chiralities=None,
+        output_dir=None,
+        conf_gen_options=None,
+        take_unique=True,
+        num_structs=10,
+        calc=None,
+        evaluate_energy=True,
+        energy_evaluator='aimnet2',
+        preoptimize=True,
+        optimizer_settings=None,
+        smiles_hash_generator=None,
+        parallelizer=None,
+        batch_size=50,
+        verbose=False,
+        output_file="pipeline_data.json",
+        steps=None,
+        trajectory_optimization_settings=None,
+        optimized_force_settings=None,
+        force_modification_settings=None,
+        max_iterations=500,
+        tol=1e-8,
+        submit=True,
+        **global_options
+):
+    def callback(product_data, product_file):
+        out_file = os.path.join(os.path.dirname(product_file), output_file)
+        if submit:
+            sbatch_python_job(
+                run_optimization_pipeline,
+                product_data,
+                out_file,
+                steps=steps,
+                trajectory_optimization_settings=trajectory_optimization_settings,
+                optimized_force_settings=optimized_force_settings,
+                force_modification_settings=force_modification_settings,
+                max_iterations=max_iterations,
+                tol=tol,
+                **global_options
+            )
+        else:
+            run_optimization_pipeline(
+                product_data,
+                out_file,
+                steps=steps,
+                trajectory_optimization_settings=trajectory_optimization_settings,
+                optimized_force_settings=optimized_force_settings,
+                force_modification_settings=force_modification_settings,
+                max_iterations=max_iterations,
+                tol=tol,
+                **global_options
+            )
+
+    if steps is None or 'products' in steps:
+        gen_prods.generate_products_and_optimize(
+            template,
+            fragments,
+            active_sites,
+            chiralities=chiralities,
+            output_dir=output_dir,
+            conf_gen_options=conf_gen_options,
+            take_unique=take_unique,
+            num_structs=num_structs,
+            calc=calc,
+            evaluate_energy=evaluate_energy,
+            energy_evaluator=energy_evaluator,
+            preoptimize=preoptimize,
+            optimizer_settings=optimizer_settings,
+            smiles_hash_generator=smiles_hash_generator,
+            parallelizer=parallelizer,
+            batch_size=batch_size,
+            verbose=verbose,
+            callback=callback
+        )
+    else:
+        if output_dir is None:
+            output_dir = '.'
+        for f in glob.glob(f"{output_dir}/*/*/optimized_forces.json"):
+            product_data = utils.read_namedtuple(f)
+            callback(product_data, f)
+
 
 # def submit_if_not_found(glob_pattern, target_file,
 #                         overwrite=False,
