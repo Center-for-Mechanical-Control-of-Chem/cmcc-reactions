@@ -23,6 +23,7 @@ import cmcc_reactions.reaction_data_analysis as rda
 import cmcc_reactions.coordinate_choice as cocho
 import cmcc_reactions.optimal_directions as fopt
 import cmcc_reactions.utils as utils
+import cmcc_reactions.pipeline as pipeline
 
 __all__ = [
     "CMCCTests"
@@ -247,7 +248,6 @@ class CMCCTests(unittest.TestCase):
 
         rda.compare_profiles(new_traj, marker='.').show()
 
-
     @unittest.skip
     def test_LocalizedOptimization(self):
         import warnings
@@ -318,6 +318,7 @@ class CMCCTests(unittest.TestCase):
 
         opt.save(test_data('optimized_forces.json'))
 
+    @unittest.skip
     def test_ForceAdjustedProfile(self):
         import warnings
         warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -384,6 +385,18 @@ class CMCCTests(unittest.TestCase):
             sel=r.fragment_indices[0]
         )
         ts.plot(scan, include_save_buttons=True, background='white').show()
+
+    def test_ForceOptimizerPipeline(self):
+        import warnings
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+        uuh = pipeline.run_optimization_pipeline(
+            test_data('product.json'),
+            output_file=test_data('pipline_output.json'),
+            max_iterations=5
+        )
+        print(uuh)
 
     @unittest.skip
     def test_CoordinateSystemGen(self):

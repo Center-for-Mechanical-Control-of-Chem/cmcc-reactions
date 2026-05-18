@@ -1,3 +1,7 @@
+from __future__ import annotations
+import typing
+
+
 import collections
 import os
 import numpy as np
@@ -13,6 +17,7 @@ import McUtils.Plots as plt
 from Psience.Reactions import Reaction
 
 from . import utils
+from . import reaction_data_analysis as rda
 
 __all__ = [
     "find_optimal_displacement_coordinate",
@@ -68,7 +73,8 @@ def get_guess_dir(f_proj_r, f_proj_ts):
 def scipy_optimize_forces(gs_hess, ts_hess, guess_dir, proj_dirs, *,
                           max_iterations,
                           logger=None,
-                          method='nelder-mead'):
+                          method='nelder-mead',
+                          **options):
     reduced_basis = nput.find_basis(nput.orthogonal_projection_matrix(proj_dirs))
     gs_hess = reduced_basis.T @ gs_hess @ reduced_basis
     ts_hess = reduced_basis.T @ ts_hess @ reduced_basis
@@ -85,7 +91,19 @@ def scipy_optimize_forces(gs_hess, ts_hess, guess_dir, proj_dirs, *,
         g2 = np.dot(nput.orthogonal_projection_matrix(guess[:, np.newaxis]), gg)
         return -g2
 
-    opts = dict(options={'maxiter':max_iterations})
+    _, x, min = nput.scipy_minimize(
+        guess_dir,
+        function=fun,
+        jacobian=jac,
+        method=method,
+        max_iterations=max_iterations,
+        **options
+    )
+
+    return np.dot(nput.vec_normalize(x), reduced_basis.T), min
+
+    min = scipy_opt(fun, guess_dir, method=method, **opts)
+    opts = options | dict(options={'maxiter':max_iterations})
     if method in {'cg', 'bfgs'}:
         opts['jac'] = jac
 
@@ -611,7 +629,8 @@ OptimizedForceData = collections.namedtuple(
         'internals',
         'use_mode_space',
         'optimizer_settings'
-    ]
+    ],
+    defaults=[None]
 )
 utils.register_namedtuple(OptimizedForceData)
 
@@ -634,7 +653,8 @@ ForceModifiedReactionData = collections.namedtuple(
         'energy_evaluator',
         'internals',
         'optimizer_settings'
-    ]
+    ],
+    defaults=[None]
 )
 utils.register_namedtuple(ForceModifiedReactionData)
 
@@ -654,21 +674,27 @@ class ForceOptimizer:
                  prepped_modes=None,
                  internals=None,
                  projection_internals=None,
+                 reactant_hessian=None,
+                 transition_state_hessian=None,
                  force_coeffs=None,
                  **determination_opts):
+        if reactant_hessian is not None:
+            reactant_mol = reactant_mol.modify(potential_derivatives=[0, reactant_hessian])
+        if transition_state_hessian is not None:
+            ts_mol = ts_mol.modify(potential_derivatives=[0, transition_state_hessian])
         if reembed:
-            reactant_mol.get_normal_modes()
+            reactant_mol.get_normal_modes() # precompute modes
             reactant_mol = reactant_mol.get_embedded_molecule(ref=ts_mol)
         self.rs:Molecule = reactant_mol
         self.ts:Molecule = ts_mol
         self._prepped_modes = prepped_modes
+        self.reorder = reorder
+        self.use_mode_space = use_mode_space
         if projection_internals is None:
             projection_internals = internals
         if projection_internals is not None:
             determination_opts = determination_opts | dict(internals=projection_internals)
         self.opts = self.default_options | determination_opts
-        self.reorder = reorder
-        self.use_mode_space = use_mode_space
         self.internals = internals
         if optimal_forces is None and force_coeffs is not None:
             optimal_forces = self.get_forces_from_coeffs(force_coeffs)
@@ -718,33 +744,48 @@ class ForceOptimizer:
         return info_file
 
     @classmethod
-    def from_data(cls, force_data:OptimizedForceData):
-        reactant = Molecule(
-            force_data.atoms,
-            force_data.reactant_geom,
-            potential_derivatives=[0, np.asanyarray(force_data.reactant_hessian)],
-            energy_evaluator=force_data.energy_evaluator
-        )
-        ts = Molecule(
-            force_data.atoms,
-            force_data.transition_state_geom,
-            potential_derivatives=[0, np.asanyarray(force_data.transition_state_hessian)],
-            energy_evaluator=force_data.energy_evaluator
-        )
-        opts = force_data.optimizer_settings.copy()
-        if 'internals' in opts:
-            opts['projection_internals'] = opts.pop('internals')
-        return cls(
-            reactant, ts,
-            force_coeffs=force_data.force_coeffs,
-            internals=force_data.internals,
-            use_mode_space=force_data.use_mode_space,
-            **opts
-        )
+    def from_data(cls, force_data:ForceOptimizer|OptimizedForceData):
+        if isinstance(force_data, ForceOptimizer):
+            return force_data
+        else:
+            energy_evaluator = force_data.energy_evaluator
+            opts = force_data.optimizer_settings.copy()
+            ee = opts.pop('energy_evaluator', None)
+            if energy_evaluator is None:
+                energy_evaluator = ee
+            reactant = Molecule(
+                force_data.atoms,
+                force_data.reactant_geom,
+                potential_derivatives=[0, np.asanyarray(force_data.reactant_hessian)],
+                energy_evaluator=energy_evaluator
+            )
+            ts = Molecule(
+                force_data.atoms,
+                force_data.transition_state_geom,
+                potential_derivatives=[0, np.asanyarray(force_data.transition_state_hessian)],
+                energy_evaluator=energy_evaluator
+            )
+            if 'internals' in opts:
+                opts['projection_internals'] = opts.pop('internals')
+            return cls(
+                reactant, ts,
+                force_coeffs=force_data.force_coeffs,
+                internals=force_data.internals,
+                use_mode_space=force_data.use_mode_space,
+                **opts
+            )
     @classmethod
     def from_file(cls, force_data):
         return cls.from_data(utils.read_namedtuple(force_data))
 
+    @classmethod
+    def from_trajectory(cls, trajectory, **opts):
+        if isinstance(trajectory, str):
+            trajectory = rda.DielsAlderReactionTrajectory.from_file(trajectory)
+        elif not isinstance(trajectory, rda.DielsAlderReactionTrajectory):
+            trajectory = rda.DielsAlderReactionTrajectory.from_trajectory_data(trajectory)
+
+        return cls(trajectory.reactant, trajectory.transition_state, **opts)
 
     @classmethod
     def from_displacements(cls,
@@ -1160,7 +1201,7 @@ class ForceOptimizer:
         return force_modification, d
 
     def reoptimize_with_force(self, mode,
-                              magnitude=1,
+                              magnitude=50,
                               units='PicoJoules/Meters',
                               use_internals=False,
                               mass_weight=False,
@@ -1181,167 +1222,191 @@ class ForceOptimizer:
                               remove_transrot=True,
                               remove_orientation=None,
                               output_dir=None,
-                              info_file='force_modified_{mode}.json',
+                              info_file='force_modified_{mode}_{mag}.json',
                               **opts):
-        if units is not None:
-            if isinstance(units, str):
-                units = units.split("/")
-            conv = UnitsData.convert(units[0], "Hartrees") / (
-                UnitsData.convert(units[1], "BohrRadius")
-            )
-            magnitude = conv * magnitude
-
-        if modify_forces:
-            if remove_orientation is None:
-                remove_orientation = not apply_constraints
-            if remove_transrot is None:
-                remove_transrot = not apply_constraints
-            gradient_modification_function, force_vector = self.mode_force_function(mode,
-                                                                                    magnitude=magnitude,
-                                                                                    use_internals=use_internals,
-                                                                                    mass_weight=mass_weight,
-                                                                                    remove_transrot=remove_transrot,
-                                                                                    remove_orientation=remove_orientation)
+        smol_mode = nput.is_int(mode)
+        smol_force = nput.is_numeric(magnitude)
+        if smol_mode:
+            modes = [mode]
         else:
-            gradient_modification_function, force_vector = None, None
+            modes = mode
 
-        if reoptimize_ts:
-            if profile_generator == 'relaxed':
-                if ts_opt_settings is None:
-                    ts_opt_settings = {}
-                if optimizer_method is not None:
-                    ts_opt_settings['method'] = ts_opt_settings.get('method', optimizer_method)
-                ts_opt_settings = dict(
-                    max_displacement=max_displacement,
-                    coordinate_constraints=[
-                        (0, 2),
-                        (1, 3)
-                    ]) | ts_opt_settings
+        if smol_force:
+            mags = [magnitude]
+        else:
+            mags = magnitude
 
-                def pre_displace(coords):
-                    displacements = self.get_displacement_dirs(mass_weight=mass_weight, use_internals=use_internals)
-                    d = displacements[mode] * initial_reactants_step
-                    if use_internals:
-                        force_mol = self.internal_mols[1].modify(coords=coords)
-                        dx = force_mol.get_cartesians_by_internals(1, strip_embedding=True)[0]
-                        d = np.dot(d, dx)
-                    return coords + d.reshape(-1, 3)
 
-                ts = self.ts.optimize(gradient_modification_function=gradient_modification_function,
-                                      max_iterations=max_iterations,
-                                      mode=optimizer_mode,
-                                      initialization_function=pre_displace,
-                                      # logger=True,
-                                      **ts_opt_settings)
-            else:
-                disp_t = self.ts.get_scan_coordinates(
-                    [[-initial_ts_step, initial_ts_step, num_ts_steps]],
-                    which=[0],
-                    coordinate_expansion=[self.ts.get_normal_modes().coords_by_modes],
-                    internals='reembed' if use_internals else False,
-                    strip_embedding=True if use_internals else False
+        res = []
+        for mode in modes:
+            for magnitude in mags:
+                if units is not None:
+                    if isinstance(units, str):
+                        units = units.split("/")
+                    conv = UnitsData.convert(units[0], "Hartrees") / (
+                        UnitsData.convert(units[1], "BohrRadius")
+                    )
+                    magnitude = conv * magnitude
+
+                if modify_forces:
+                    if remove_orientation is None:
+                        remove_orientation = not apply_constraints
+                    if remove_transrot is None:
+                        remove_transrot = not apply_constraints
+                    gradient_modification_function, force_vector = self.mode_force_function(mode,
+                                                                                            magnitude=magnitude,
+                                                                                            use_internals=use_internals,
+                                                                                            mass_weight=mass_weight,
+                                                                                            remove_transrot=remove_transrot,
+                                                                                            remove_orientation=remove_orientation)
+                else:
+                    gradient_modification_function, force_vector = None, None
+
+                if reoptimize_ts:
+                    if profile_generator == 'relaxed':
+                        if ts_opt_settings is None:
+                            ts_opt_settings = {}
+                        if optimizer_method is not None:
+                            ts_opt_settings['method'] = ts_opt_settings.get('method', optimizer_method)
+                        ts_opt_settings = dict(
+                            max_displacement=max_displacement,
+                            coordinate_constraints=[
+                                (0, 2),
+                                (1, 3)
+                            ]) | ts_opt_settings
+
+                        def pre_displace(coords):
+                            displacements = self.get_displacement_dirs(mass_weight=mass_weight, use_internals=use_internals)
+                            d = displacements[mode] * initial_reactants_step
+                            if use_internals:
+                                force_mol = self.internal_mols[1].modify(coords=coords)
+                                dx = force_mol.get_cartesians_by_internals(1, strip_embedding=True)[0]
+                                d = np.dot(d, dx)
+                            return coords + d.reshape(-1, 3)
+
+                        ts = self.ts.optimize(gradient_modification_function=gradient_modification_function,
+                                              max_iterations=max_iterations,
+                                              mode=optimizer_mode,
+                                              initialization_function=pre_displace,
+                                              # logger=True,
+                                              **ts_opt_settings)
+                    else:
+                        disp_t = self.ts.get_scan_coordinates(
+                            [[-initial_ts_step, initial_ts_step, num_ts_steps]],
+                            which=[0],
+                            coordinate_expansion=[self.ts.get_normal_modes().coords_by_modes],
+                            internals='reembed' if use_internals else False,
+                            strip_embedding=True if use_internals else False
+                        )
+
+                        if ts_opt_settings is None:
+                            ts_opt_settings = {}
+                        ts_opt_settings = dict(max_iterations=max_iterations, max_displacement=max_displacement) | ts_opt_settings
+
+                        images = [self.ts.modify(coords=t) for t in disp_t]
+                        rxn = Reaction(
+                            [images[0]],
+                            [images[-1]],
+                            optimize=False
+                        )
+
+                        if 'dimer' in profile_generator:
+                            ts_opt_settings['image_guess'] = ts_opt_settings.get('image_guess', 0)
+                            images = [images[0], images[-1]]
+                        if profile_generator == 'ase-dimer':
+                            ts_opt_settings['method_options'] = {
+                                                                    'image_guess': ts_opt_settings.pop('image_guess', 0)
+                                                                } | ts_opt_settings.get('method_options', {})
+                        prof = rxn.get_profile_generator(profile_generator,
+                                                         climb=climb,
+                                                         energy_evaluator=self.ts.energy_evaluator)
+
+                        new_images = prof.generate(base_images=[images[0], images[-1]],
+                                                   gradient_modification_function=gradient_modification_function,
+                                                   **ts_opt_settings)
+                        ts = new_images[0]
+                else:
+                    ts = self.ts
+
+                if reoptimize_reactants:
+                    if optimizer_method is not None:
+                        opts['method'] = opts.get('method', optimizer_method)
+                    if apply_constraints:
+                        opts['coordinate_constraints'] = [
+                            (0, 2),
+                            (1, 3)
+                        ]
+
+                    def pre_displace(coords):
+                        displacements = self.get_displacement_dirs(mass_weight=mass_weight, use_internals=use_internals)
+                        d = displacements[mode] * initial_reactants_step
+                        if use_internals:
+                            force_mol = self.internal_mols[0].modify(coords=coords)
+                            dx = force_mol.get_cartesians_by_internals(1, strip_embedding=True)[0]
+                            d = np.dot(d, dx)
+                        return coords + d.reshape(-1, 3)
+
+                    r = self.rs.modify(internals=None).optimize(
+                        gradient_modification_function=gradient_modification_function,
+                        max_iterations=max_iterations,
+                        mode=optimizer_mode,
+                        initialization_function=pre_displace,
+                        max_displacement=max_displacement,
+                        # logger=True,
+                        **opts)
+                else:
+                    r = self.rs
+
+                fmrd = ForceModifiedReactionData(
+                    atoms=self.ts.atoms,
+                    reactant_geom=self.rs.coords,
+                    transition_state_geom=self.ts.coords,
+                    reactant_energy=self.rs.calculate_energy(),
+                    transition_state_energy=self.ts.calculate_energy(),
+                    force_modified_reactant_geom=r.coords,
+                    force_modified_transition_state_geom=ts.coords,
+                    force_modified_reactant_energy=r.calculate_energy(),
+                    force_modified_transition_state_energy=ts.calculate_energy(),
+                    force_vector=force_vector,
+                    force_magnitude=magnitude,
+                    force_units=units,
+                    mass_weight=mass_weight,
+                    energy_evaluator=self.rs.energy_evaluator,
+                    internals=self.internals,
+                    optimizer_settings=dict(
+                        optimizer_mode=optimizer_mode,
+                        optimizer_method=optimizer_method,
+                        profile_generator=profile_generator,
+                        ts_opt_settings=ts_opt_settings,
+                        max_iterations=max_iterations,
+                        initial_ts_step=initial_ts_step,
+                        num_ts_steps=num_ts_steps,
+                        initial_reactants_step=initial_reactants_step
+                    ) | opts
                 )
 
-                if ts_opt_settings is None:
-                    ts_opt_settings = {}
-                ts_opt_settings = dict(max_iterations=max_iterations, max_displacement=max_displacement) | ts_opt_settings
+                if output_dir is not None:
+                    conv2 = UnitsData.convert("Hartrees", "Picojoules") / (
+                        UnitsData.convert("BohrRadius", "Meters")
+                    )
+                    m = np.round(magnitude * conv2)
+                    if os.path.splitext(output_dir)[-1].startswith('.'):
+                        output_dir, info_file = os.path.split(output_dir)
+                    output_dir = output_dir.format(mode=mode, mag=m)
+                    info_file = info_file.format(mode=mode, mag=m)
+                    if len(output_dir) > 0:
+                        os.makedirs(output_dir, exist_ok=True)
+                        info_file = os.path.join(output_dir, info_file)
+                    utils.write_namedtuple(
+                        info_file,
+                        fmrd
+                    )
+                res.append([r, ts, fmrd])
 
-                images = [self.ts.modify(coords=t) for t in disp_t]
-                rxn = Reaction(
-                    [images[0]],
-                    [images[-1]],
-                    optimize=False
-                )
-
-                if 'dimer' in profile_generator:
-                    ts_opt_settings['image_guess'] = ts_opt_settings.get('image_guess', 0)
-                    images = [images[0], images[-1]]
-                if profile_generator == 'ase-dimer':
-                    ts_opt_settings['method_options'] = {
-                                                            'image_guess': ts_opt_settings.pop('image_guess', 0)
-                                                        } | ts_opt_settings.get('method_options', {})
-                prof = rxn.get_profile_generator(profile_generator,
-                                                 climb=climb,
-                                                 energy_evaluator=self.ts.energy_evaluator)
-
-                new_images = prof.generate(base_images=[images[0], images[-1]],
-                                           gradient_modification_function=gradient_modification_function,
-                                           **ts_opt_settings)
-                ts = new_images[0]
+        if smol_mode and smol_mode:
+            return res[0]
         else:
-            ts = self.ts
-
-        if reoptimize_reactants:
-            if optimizer_method is not None:
-                opts['method'] = opts.get('method', optimizer_method)
-            if apply_constraints:
-                opts['coordinate_constraints'] = [
-                    (0, 2),
-                    (1, 3)
-                ]
-
-            def pre_displace(coords):
-                displacements = self.get_displacement_dirs(mass_weight=mass_weight, use_internals=use_internals)
-                d = displacements[mode] * initial_reactants_step
-                if use_internals:
-                    force_mol = self.internal_mols[0].modify(coords=coords)
-                    dx = force_mol.get_cartesians_by_internals(1, strip_embedding=True)[0]
-                    d = np.dot(d, dx)
-                return coords + d.reshape(-1, 3)
-
-            r = self.rs.modify(internals=None).optimize(
-                gradient_modification_function=gradient_modification_function,
-                max_iterations=max_iterations,
-                mode=optimizer_mode,
-                initialization_function=pre_displace,
-                max_displacement=max_displacement,
-                # logger=True,
-                **opts)
-        else:
-            r = self.rs
-
-        fmrd = ForceModifiedReactionData(
-            atoms=self.ts.atoms,
-            reactant_geom=self.rs.coords,
-            transition_state_geom=self.ts.coords,
-            reactant_energy=self.rs.calculate_energy(),
-            transition_state_energy=self.ts.calculate_energy(),
-            force_modified_reactant_geom=r.coords,
-            force_modified_transition_state_geom=ts.coords,
-            force_modified_reactant_energy=r.calculate_energy(),
-            force_modified_transition_state_energy=ts.calculate_energy(),
-            force_vector=force_vector,
-            force_magnitude=magnitude,
-            force_units=units,
-            mass_weight=mass_weight,
-            energy_evaluator=self.rs.energy_evaluator,
-            internals=self.internals,
-            optimizer_settings=dict(
-                optimizer_mode=optimizer_mode,
-                optimizer_method=optimizer_method,
-                profile_generator=profile_generator,
-                ts_opt_settings=ts_opt_settings,
-                max_iterations=max_iterations,
-                initial_ts_step=initial_ts_step,
-                num_ts_steps=num_ts_steps,
-                initial_reactants_step=initial_reactants_step
-            ) | opts
-        )
-
-        if output_dir is not None:
-            if os.path.splitext(output_dir)[-1].startswith('.'):
-                output_dir, info_file = os.path.split(output_dir)
-            output_dir = output_dir.format(mode=mode)
-            info_file = info_file.format(mode=mode)
-            if len(output_dir) > 0:
-                os.makedirs(output_dir, exist_ok=True)
-                info_file = os.path.join(output_dir, info_file)
-            utils.write_namedtuple(
-                info_file,
-                fmrd
-            )
-
-        return r, ts, fmrd
+            return res
 
     def direction_overlap(self, other, mol='ts'):
         fds = self.force_dirs

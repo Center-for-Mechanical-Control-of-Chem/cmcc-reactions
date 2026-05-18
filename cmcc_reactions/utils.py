@@ -16,7 +16,9 @@ __all__ = [
     "write_json",
     "read_json",
     "write_namedtuple",
-    "read_namedtuple"
+    "make_namedtuple",
+    "read_namedtuple",
+    "isnamedtupleinstance"
 ]
 
 def dictify_lists(tree:dict):
@@ -293,8 +295,13 @@ def register_namedtuple(type):
 def write_namedtuple(file, obj, compress=False, mode='json', **opts):
     d = obj._asdict() | {"_type":type(obj).__name__}
     return write_tree(file, d, compress=compress, mode=mode, **opts)
-def read_namedtuple(file, nt_type=None, decompress=False, mode='json', **opts):
-    obj = read_tree(file, decompress=decompress, mode=mode, **opts)
+def make_namedtuple(obj, nt_type=None, key=None, in_place=False):
+    if key is not None:
+        if not isinstance(key, str):
+            key = [key]
+        for k in key:
+            obj = obj[k]
+    if not in_place: obj = obj.copy()
     tn = obj.pop('_type', None)
     if nt_type is None:
         if tn is None: raise ValueError("can't load `namedtuple` without type name")
@@ -303,6 +310,22 @@ def read_namedtuple(file, nt_type=None, decompress=False, mode='json', **opts):
         nt_type = namedtuple_registry[nt_type]
 
     return nt_type(**obj)
+def read_namedtuple(file, nt_type=None, decompress=False, mode='json', key=None, **opts):
+    obj = read_tree(file, decompress=decompress, mode=mode, **opts)
+    return make_namedtuple(obj, nt_type=nt_type, key=key, in_place=True)
+def isnamedtupleinstance(obj, nt_types):
+    if not isinstance(nt_types, tuple):
+        nt_types = (nt_types,)
+    return (
+            isinstance(obj, nt_types)
+            or any(
+                all(
+                    hasattr(obj, k)
+                    for k in nt_type._fields
+                )
+                for nt_type in nt_types
+            )
+    )
 
 def construct_json_file_tree(top_dir, js_patterns="**/*.json", recursive=True):
     tree = {}

@@ -136,11 +136,13 @@ InitialProductData = collections.namedtuple(
         'bonds',
         'energy',
         'breakpoints',
-        "evaluator"
-    ]
+        "evaluator",
+        'optimization_settings'
+    ],
+    defaults=[None]
 )
 utils.register_namedtuple(InitialProductData)
-def create_product_data(struct, inds, energy=None, smiles=None, energy_evaluator=None):
+def create_product_data(struct, inds, energy=None, smiles=None, energy_evaluator=None, optimization_settings=None):
     return InitialProductData(
         smiles=smiles,
         atoms=struct.atoms,
@@ -148,7 +150,8 @@ def create_product_data(struct, inds, energy=None, smiles=None, energy_evaluator
         bonds=[[int(i), int(j), float(t)] for i, j, t in struct.bonds],
         energy=energy,
         breakpoints=inds,
-        evaluator=energy_evaluator
+        evaluator=energy_evaluator,
+        optimization_settings=optimization_settings
     )
 def write_product_structure(output_dir, struct, inds,
                             # conf_file='conf.xyz',
@@ -160,31 +163,12 @@ def write_product_structure(output_dir, struct, inds,
                             # bond_line='BREAK {0[0]:.0f} {0[1]:.0f}'
                             ):
     os.makedirs(output_dir, exist_ok=True)
-    # comment = f"Energy: {energy} | SMILES: {smiles}"
-    # with open(os.path.join(output_dir, conf_file), 'w+') as xyz:
-    #     ase.io.write(xyz, struct, format='xyz', comment=comment)
-    # with open(os.path.join(output_dir, index_file), 'w+') as ind_out:
-    #     ind_out.writelines([
-    #         bond_line.format(inds[0]),
-    #         bond_line.format(inds[1])
-    #     ])
     product_data = create_product_data(struct, inds, energy=energy, smiles=smiles, energy_evaluator=energy_evaluator)
     utils.write_namedtuple(
         os.path.join(output_dir, info_file),
         product_data
     )
     return product_data
-    # dev.write_json(
-    #     os.path.join(output_dir, info_file),
-    #     {
-    #         'smiles': smiles,
-    #         'atoms':list(struct.atoms),
-    #         'coords': struct.coords.tolist(),
-    #         'bonds': [[int(i), int(j), float(t)] for i,j,t in struct.bonds],
-    #         'energy': energy,
-    #         'breakpoints': inds,
-    #     }
-    # )
 
 def _get_rmsd_groups(rmsd_blocks, group, rmsd_cutoff):
     r, c = np.triu_indices(len(group), k=1)
@@ -556,7 +540,7 @@ def create_breakpoint_zmat(mol, bonds=((0, 2), (1, 3)), type='dibond'):
 default_driven_bonds = ((0, 2), (1, 3))
 def generate_initial_reaction_sampling(mol,
                                        max_step=4,
-                                       nsteps=15,
+                                       nsteps=30,
                                        max_iterations=500,
                                        driven_bonds=None,
                                        **optimizer_settings):
@@ -652,8 +636,10 @@ ReoptimizedTrajectoryData = collections.namedtuple(
         "initial_rmsds",
         "raw_pre_sampling",
         "raw_pre_energies",
-        "evaluator"
-    ]
+        "evaluator",
+        "optimization_settings"
+    ],
+    defaults=[None]
 )
 utils.register_namedtuple(ReoptimizedTrajectoryData)
 
