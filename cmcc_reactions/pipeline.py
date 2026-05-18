@@ -496,6 +496,9 @@ def run_optimization_pipeline(
 
     return input_data
 
+def generate_product_library():
+    ...
+
 # def submit_if_not_found(glob_pattern, target_file,
 #                         overwrite=False,
 #                         submission_function=run_python_script):

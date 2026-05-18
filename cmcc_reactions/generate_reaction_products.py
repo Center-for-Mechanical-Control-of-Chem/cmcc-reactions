@@ -4,7 +4,7 @@ import functools
 import scipy.sparse
 import collections
 
-#TODO: just use the mcutils functions for most of this...
+from McUtils.ExternalPrograms import RDMolecule
 import McUtils.Devutils as dev
 import McUtils.Numputils as nput
 from Psience.Molecools import Molecule
@@ -17,6 +17,7 @@ import os
 # import ase
 # import ase.optimize
 # import ase.io
+from rdkit.rdBase import BlockLogs
 
 from . import utils
 
@@ -80,6 +81,209 @@ def product_smiles_iterator(templates, diene_atom_lists, group_map, diene_templa
                     dict(zip(map_keys, v), diene=diene_core)
                 )
 
+
+# Find atom indices by map number
+def _get_atom_idx(mol, map_num):
+    for atom in mol.GetAtoms():
+        if atom.GetAtomMapNum() == map_num:
+            return atom.GetIdx()
+    raise ValueError(f"Atom map number {map_num} not found in molecule.")
+def _pop_hydrogen(ref_mol, new_mol, idx1, idx2):
+    a1 = ref_mol.GetAtomWithIdx(idx1)
+    implicit_hs = a1.GetNumImplicitHs()
+    explicit_hs = a1.GetNumExplicitHs()
+    if implicit_hs > 0:
+        return False
+    elif explicit_hs > 0:
+        a1 = new_mol.GetAtomWithIdx(idx2)
+        explicit_hs = a1.GetNumExplicitHs()
+        a1.SetNumExplicitHs(explicit_hs - 1)
+        return False
+    else:
+        # Find one explicit neighbor on the new mol
+        a1 = new_mol.GetAtomWithIdx(idx2)
+        for neighbor in a1.GetNeighbors():
+            if neighbor.GetAtomicNum() == 1:
+                h_idx = neighbor.GetIdx()
+                new_mol.RemoveAtom(h_idx)
+                return True
+        return False
+def join_fragments(smiles1: str, smiles2: str, new_bonds,
+                   cache=None,
+                   resanitize=True,
+                   add_implicit_hydrogens=False,
+                   fallback_to_ordering=False,
+                   decrement_hydrogens=True) -> str:
+    if cache is None:
+        cache = {}
+    if smiles1 not in cache:
+        mol = RDMolecule.parse_smiles(smiles1, remove_hydrogens=True, add_implicit_hydrogens=add_implicit_hydrogens)
+        if mol is not None:
+            map = {a.GetAtomMapNum(): a.GetIdx() for a in mol.GetAtoms()}
+            map.pop(0, None)
+        else:
+            map = None
+        cache[smiles1] = {'mol': mol, 'map': map}
+    if smiles2 not in cache:
+        mol = RDMolecule.parse_smiles(smiles2, remove_hydrogens=True, add_implicit_hydrogens=add_implicit_hydrogens)
+        if mol is not None:
+            map = {a.GetAtomMapNum(): a.GetIdx() for a in mol.GetAtoms()}
+            map.pop(0, None)
+        else:
+            map = None
+        cache[smiles2] = {'mol': mol, 'map': map}
+    mol1 = cache[smiles1]['mol']
+    mol2 = cache[smiles2]['mol']
+
+    if mol1 is None:
+        raise ValueError(f"bad SMILES {smiles1}")
+    if mol1 is None:
+        raise ValueError(f"bad SMILES {smiles2}")
+
+    map1 = cache[smiles1]['map']
+    map2 = cache[smiles2]['map']
+    offset = mol1.GetNumAtoms()
+
+    map2 = {m+offset: i+offset for m,i in map2.items()}
+
+    # Combine both molecules into one (no bond yet)
+    combined = Chem.CombineMols(mol1, mol2)
+    editable = Chem.RWMol(combined)
+
+    for b in new_bonds:
+        if len(b) == 2:
+            m1, m2 = b
+            t = 1
+        else:
+            m1, m2, t = b
+        if fallback_to_ordering:
+            idx1 = map1.get(m1 + 1, m1)
+            idx2 = map2.get(m2 + offset + 1, m2 + offset)
+        else:
+            idx1 = map1[m1 + 1]
+            idx2 = map2[m2 + offset + 1]
+
+        if nput.is_numeric(t):
+            if t == 1:
+                t = Chem.BondType.SINGLE
+            elif t == 2:
+                t = Chem.BondType.DOUBLE
+            elif t == 3:
+                t = Chem.BondType.TRIPLE
+            elif 1 < t and t < 2:
+                t = Chem.BondType.AROMATIC
+            else:
+                raise ValueError(f"Bond type {t} is not supported.")
+
+        editable.AddBond(idx1, idx2, t)
+        if decrement_hydrogens:
+            success = _pop_hydrogen(mol1, editable, idx1, idx1)
+            i2 = idx2 - offset
+            if success:
+                offset = offset
+                idx2 = idx2 - 1
+                map2 = {m:i-1 for m,i in map2.items()}
+            _pop_hydrogen(mol2, editable, i2, idx2)
+    joined = editable.GetMol()
+
+    if resanitize:
+        Chem.SanitizeMol(joined)
+
+    for m,i in map1.items():
+        joined.GetAtomWithIdx(i).SetAtomMapNum(m)
+    for m,i in map2.items():
+        joined.GetAtomWithIdx(i).SetAtomMapNum(m - offset + len(map1))
+
+    if add_implicit_hydrogens is not None:
+        joined = Chem.RemoveHs(joined)
+    return Chem.MolToSmiles(joined)
+
+def set_chiralities(base_smiles, site_chirality_map):
+    if not isinstance(base_smiles, str):
+        mol = Chem.Mol(base_smiles)
+    else:
+        mol = Chem.MolFromSmiles(base_smiles)
+    atom_map_pos = {atom.GetAtomMapNum(): atom.GetIdx() for atom in mol.GetAtoms()}
+    atom_map_pos.pop(0, None)
+
+    for map_num, winding in site_chirality_map.items():
+        atom_idx = atom_map_pos[map_num]
+        winding_map = {
+            "CW": Chem.ChiralType.CHI_TETRAHEDRAL_CW,
+            "CCW": Chem.ChiralType.CHI_TETRAHEDRAL_CCW,
+        }
+        if winding.upper() not in winding_map:
+            raise ValueError("winding must be 'CW' or 'CCW'")
+        atom = mol.GetAtomWithIdx(atom_idx)
+
+
+        atom.SetChiralTag(winding_map[winding.upper()])
+
+    Chem.AssignStereochemistry(mol, cleanIt=True, force=True)
+    return Chem.MolToSmiles(mol)
+
+def set_stereo(base_smiles, active_sites,  stereo):
+    # inject stereo information in the RDKit graph
+    if not isinstance(base_smiles, str):
+        mol = Chem.Mol(base_smiles)
+    else:
+        mol = Chem.MolFromSmiles(base_smiles)
+    atom_map_pos = {atom.GetAtomMapNum():atom.GetIdx() for atom in mol.GetAtoms()}
+    atom_map_pos.pop(0, None)
+
+    if nput.is_int(active_sites[0]):
+        active_sites = [active_sites]
+    for a,b,c,d in active_sites:
+        i, j, k, l = atom_map_pos[a], atom_map_pos[b], atom_map_pos[c], atom_map_pos[d]
+        # TODO: ensure this is robust, might need to iterate on thiz
+        mol.GetBondBetweenAtoms(j, k).SetStereo(Chem.BondStereo.STEREOE if stereo == "trans" else Chem.BondStereo.STEREOZ)
+        mol.GetBondBetweenAtoms(i, j).SetBondDir(Chem.BondDir.ENDDOWNRIGHT)
+        mol.GetBondBetweenAtoms(k, l).SetBondDir(Chem.BondDir.ENDUPRIGHT)
+        set_stereo = False
+        with BlockLogs():
+            for a, b in [(j, k), (k, j)]:
+                if set_stereo: break
+                for c, d in [(i, l), (l, i)]:
+                    # this is bad practice, I should look up what they are actually doing
+                    # but we are going quick and dirty
+                    try:
+                        mol.GetBondBetweenAtoms(a, b).SetStereoAtoms(c, d)
+                    except RuntimeError:
+                        ...
+                    else:
+                        set_stereo = True
+                        break
+            else:
+                raise ValueError(f"failed to set stereo atoms for {i},{j},{k},{l}")
+
+    Chem.AssignStereochemistry(mol, cleanIt=True, force=True)
+    smi = Chem.MolToSmiles(mol)
+    return smi
+
+def fragment_to_smiles_iterator(
+        template,
+        fragments,
+        active_sites,
+        chiralities=None,
+        add_implicit_hydrogens='full'
+):
+    cache = {}
+    nsites = len(active_sites)
+    for frags in itertools.combinations_with_replacement(fragments, nsites):
+        temp = template
+        for site,frag in zip(active_sites, frags):
+            temp = join_fragments(temp, frag, [[site, 0]],
+                                  cache=cache,
+                                  add_implicit_hydrogens=add_implicit_hydrogens)
+        if chiralities is not None:
+            chiralities = [
+                [c] if isinstance(c, str) else c
+                for c in chiralities
+            ]
+            for c_set in itertools.product(*chiralities):
+                yield set_chiralities(temp, dict(zip(active_sites, c_set)))
+        else:
+            yield temp
 
 # def get_atoms(mol):
 #     return [a.GetSymbol() for a in mol.GetAtoms()]

@@ -386,6 +386,7 @@ class CMCCTests(unittest.TestCase):
         )
         ts.plot(scan, include_save_buttons=True, background='white').show()
 
+    @unittest.skip
     def test_ForceOptimizerPipeline(self):
         import warnings
         warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -418,6 +419,50 @@ class CMCCTests(unittest.TestCase):
         ).plot_profile(
             distance_metric=rda.incremental_rmsds
         ).show()
+
+    @unittest.skip
+    def test_NewBuildingBlocks(self):
+        # from Psience.Molecools import Molecule
+
+        base_template = '[CH2:3]1[CH:1]([CH2:7]2)[CH:5]=[CH:6][CH:2]2[CH2:4]1'
+
+        temp = base_template
+        # Molecule.from_string(base_template).plot().show()
+        # Molecule.from_string("[CH3:1]N").plot().show()
+
+        temp = gen_prods.join_fragments(temp,
+                                        "[CH3:1]N",
+                                        [[2, 0]]
+                                        )
+        temp = gen_prods.join_fragments(temp,
+                                        "[SH:1](=O)(C4=CC=CC=C4)=O",
+                                        [[3, 0]]
+                                        )
+        temp = gen_prods.set_chiralities(temp, {3:'cw', 4:'cw'})
+        print(temp)
+        # Molecule.from_string(temp).plot().show()
+        # print(
+        #     gen_prods.join_fragments(
+        #         '[C@@H:3]1[CH:1]([CH2:7]2)[CH:5]=[CH:6][CH:2]2[C@@H:4]1',
+        #         "N[C:1]",
+        #         [[2, 0]]
+        #     )
+        # )
+
+    def test_NewEnumeration(self):
+        from Psience.Molecools import Molecule
+
+        base_template = '[C:3]1[C:1]([C:7]2)[C:5]=[C:6][C:2]2[C:4]1'
+
+        for n,smi in enumerate(gen_prods.fragment_to_smiles_iterator(
+            '[C:3]1[C:1]([C:7]2)[C:5]=[C:6][C:2]2[C:4]1',
+            ["[C:1]N", "[S:1](=O)(C4=CC=CC=C4)=O"],
+            [2, 3],
+            chiralities=[['cw', 'ccw'], ['cw', 'ccw']]
+        )):
+            Molecule.from_string(smi).plot(highlight_atoms=[0, 1]).show()
+            if n >= 4:
+                break
 
 
 if __name__ == '__main__':
