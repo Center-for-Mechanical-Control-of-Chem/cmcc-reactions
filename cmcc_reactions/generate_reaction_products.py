@@ -577,7 +577,7 @@ def iter_batched(iterable, n):
             return
         yield batch
 def inchi_key(smiles):
-    return Chem.MolToInchi(Chem.MolFromSmiles(smiles))#.replace("/", "_").replace("\\", "^")
+    return Chem.MolToInchiKey(Chem.MolFromSmiles(smiles))#.replace("/", "_").replace("\\", "^")
 def generate_products_and_optimize_from_iterator(
         base_iterator,
         conf_gen_options=None,

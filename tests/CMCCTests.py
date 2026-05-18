@@ -468,6 +468,10 @@ class CMCCTests(unittest.TestCase):
         warnings.filterwarnings("ignore", category=RuntimeWarning)
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+        raise Exception(
+            gen_prods.inchi_key('N[CH2:8][C@H:3]1[CH:1]2[CH:5]=[CH:6][C@@H:2]([CH:4]1[S:9](=O)(=O)c1ccccc1)[CH2:7]2')
+        )
+
         uuh = pipeline.run_optimization_pipeline(
             test_data('problem_product2.json'),
             output_file=test_data('problem_pipline_output2.json'),
