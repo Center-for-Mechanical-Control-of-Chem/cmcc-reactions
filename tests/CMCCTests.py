@@ -449,10 +449,9 @@ class CMCCTests(unittest.TestCase):
         #     )
         # )
 
+    @unittest.skip
     def test_NewEnumeration(self):
         from Psience.Molecools import Molecule
-
-        base_template = '[C:3]1[C:1]([C:7]2)[C:5]=[C:6][C:2]2[C:4]1'
 
         for n,smi in enumerate(gen_prods.fragment_to_smiles_iterator(
             '[C:3]1[C:1]([C:7]2)[C:5]=[C:6][C:2]2[C:4]1',

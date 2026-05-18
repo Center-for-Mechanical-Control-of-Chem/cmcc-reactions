@@ -565,9 +565,8 @@ def iter_batched(iterable, n):
         if not batch:
             return
         yield batch
-def generate_products_and_optimize(
-        templates, diene_atoms, group_map,
-        diene_template=diene_template,
+def generate_products_and_optimize_from_iterator(
+        base_iterator,
         conf_gen_options=None,
         take_unique=True,
         num_structs=10,
@@ -582,23 +581,7 @@ def generate_products_and_optimize(
         batch_size=50,
         verbose=False,
 ):
-    base_iterator = enumerate(
-        product_smiles_iterator(
-            templates, diene_atoms, group_map,
-            diene_template=diene_template
-        )
-    )
-    if output_dir is not None:
-        os.makedirs(output_dir, exist_ok=True)
-        dev.write_json(
-            os.path.join(output_dir, 'templates.json'),
-            {
-                'templates': templates,
-                'diene_bond': diene_atoms,
-                'groups': group_map,
-                'diene_template': diene_template
-            }
-        )
+    base_iterator = enumerate(base_iterator)
     if parallelizer is None:
         return _generate_products_and_optimize(
             base_iterator,
@@ -649,6 +632,59 @@ def generate_products_and_optimize(
 
         return final_smiles, final_structures, energies, indices
 
+def generate_products_and_optimize_from_diene_templates(
+        templates, diene_atoms, group_map,
+        diene_template=diene_template,
+        output_dir=None,
+        **opt_args
+):
+    base_iterator = product_smiles_iterator(
+        templates, diene_atoms, group_map,
+        diene_template=diene_template
+    )
+    if output_dir is not None:
+        os.makedirs(output_dir, exist_ok=True)
+        dev.write_json(
+            os.path.join(output_dir, 'templates.json'),
+            {
+                'templates': templates,
+                'diene_bond': diene_atoms,
+                'groups': group_map,
+                'diene_template': diene_template
+            }
+        )
+    yield from generate_products_and_optimize_from_iterator(
+        base_iterator,
+        **opt_args
+    )
+
+def generate_products_and_optimize(
+        template,
+        fragments,
+        active_sites,
+        chiralities=None,
+        output_dir=None,
+        **opt_args
+):
+    base_iterator = fragment_to_smiles_iterator(
+        template, fragments, active_sites,
+        chiralities=chiralities
+    )
+    if output_dir is not None:
+        os.makedirs(output_dir, exist_ok=True)
+        dev.write_json(
+            os.path.join(output_dir, 'templates.json'),
+            {
+                'template': template,
+                'fragments': fragments,
+                'active_sites': active_sites,
+                'chiralities': chiralities
+            }
+        )
+    yield from generate_products_and_optimize_from_iterator(
+        base_iterator,
+        **opt_args
+    )
 
 def scan_opt(start_struct, step_max, step_n, scan_ind,
              *,
