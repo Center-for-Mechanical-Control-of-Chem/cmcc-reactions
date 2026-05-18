@@ -325,9 +325,8 @@ class OptimizedForceResults:
         else:
             return fopt.ForceOptimizer.from_data(self.optimized_forces)
 
-    @property
-    def trajectory_analyzer(self):
-        return rda.DielsAlderReactionTrajectory.from_trajectory_data(self.trajectory)
+    def trajectory_analyzer(self, **opts):
+        return rda.DielsAlderReactionTrajectory.from_trajectory_data(self.trajectory, **opts)
 
     # product: gen_prods.InitialProductData|None = None
     # trajectory: gen_prods.ReoptimizedTrajectoryData|None = None
