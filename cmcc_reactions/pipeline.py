@@ -610,7 +610,7 @@ def generate_from_product_library(
     else:
         if output_dir is None:
             output_dir = '.'
-        for f in glob.glob(f"{output_dir}/*/*/optimized_forces.json"):
+        for f in glob.glob(f"{output_dir}/*/*/product.json"):
             product_data = utils.read_namedtuple(f)
             callback(product_data, f)
 

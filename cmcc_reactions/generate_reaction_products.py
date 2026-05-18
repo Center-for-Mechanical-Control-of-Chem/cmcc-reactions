@@ -535,7 +535,7 @@ def _generate_products_and_optimize(smiles_iterator,
                     energy_evaluator=energy_evaluator
                 )
                 if callback is not None:
-                    callback(product_data, os.path.join(output_dir, smiles_label, str(i)))
+                    callback(product_data, os.path.join(output_dir, smiles_label, str(i), 'product.json'))
             else:
                 product_data = create_product_data(
                     struct, diene_inds,
