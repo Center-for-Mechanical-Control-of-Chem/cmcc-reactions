@@ -472,6 +472,9 @@ def run_optimization_pipeline(
                 print('running sampling')
             input_data.trajectory = run_initial_sampling(product, **trajectory_optimization_settings)
 
+            if output_file is not None:
+                input_data.save(output_file)
+
         if 'refine' in steps:
             if refined_trajectory_optimization_settings is None:
                 refined_trajectory_optimization_settings = {}
@@ -479,6 +482,9 @@ def run_optimization_pipeline(
             if verbose:
                 print('running refinement')
             input_data.trajectory = run_refined_trajectory(input_data.trajectory, **refined_trajectory_optimization_settings)
+
+            if output_file is not None:
+                input_data.save(output_file)
 
         trajectory:gen_prods.ReoptimizedTrajectoryData = input_data.trajectory
         optimizer = None
@@ -495,6 +501,9 @@ def run_optimization_pipeline(
             optimizer = run_force_optimization(trajectory, **optimized_force_settings)
             input_data.optimized_forces = optimizer.to_data()
 
+            if output_file is not None:
+                input_data.save(output_file)
+
         if 'fmrds' in steps:
             if optimizer is None:
                 opt_force = input_data.optimized_forces
@@ -510,6 +519,9 @@ def run_optimization_pipeline(
             force_modification_settings = global_options | force_modification_settings
             fmrds = run_fmrds(optimizer, **force_modification_settings)
             input_data.fmrds = [f[2] for f in fmrds]
+
+            if output_file is not None:
+                input_data.save(output_file)
     finally:
         if output_file is not None:
             input_data.save(output_file)
