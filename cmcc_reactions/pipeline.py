@@ -545,7 +545,8 @@ def generate_from_product_library(
                 verbose=verbose,
                 **global_options
             )
-            script.run()
+            if verbose:
+                print(script.run())
         else:
             run_optimization_pipeline(
                 product_data,
