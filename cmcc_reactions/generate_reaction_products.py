@@ -1019,9 +1019,11 @@ def reoptimize_trajectory(mol,
 def generate_reactants_from_products(
         product_data: InitialProductData,
         max_iterations=500,
-        profile_generator='neb',
+        profile_generator='pys-dimer',
         energy_evaluator='aimnet2',
         reoptimize_product=True,
+        refine_endpoints=True,
+        refine_ts=True,
         output_dir=None,
         info_file='trajectory.json',
         **optimization_settings
@@ -1040,17 +1042,37 @@ def generate_reactants_from_products(
         max_step=4,
         nsteps=15,
         max_iterations=max_iterations,
-        driven_bonds=product_data.breakpoints
-    )
-
-    new_traj = reoptimize_trajectory(
-        mol,
-        init_traj,
-        max_iterations=max_iterations,
-        profile_generator=profile_generator,
-        energy_evaluator=energy_evaluator,
+        driven_bonds=product_data.breakpoints,
         **optimization_settings
     )
+
+    base_structs = [
+        mol.modify(coords=t, energy_evaluator=energy_evaluator)
+        for t in init_traj
+    ]
+
+    init_traj = create_trajectory_data(base_structs)
+
+    if profile_generator is not None:
+        new_traj = refine_trajectory(
+            init_traj,
+            init_traj,
+            energy_evaluator=energy_evaluator,
+            profile_generator=profile_generator,
+            refine_endpoints=refine_endpoints,
+            refine_ts=refine_ts,
+            **optimization_settings
+            )
+        # new_traj = reoptimize_trajectory(
+        #     mol,
+        #     init_traj,
+        #     max_iterations=max_iterations,
+        #     profile_generator=profile_generator,
+        #     energy_evaluator=energy_evaluator,
+        #     **optimization_settings
+        # )
+    else:
+        new_traj = init_traj
 
     if output_dir is not None:
         utils.write_namedtuple(
@@ -1071,10 +1093,14 @@ def refine_trajectory(product_data: InitialProductData|ReoptimizedTrajectoryData
                       ts_opt_generator=None,#'pys-dimer',
                       ts_opt_settings=None,
                       ts_opt_optimizer=None,
-                      thresh='gau_tight',
+                      # thresh='gau_tight',
+                      thresh=None,
+                      tol=None,
+                      max_displacement=None,
                       refine_endpoints=False,
                       refine_ts=True,
                       optimizer_settings=None,
+                      which='final',
                       **calc_options
                       ):
     if trajectory_data is None:
@@ -1086,18 +1112,40 @@ def refine_trajectory(product_data: InitialProductData|ReoptimizedTrajectoryData
 
     if optimizer_settings is None:
         optimizer_settings = {}
-    if 'thresh' not in optimizer_settings:
-        optimizer_settings['thresh'] = thresh
+
+    for k,v in dict(
+            thresh=thresh,
+            tol=tol,
+            max_displacement=max_displacement,
+    ).items():
+        if v is not None and k not in optimizer_settings:
+            optimizer_settings[k] = v
+
+    if hasattr(trajectory_data, 'final_trajectory'):
+        if which == 'initial':
+            trajectory = trajectory_data.initial_trajectory
+            energies = trajectory_data.initial_energies
+            rmsds = trajectory_data.initial_rmsds
+            raw_pre_sampling = None
+            raw_pre_energies = None
+        else:
+            trajectory = trajectory_data.final_trajectory
+            energies = trajectory_data.final_energies
+            rmsds = trajectory_data.final_rmsds
+            raw_pre_sampling = trajectory_data.raw_pre_sampling
+            raw_pre_energies = trajectory_data.raw_pre_energies
+    else:
+        trajectory = trajectory_data.coordinates
+        energies = trajectory_data.energies
+        rmsds = trajectory_data.rmsds
+        raw_pre_sampling = None
+        raw_pre_energies = None
 
     traj = [
         Molecule(product_data.atoms,
                  c,
                  energy_evaluator=energy_evaluator)
-        for c in (
-            trajectory_data.final_trajectory
-                if hasattr(trajectory_data, 'final_trajectory') else
-            trajectory_data.coordinates
-        )
+        for c in trajectory
     ]
 
     if refine_endpoints:
@@ -1140,31 +1188,11 @@ def refine_trajectory(product_data: InitialProductData|ReoptimizedTrajectoryData
         final_trajectory=np.array([t.coords for t in new_images]),
         final_energies=[i.calculate_energy() for i in new_images],
         final_rmsds=nput.incremental_eckart_rmsd(new_coords, masses=new_images[0].masses, mass_weighted=False),
-        initial_trajectory=(
-            trajectory_data.final_trajectory
-                if hasattr(trajectory_data, 'final_trajectory') else
-            trajectory_data.coordinates
-        ),
-        initial_energies=(
-            trajectory_data.final_energies
-                if hasattr(trajectory_data, 'final_trajectory') else
-            trajectory_data.energies
-        ),
-        initial_rmsds=(
-            trajectory_data.final_rmsds
-                if hasattr(trajectory_data, 'final_trajectory') else
-            trajectory_data.rmsds
-        ),
-        raw_pre_sampling=(
-            trajectory_data.raw_pre_sampling
-                if hasattr(trajectory_data, 'final_trajectory') else
-            None
-        ),
-        raw_pre_energies=(
-            trajectory_data.raw_pre_energies
-                if hasattr(trajectory_data, 'final_trajectory') else
-            None
-        ),
+        initial_trajectory=trajectory,
+        initial_energies=energies,
+        initial_rmsds=rmsds,
+        raw_pre_sampling=raw_pre_sampling,
+        raw_pre_energies=raw_pre_energies,
         evaluator=energy_evaluator
     )
 

@@ -326,6 +326,13 @@ def run_initial_sampling(product, output_dir=None, **opts):
         **opts
     )
 
+def run_refined_trajectory(traj, output_dir=None, **opts):
+    return gen_prods.refine_trajectory(
+        traj,
+        output_dir=output_dir,
+        **opts
+    )
+
 def run_force_optimization(trajectory,
                            internals='auto',
                            breakpoints=((0, 2), (1, 3)),
@@ -404,6 +411,7 @@ def run_optimization_pipeline(
         steps=None,
         verbose=False,
         trajectory_optimization_settings=None,
+        refined_trajectory_optimization_settings=None,
         optimized_force_settings=None,
         force_modification_settings=None,
         max_iterations=500,
@@ -463,6 +471,14 @@ def run_optimization_pipeline(
             if verbose:
                 print('running sampling')
             input_data.trajectory = run_initial_sampling(product, **trajectory_optimization_settings)
+
+        if 'refine' in steps:
+            if refined_trajectory_optimization_settings is None:
+                refined_trajectory_optimization_settings = {}
+            refined_trajectory_optimization_settings = global_options | refined_trajectory_optimization_settings
+            if verbose:
+                print('running refinement')
+            input_data.trajectory = run_refined_trajectory(input_data.trajectory, **refined_trajectory_optimization_settings)
 
         trajectory:gen_prods.ReoptimizedTrajectoryData = input_data.trajectory
         optimizer = None
