@@ -529,11 +529,14 @@ def generate_from_product_library(
         **global_options
 ):
     def callback(product_data, product_file):
-        out_file = os.path.join(os.path.dirname(product_file), output_file)
+        targ_dir = os.path.dirname(product_file)
+        product_file = os.path.basename(product_file)
+        os.chdir(targ_dir)
+        out_file = output_file
         if submit:
             script, _ = sbatch_python_job(
                 run_optimization_pipeline,
-                product_data,
+                product_file,
                 out_file,
                 steps=steps,
                 trajectory_optimization_settings=trajectory_optimization_settings,
