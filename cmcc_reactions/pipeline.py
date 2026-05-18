@@ -318,6 +318,21 @@ class OptimizedForceResults:
             traj_data
         )
         return info_file
+    @property
+    def optimizer(self):
+        if self.optimized_forces is None:
+            return None
+        else:
+            return fopt.ForceOptimizer.from_data(self.optimized_forces)
+
+    @property
+    def trajectory_analyzer(self):
+        return rda.DielsAlderReactionTrajectory.from_trajectory_data(self.trajectory)
+
+    # product: gen_prods.InitialProductData|None = None
+    # trajectory: gen_prods.ReoptimizedTrajectoryData|None = None
+    # optimized_forces: fopt.OptimizedForceData|None = None
+    # fmrds: list[fopt.ForceModifiedReactionData]|None = None
 
 def run_initial_sampling(product, output_dir=None, **opts):
     return gen_prods.generate_reactants_from_products(
@@ -378,7 +393,7 @@ def run_force_optimization(trajectory,
             fragment_indices = ref.fragment_indices[fragment_indices]
         projection_internals = [
             p for p in projection_internals
-            if all(pp in fragment_indices for pp in p)
+            if any(pp in fragment_indices for pp in p)
         ]
 
     opt = fopt.ForceOptimizer(trajectory.reactant, trajectory.transition_state,
@@ -398,6 +413,7 @@ def run_fmrds(optimizer,
               magnitude=(-200, -100, -50, 50, 100, 200),
               pool=None,
               **opts):
+    nmodes = max(optimizer.force_coeffs.shape[0], nmodes)
     return optimizer.reoptimize_with_force(
         list(range(nmodes)),
         magnitude=magnitude,
@@ -624,7 +640,7 @@ def generate_from_product_library(
     else:
         if output_dir is None:
             output_dir = '.'
-        for n,f in enumerate(glob.glob(f"{output_dir}/*/*/product.json")):
+        for n,f in enumerate(glob.glob(f"{output_dir}/**/product.json", recursive=True)):
             product_data = utils.read_namedtuple(f)
             callback(product_data, f)
             if max_products is not None and n >= max_products:

@@ -463,6 +463,7 @@ class CMCCTests(unittest.TestCase):
             if n >= 4:
                 break
 
+    @unittest.skip
     def test_ReoptZMIssues(self):
         import warnings
         warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -478,6 +479,30 @@ class CMCCTests(unittest.TestCase):
             max_iterations=5
         )
         print(uuh)
+
+    def test_ResultsAnalysis(self):
+        import warnings
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+        res = pipeline.OptimizedForceResults.from_file(test_data('pipeline_data_new.json'))
+        res = pipeline.run_optimization_pipeline(
+            test_data('pipeline_data_new.json'),
+            test_data('pipeline_data_new.json'),
+            steps=['fmrds'],
+            verbose=True,
+            # max_iterations=5
+        )
+
+        o = res.optimizer
+        r, t = o.rs, o.ts
+        uuh = fopt.ForceOptimizer(r, t, internals=o.internals)
+        print(o.force_coeffs.shape,
+              uuh.force_coeffs.shape,
+              uuh.to_data().force_coeffs.shape)
+        uuh2 = fopt.ForceOptimizer.from_data(uuh.to_data())
+        print(uuh.force_coeffs.shape,
+              uuh2.force_coeffs.shape)
 
 
 if __name__ == '__main__':

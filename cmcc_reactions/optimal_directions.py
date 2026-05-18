@@ -275,6 +275,7 @@ def construct_force_dirs(modes_gs, modes_ts,
     # hess_ts_nms = nm_hess(modes_ts, L=np.eye(modes_ts.matrix.shape[-1]))
     # hess_gs_nms = nm_hess(modes_gs, L=modes_ts.inverse @ modes_gs.matrix)
 
+    num_dirs = min(num_dirs, len(hess_gs_nms) - proj_dir.shape[1])
     force_dirs, errors = get_force_dirs(hess_gs_nms, hess_ts_nms,
                                         proj_dir,
                                         # new_modes_ts.matrix[:, (0,)],
@@ -394,7 +395,8 @@ def prep_optimization_modes(reactant, transition_state,
 
 LOW_FREQUENCY_MODE_CUTOFF = 0.00045
 def reaction_force_dirs(reactant, transition_state,
-                        num_dirs=6,
+                        *,
+                        num_dirs,
                         prepped_modes=None,
                         fragment_indices=None,
                         low_frequency_cutoff=None,  # 100 cm-1
