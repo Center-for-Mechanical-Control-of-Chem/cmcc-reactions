@@ -514,7 +514,7 @@ def generate_from_product_library(
         energy_evaluator='aimnet2',
         preoptimize=True,
         optimizer_settings=None,
-        smiles_hash_generator=None,
+        smiles_hash_generator='inchi',
         parallelizer=None,
         batch_size=50,
         verbose=True,
