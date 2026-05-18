@@ -1022,6 +1022,8 @@ def reoptimize_trajectory(mol,
 def generate_reactants_from_products(
         product_data: InitialProductData,
         max_iterations=500,
+        nsteps=30,
+        max_step=4,
         profile_generator='pys-dimer',
         energy_evaluator='aimnet2',
         reoptimize_product=True,
@@ -1042,8 +1044,8 @@ def generate_reactants_from_products(
 
     init_traj = generate_initial_reaction_sampling(
         mol,
-        max_step=4,
-        nsteps=15,
+        max_step=max_step,
+        nsteps=nsteps,
         max_iterations=max_iterations,
         driven_bonds=product_data.breakpoints,
         **optimization_settings
