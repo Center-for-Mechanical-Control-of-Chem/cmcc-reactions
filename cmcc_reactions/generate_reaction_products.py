@@ -576,6 +576,8 @@ def iter_batched(iterable, n):
         if not batch:
             return
         yield batch
+def inchi_key(smiles):
+    return Chem.MolToInchi(Chem.MolFromSmiles(smiles))#.replace("/", "_").replace("\\", "^")
 def generate_products_and_optimize_from_iterator(
         base_iterator,
         conf_gen_options=None,
@@ -586,7 +588,7 @@ def generate_products_and_optimize_from_iterator(
         energy_evaluator='aimnet2',
         preoptimize=True,
         optimizer_settings=None,
-        smiles_hash_generator=None,
+        smiles_hash_generator='inchi',
         output_dir=None,
         parallelizer=None,
         batch_size=50,
@@ -594,6 +596,8 @@ def generate_products_and_optimize_from_iterator(
         callback=None
 ):
     base_iterator = enumerate(base_iterator)
+    if dev.str_is(smiles_hash_generator, 'inchi'):
+        smiles_hash_generator = inchi_key
     if parallelizer is None:
         return _generate_products_and_optimize(
             base_iterator,
