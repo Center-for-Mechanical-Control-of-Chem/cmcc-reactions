@@ -661,7 +661,7 @@ def generate_products_and_optimize_from_diene_templates(
                 'diene_template': diene_template
             }
         )
-    yield from generate_products_and_optimize_from_iterator(
+    return generate_products_and_optimize_from_iterator(
         base_iterator,
         **opt_args
     )
@@ -689,7 +689,7 @@ def generate_products_and_optimize(
                 'chiralities': chiralities
             }
         )
-    yield from generate_products_and_optimize_from_iterator(
+    return generate_products_and_optimize_from_iterator(
         base_iterator,
         **opt_args
     )

@@ -517,7 +517,7 @@ def generate_from_product_library(
         smiles_hash_generator=None,
         parallelizer=None,
         batch_size=50,
-        verbose=False,
+        verbose=True,
         output_file="pipeline_data.json",
         steps=None,
         trajectory_optimization_settings=None,
@@ -541,6 +541,8 @@ def generate_from_product_library(
                 force_modification_settings=force_modification_settings,
                 max_iterations=max_iterations,
                 tol=tol,
+                energy_evaluator=energy_evaluator,
+                verbose=verbose,
                 **global_options
             )
         else:
@@ -553,6 +555,8 @@ def generate_from_product_library(
                 force_modification_settings=force_modification_settings,
                 max_iterations=max_iterations,
                 tol=tol,
+                energy_evaluator=energy_evaluator,
+                verbose=verbose,
                 **global_options
             )
 
