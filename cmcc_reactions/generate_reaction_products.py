@@ -691,6 +691,7 @@ def generate_products_and_optimize(
         )
     return generate_products_and_optimize_from_iterator(
         base_iterator,
+        output_dir=output_dir,
         **opt_args
     )
 
