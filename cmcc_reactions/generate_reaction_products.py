@@ -792,7 +792,7 @@ def create_breakpoint_zmat(mol, bonds=((0, 2), (1, 3)), type='dibond'):
 
     return zm, constraints
 
-default_driven_bonds = ((0, 2), (1, 3))
+default_driven_bonds = ((0, 2), (3, 1))
 def generate_initial_reaction_sampling(mol,
                                        max_step=4,
                                        nsteps=30,
@@ -803,7 +803,9 @@ def generate_initial_reaction_sampling(mol,
         driven_bonds = default_driven_bonds
 
     driven_bonds = [tuple(b) for b in driven_bonds]
-    zm = mol.get_bond_zmatrix(required_coordinates=driven_bonds)
+    zm = mol.get_bond_zmatrix(
+        initial_backbone=sum(driven_bonds, ()),
+        required_coordinates=driven_bonds)
 
     int_mol = mol.modify(internals=zm)
     _, geoms, _ = int_mol.relaxed_scan(
