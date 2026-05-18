@@ -485,14 +485,14 @@ class CMCCTests(unittest.TestCase):
         warnings.filterwarnings("ignore", category=RuntimeWarning)
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        res = pipeline.OptimizedForceResults.from_file(test_data('pipeline_data_new.json'))
-        res = pipeline.run_optimization_pipeline(
-            test_data('pipeline_data_new.json'),
-            test_data('pipeline_data_new.json'),
-            steps=['fmrds'],
-            verbose=True,
-            # max_iterations=5
-        )
+        res = pipeline.OptimizedForceResults.from_file(test_data('pipeline_data3.json'))
+        # res = pipeline.run_optimization_pipeline(
+        #     test_data('pipeline_data_new.json'),
+        #     test_data('pipeline_data_new.json'),
+        #     steps=['fmrds'],
+        #     verbose=True,
+        #     # max_iterations=5
+        # )
 
         o = res.optimizer
         r, t = o.rs, o.ts
