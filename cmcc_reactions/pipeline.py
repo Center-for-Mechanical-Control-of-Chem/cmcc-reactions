@@ -9,6 +9,7 @@ import collections
 import os
 
 from McUtils.Data import UnitsData
+import McUtils.Plots as plt
 import McUtils.Devutils as dev
 import McUtils.Coordinerds as coordops
 import McUtils.Iterators as itut
@@ -336,32 +337,112 @@ class OptimizedForceResults:
                         bar_color='gray',
                         bar_spacing=.2,
                         distance_metric=None,
+                        force_modified=True,
                         bonds=((0, 2), (1, 3)),
+                        baseline=None,
+                        traj=None,
                         **etc
                         ):
         distance_metric = rda.resolve_distance_metric(distance_metric)
         fmrd: fopt.ForceModifiedReactionData = self.fmrds[fmrd_index]
-        coords = distance_metric(
-            [fmrd.force_modified_reactant_geom, fmrd.force_modified_transition_state_geom, self.product.coords],
-            bonds
-        ) * UnitsData.convert("BohrRadius", "Angstroms")
-        rda.plot_reaction_lines(
-            coords,
-            [
+        if traj is None:
+            traj = self.trajectory_analyzer()
+        product_energy = traj.energies[traj.product_index]
+        product_coords = traj.product.coords
+        if force_modified:
+            coords = distance_metric(
+                [fmrd.force_modified_reactant_geom, fmrd.force_modified_transition_state_geom, product_coords],
+                bonds
+            ) * UnitsData.convert("BohrRadius", "Angstroms")
+            engs = [
                 fmrd.force_modified_reactant_energy,
                 fmrd.force_modified_transition_state_energy,
-                self.product.energy,
-            ],
+                product_energy
+            ]
+        else:
+            coords = distance_metric(
+                [fmrd.reactant_geom, fmrd.transition_state_geom, product_coords],
+                bonds
+            ) * UnitsData.convert("BohrRadius", "Angstroms")
+            engs = [
+                fmrd.reactant_energy,
+                fmrd.transition_state_energy,
+                product_energy
+            ]
+
+        if baseline is None:
+            if traj is not None:
+                baseline = traj.energies[traj.reactant_index]
+            else:
+                baseline = fmrd.reactant_energy
+        rda.plot_reaction_lines(
+            coords,
+            engs,
             connect=True,
             ticks=False,
-            baseline=fmrd.reactant_energy,
+            baseline=baseline,
             color=bar_color,
             bar_spacing=bar_spacing,
             **etc
         )
+    def plot_profile(self,
+                     fmrd_index=None,
+                     distance_metric=None,
+                     bonds=((0, 2), (1, 3)),
+                     bar_color='gray',
+                     bar_spacing=.2,
+                     which='initial',
+                     force_modified=True,
+                     **opts):
+        traj = rda.DielsAlderReactionTrajectory.from_trajectory_data(self.trajectory, which=which)
+        figure, x = traj.plot_profile(
+            return_metrics=True,
+            distance_metric=distance_metric,
+            **opts
+        )
+        if fmrd_index is not None:
+            if dev.str_is(force_modified, 'both'):
+                if isinstance(bar_color, str):
+                    bar_color = [
+                        plt.prep_color(bar_color, lighten=.5),
+                        bar_color
+                    ]
+                self.plot_fmrd_lines(
+                    fmrd_index,
+                    distance_metric=distance_metric,
+                    bonds=bonds,
+                    bar_color=bar_color[0],
+                    bar_spacing=bar_spacing,
+                    figure=figure,
+                    force_modified=False,
+                    traj=traj,
+                )
+                self.plot_fmrd_lines(
+                    fmrd_index,
+                    distance_metric=distance_metric,
+                    bonds=bonds,
+                    bar_color=bar_color[1],
+                    bar_spacing=bar_spacing,
+                    figure=figure,
+                    force_modified=True,
+                    traj=traj
+                )
+            else:
+                self.plot_fmrd_lines(
+                    fmrd_index,
+                    distance_metric=distance_metric,
+                    bonds=bonds,
+                    bar_color=bar_color,
+                    bar_spacing=bar_spacing,
+                    figure=figure,
+                    force_modified=force_modified,
+                    traj=traj
+                )
+        return figure
     def compare_profiles(self, fmrd_index=None, distance_metric=None, bonds=((0, 2), (1, 3)),
                          bar_color='gray',
                          bar_spacing=.2,
+                         force_modified=True,
                          **opts):
         traj = rda.DielsAlderReactionTrajectory.from_trajectory_data(self.trajectory)
         figure, x = traj.compare_profiles(
@@ -371,14 +452,43 @@ class OptimizedForceResults:
             **opts
         )
         if fmrd_index is not None:
-            self.plot_fmrd_lines(
-                fmrd_index,
-                distance_metric=distance_metric,
-                bonds=bonds,
-                bar_color=bar_color,
-                bar_spacing=bar_spacing,
-                figure=figure
-            )
+            if dev.str_is(force_modified, 'both'):
+                if isinstance(bar_color, str):
+                    bar_color = [
+                        plt.prep_color(bar_color, lighten=.5),
+                        bar_color
+                    ]
+                self.plot_fmrd_lines(
+                    fmrd_index,
+                    distance_metric=distance_metric,
+                    bonds=bonds,
+                    bar_color=bar_color[0],
+                    bar_spacing=bar_spacing,
+                    figure=figure,
+                    force_modified=False,
+                    traj=traj,
+                )
+                self.plot_fmrd_lines(
+                    fmrd_index,
+                    distance_metric=distance_metric,
+                    bonds=bonds,
+                    bar_color=bar_color[1],
+                    bar_spacing=bar_spacing,
+                    figure=figure,
+                    force_modified=True,
+                    traj=traj
+                )
+            else:
+                self.plot_fmrd_lines(
+                    fmrd_index,
+                    distance_metric=distance_metric,
+                    bonds=bonds,
+                    bar_color=bar_color,
+                    bar_spacing=bar_spacing,
+                    figure=figure,
+                    force_modified=force_modified,
+                    traj=traj
+                )
         return figure
 
 
