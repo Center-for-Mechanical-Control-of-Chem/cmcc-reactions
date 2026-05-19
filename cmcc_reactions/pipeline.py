@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import collections
 import os
 
+from McUtils.Data import UnitsData
 import McUtils.Devutils as dev
 import McUtils.Coordinerds as coordops
 import McUtils.Iterators as itut
@@ -17,7 +18,7 @@ from McUtils.ExternalPrograms import sbatch_python_job
 from . import utils
 from . import generate_reaction_products as gen_prods
 from . import optimal_directions as fopt
-from . import reaction_data_analysis as rda
+from . import trajectory_tools as rda
 
 
 def apply_distortion_library_distortions(
@@ -288,6 +289,8 @@ class OptimizedForceResults:
 
     @classmethod
     def from_intermediate_data(cls, subdata) -> OptimizedForceResults:
+        if isinstance(subdata, dict):
+            subdata = utils.make_namedtuple(subdata)
         if isinstance(subdata, OptimizedForceResults):
             return subdata
         elif utils.isnamedtupleinstance(subdata, OptimizedForcePipelineData):
@@ -327,6 +330,57 @@ class OptimizedForceResults:
 
     def trajectory_analyzer(self, **opts):
         return rda.DielsAlderReactionTrajectory.from_trajectory_data(self.trajectory, **opts)
+
+    def plot_fmrd_lines(self,
+                        fmrd_index,
+                        bar_color='gray',
+                        bar_spacing=.2,
+                        distance_metric=None,
+                        bonds=((0, 2), (1, 3)),
+                        **etc
+                        ):
+        distance_metric = rda.resolve_distance_metric(distance_metric)
+        fmrd: fopt.ForceModifiedReactionData = self.fmrds[fmrd_index]
+        coords = distance_metric(
+            [fmrd.force_modified_reactant_geom, fmrd.force_modified_transition_state_geom, self.product.coords],
+            bonds
+        ) * UnitsData.convert("BohrRadius", "Angstroms")
+        rda.plot_reaction_lines(
+            coords,
+            [
+                fmrd.force_modified_reactant_energy,
+                fmrd.force_modified_transition_state_energy,
+                self.product.energy,
+            ],
+            connect=True,
+            ticks=False,
+            baseline=fmrd.reactant_energy,
+            color=bar_color,
+            bar_spacing=bar_spacing,
+            **etc
+        )
+    def compare_profiles(self, fmrd_index=None, distance_metric=None, bonds=((0, 2), (1, 3)),
+                         bar_color='gray',
+                         bar_spacing=.2,
+                         **opts):
+        traj = rda.DielsAlderReactionTrajectory.from_trajectory_data(self.trajectory)
+        figure, x = traj.compare_profiles(
+            rda.DielsAlderReactionTrajectory.from_trajectory_data(self.trajectory, which='initial'),
+            return_metrics=True,
+            distance_metric=distance_metric,
+            **opts
+        )
+        if fmrd_index is not None:
+            self.plot_fmrd_lines(
+                fmrd_index,
+                distance_metric=distance_metric,
+                bonds=bonds,
+                bar_color=bar_color,
+                bar_spacing=bar_spacing,
+                figure=figure
+            )
+        return figure
+
 
     # product: gen_prods.InitialProductData|None = None
     # trajectory: gen_prods.ReoptimizedTrajectoryData|None = None
@@ -646,7 +700,7 @@ def generate_from_product_library(
                 break
 
 def compress_pipeline_data(
-        top_dir, js_patterns="**/pipline_data.json", recursive=True,
+        top_dir, js_patterns="**/pipeline_data.json", recursive=True,
         output_file=None
 ):
     tree = utils.construct_json_file_tree(

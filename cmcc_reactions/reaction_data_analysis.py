@@ -1,13 +1,17 @@
 
 import collections
 import os.path
-
 import numpy as np
+import glob
+import itertools
 
 from . import reaction_data_schema as schema
 from . import utils
 from . import generate_reaction_products as gen_prods
+from . import trajectory_tools as trajt
+from . import pipeline
 
+import McUtils.Devutils as dev
 from McUtils.Data import UnitsData, BondData
 import McUtils.Numputils as nput
 import McUtils.Plots as plt
@@ -138,417 +142,337 @@ def load_all_structs(distortion_data:dict):
                 mols[full_path] = (atoms, coords), meta
     return mols
 
-def get_critical_points(trajectory, energies=None, initial=None):
-    if energies is None:
-        energies = [g.calculate_energy() for g in trajectory]
-
-    product_idx = np.argmin(energies)
-    ts_idx = np.argmax(energies)
-    if product_idx > ts_idx:
-        react_idx = np.argmin(energies[:ts_idx])
-    else:
-        react_idx = np.argmin(energies[ts_idx:])
-    return energies, (ts_idx, react_idx, product_idx)
-
-def centroid_distance(traj, bonds):
-    traj = np.asanyarray(traj)
-    a1, a2 = np.array(bonds).T
-    return nput.pts_norms(
-        np.average(traj[:, a1], axis=-2),
-        np.average(traj[:, a2], axis=-2)
-    )
-
-def bond_average_distance(traj, bonds):
-    traj = np.asanyarray(traj)
-    a1, a2 = np.array(bonds).T
-    return np.average(nput.pts_norms(traj[:, a1], traj[:, a2]), axis=-1)
-
-default_cc_single_distance = 1.54#BondData["C", "C"]
-def cc_single_normalized_distance(traj, bonds):
-    return default_cc_single_distance - bond_average_distance(traj, bonds)
-
-def bond_centroid_deviation_distance(traj, bonds):
-    return centroid_distance(traj, bonds) - bond_average_distance(traj, bonds)
-
-def bond_1(traj, bonds):
-    traj = np.asanyarray(traj)
-    return nput.pts_norms(traj[:, bonds[0][0]], traj[:, bonds[0][1]])
-
-def bond_2(traj, bonds):
-    traj = np.asanyarray(traj)
-    return nput.pts_norms(traj[:, bonds[1][0]], traj[:, bonds[1][1]])
-
-def dienophile_distance(traj, bonds):
-    traj = np.asanyarray(traj)
-    _, (i, j) = np.array(bonds).T
-    return nput.pts_norms(traj[:, i], traj[:, j])
-
-def incremental_rmsds(traj, bonds=None, sel=None):
-    traj = np.asanyarray(traj)
-    if sel is None and bonds is not None:
-        sel = np.asanyarray(bonds).flatten()
-    if sel is not None:
-        traj = traj[..., sel, :]
-    disps = np.diff(traj, axis=0).reshape((len(traj)-1, -1))
-    rmsds = np.linalg.norm(disps, axis=-1)
-    return np.cumsum(np.concatenate([[0], rmsds]), axis=0)
-
-metric_label_map = {
-    centroid_distance:'Centroid Distance',
-    bond_average_distance:r'$r_\text{avg.}$',
-    cc_single_normalized_distance:r'$\Delta r_\text{avg.}$',
-    bond_1:r'$r_{1,3}$',
-    bond_2:r'$r_{2,4}$',
-    dienophile_distance:r'$r_{\text{C=C}}$'
-}
-default_distance_metric = cc_single_normalized_distance
-def plot_reaction_profile(
-        coordinates,
-        energies,
-        distance_metric=None,
-        metric_label=None,
-        bonds=((0, 2), (1, 3)),
-        **opts):
-    energies, (ts, r, p) = get_critical_points(None, energies)
-    energies = np.asanyarray(energies)
-    if distance_metric is None:
-        distance_metric = cc_single_normalized_distance
-    if metric_label is None:
-        metric_label = metric_label_map.get(distance_metric)
-        if metric_label is None:
-            metric_label = distance_metric.__name__
-    x1 = distance_metric(coordinates, bonds) * UnitsData.convert("BohrRadius", "Angstroms")
-    return plt.Plot(
-        x1,
-        (energies - energies[r]) * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
-        **(dict(
-            axes_labels=[
-                metric_label + r" ($\AA$)",
-                "E (kcal mol$^{-1}$)"
-            ]
-        ) | opts)
-    )
-
-def plot_metric_profile(
-        coordinates,
-        distance_metric_1,
-        distance_metric_2,
-        metric_label_1=None,
-        metric_label_2=None,
-        bonds=((0, 2), (1, 3)),
-        **opts):
-    if metric_label_1 is None:
-        metric_label_1 = metric_label_map.get(distance_metric_1)
-        if metric_label_1 is None:
-            metric_label_1 = metric_label_1.__name__
-    if metric_label_2 is None:
-        metric_label_2 = metric_label_map.get(distance_metric_2)
-        if metric_label_2 is None:
-            metric_label_2 = metric_label_2.__name__
-    x1 = distance_metric_1(coordinates, bonds) * UnitsData.convert("BohrRadius", "Angstroms")
-    x2 = distance_metric_2(coordinates, bonds) * UnitsData.convert("BohrRadius", "Angstroms")
-    return plt.Plot(
-        x1,
-        x2,
-        **(dict(
-            axes_labels=[
-                metric_label_1 + r" ($\AA$)",
-                metric_label_2 + r" ($\AA$)",
-            ]
-        ) | opts)
-    )
-
-
-class DielsAlderReactionTrajectory:
-    #TODO: split this into a ReactionTrajectory base class
-    #      and subclass in specifically the `diene_atoms` etc.
-    def __init__(self, atoms, structures,
-                 energies=None,
-                 ts_index=None,
-                 reactant_index=None,
-                 product_index=None,
-                 energy_evaluator=None,
-                 distance_units=None,
-                 diene_atoms=(2, 3, 4, 5),
-                 dienophile_atoms=(0, 1)
+class ForceModifiedReactionAnalyzer:
+    def __init__(self,
+                 atoms,
+                 reactant_geom, transition_state_geom,
+                 force_modified_reactant_geom, force_modified_transition_state_geom,
+                 reactant_energy, transition_state_energy,
+                 force_modified_reactant_energy, force_modified_transition_state_energy,
                  ):
+        self.reactant_energy = reactant_energy
+        self.transition_state_energy = transition_state_energy
+        self.force_modified_reactant_energy = force_modified_reactant_energy
+        self.force_modified_transition_state_energy = force_modified_transition_state_energy
+        self.reactant = Molecule(atoms, reactant_geom)
+        self.force_modified_reactant = Molecule(atoms, force_modified_reactant_geom)
+        self.transition_state = Molecule(atoms, transition_state_geom)
+        self.force_modified_transition_state = Molecule(atoms, force_modified_transition_state_geom)
+
+    def animate_reactant_distortion(self):
+        return self.reactant.plot([
+            self.reactant.coords,
+            self.force_modified_reactant.coords
+        ])
+
+    def animate_ts_distortion(self):
+        return self.transition_state.plot([
+            self.transition_state.coords,
+            self.force_modified_transition_state.coords
+        ])
+
+class BarrierHeightDataset:
+    def __init__(self,
+                 reactant_energies,
+                 force_modified_reactant_energies,
+                 transition_state_energies,
+                 force_modified_transition_state_energies,
+                 *,
+                 atoms=None,
+                 reactant_geometries=None,
+                 force_modified_reactant_geometries=None,
+                 transition_state_geometries=None,
+                 force_modified_transition_state_geometries=None,
+                 force_magnitudes=None,
+                 force_vectors=None,
+                 dataset=None,
+                 **meta_fields):
+        self.reactant_energies = np.asanyarray(reactant_energies)
+        self.fm_reactant_energies = np.asanyarray(force_modified_reactant_energies)
+        self.transition_state_energies = np.asanyarray(transition_state_energies)
+        self.fm_transition_state_energies = np.asanyarray(force_modified_transition_state_energies)
+        self.reactant_geometries = reactant_geometries
+        self.force_modified_reactant_geometries = force_modified_reactant_geometries
+        self.transition_state_geometries = transition_state_geometries
+        self.force_modified_transition_state_geometries = force_modified_transition_state_geometries
+        if force_magnitudes is not None:
+            force_magnitudes = np.asanyarray(force_magnitudes)
+        self.force_magnitudes = force_magnitudes
+        self.force_vectors = force_vectors
         self.atoms = atoms
-        self.structures = np.asanyarray(structures)
-        self._energies = energies
-        self._mols = [None] * len(self.structures)
-        self._ts_idx = ts_index
-        self._reactant_idx = reactant_index
-        self._product_idx = product_index
-        self.energy_evaluator = energy_evaluator
-        self.distance_units = distance_units
-        self.diene_atoms = diene_atoms
-        self.dienophile_atoms = dienophile_atoms
+        self.meta_fields = {
+            k: np.asanyarray(v) if nput.is_numeric_array_like(v) else v
+            for k, v in meta_fields.items()
+        }
 
-    def load_mol(self, i):
-        if self._mols[i] is None:
-            struct = self.structures[i]
-            if self.distance_units is not None:
-                struct = struct * UnitsData.convert(self.distance_units, "BohrRadius")
-            self._mols[i] = Molecule(
-                self.atoms,
-                struct,
-                energy_evaluator=self.energy_evaluator
-            )
-        return self._mols[i]
+        self.barriers = self.transition_state_energies - self.reactant_energies
+        self.delta_r = self.fm_reactant_energies - self.reactant_energies
+        self.delta_t = self.fm_transition_state_energies - self.transition_state_energies
+        self.fm_barriers = self.fm_transition_state_energies - self.fm_reactant_energies
+        self.deltas = self.fm_barriers - self.barriers
+        self.dataset = dataset
 
-    @property
-    def energies(self):
-        if self._energies is None:
-            self._energies = [g.calculate_energy() for g in self.mols]
-        return self._energies
-
-    @property
-    def mols(self):
-        for i in range(len(self.structures)):
-            self.load_mol(i)
-        return self._mols
-
-    @property
-    def ts_index(self):
-        if self._ts_idx is None:
-            _, (self._ts_idx, self._reactant_idx, self._product_idx) = get_critical_points(None, self.energies)
-        return self._ts_idx
-    @property
-    def reactant_index(self):
-        if self._reactant_idx is None:
-            _, (self._ts_idx, self._reactant_idx, self._product_idx) = get_critical_points(None, self.energies)
-        return self._reactant_idx
-    @property
-    def product_index(self):
-        if self._product_idx is None:
-            _, (self._ts_idx, self._reactant_idx, self._product_idx) = get_critical_points(None, self.energies)
-        return self._product_idx
-    @property
-    def transition_state(self):
-        return self.load_mol(self.ts_index)
-    @property
-    def reactant(self):
-        return self.load_mol(self.reactant_index)
-    @property
-    def product(self):
-        return self.load_mol(self.product_index)
-
-    @classmethod
-    def from_trajectory_data(cls,
-                             trajectory_data,
-                             structures=None,
-                             energies=None,
-                             energy_evaluator=None,
-                             which='final',
-                             **etc):
-        if isinstance(trajectory_data, str):
-            trajectory_data = utils.read_namedtuple(trajectory_data, gen_prods.ReoptimizedTrajectoryData)
-
-        if energies is None:
-            if hasattr(trajectory_data, 'final_energies'):
-                if which == 'final':
-                    energies = trajectory_data.final_energies
-                else:
-                    energies = trajectory_data.initial_energies
-            else:
-                energies = trajectory_data.energies
-
-        if structures is None:
-            if hasattr(trajectory_data, 'final_energies'):
-                if which == 'final':
-                    structures = trajectory_data.final_trajectory
-                else:
-                    structures = trajectory_data.initial_trajectory
-            else:
-                structures = trajectory_data.coordinates
-
-        if energy_evaluator is None:
-            energy_evaluator = trajectory_data.evaluator
-        return cls(
-            trajectory_data.atoms,
-            structures=structures,
-            energies=energies,
-            energy_evaluator=energy_evaluator,
+    def get_tree_data(self, index):
+        if self.dataset is None:
+            raise ValueError("No dataset specified")
+        id = self.meta_fields['data_ids'][index]
+        t = self.dataset
+        if nput.is_int(id) or isinstance(id, str): id = [id]
+        for tt in id:
+            t = t[tt]
+        return t
+    def load_trajectory(self, index, **etc):
+        return trajt.DielsAlderReactionTrajectory.from_trajectory_data(
+            self.get_tree_data(index),
             **etc
         )
-
-    @classmethod
-    def from_file(cls, file, **etc):
-        return cls.from_trajectory_data(
-            utils.read_namedtuple(file),
+    def load_fmra(self, index, **etc):
+        return ForceModifiedReactionAnalyzer(
+            self.atoms[index],
+            self.reactant_geometries[index], self.transition_state_geometries[index],
+            self.force_modified_reactant_geometries[index], self.force_modified_transition_state_geometries[index],
+            self.reactant_energies[index], self.transition_state_energies[index],
+            self.fm_reactant_energies[index], self.fm_transition_state_energies[index],
             **etc
         )
-
-    def save(self, output_dir, info_file='profile.json', **etc):
-        if os.path.splitext(output_dir)[-1].startswith('.'):
-            output_dir, info_file = os.path.split(output_dir)
-        data = gen_prods.write_trajectory(
-            output_dir,
-            self.mols,
-            **(
-                    dict(
-                        energies=self.energies,
-                        info_file=info_file) | etc
-            )
+    def load_opt_res(self, index, force_indices=None, **etc):
+        if force_indices is None:
+            force_indices = [self.fmrd_ids[index]]
+        res0 = pipeline.OptimizedForceResults.from_intermediate_data(
+            self.get_tree_data(index),
+            **etc
         )
-        return os.path.join(output_dir, info_file)
+        if len(force_indices) > 0:
+            res0.fmrds = [res0.fmrds[index] for index in force_indices]
+        return res0
 
-    def plot_profile(self,
-                     distance_metric=None,
-                     metric_label=None,
-                     bonds=((0, 2), (1, 3)),
-                     **opts
-                     ):
-        return plot_reaction_profile(
-            self.structures,
-            self.energies,
-            distance_metric=distance_metric,
-            metric_label=metric_label,
-            bonds=bonds,
+    def __getattr__(self, name):
+        return self.meta_fields[name]
+
+    def filter_by_mask(self, mask):
+        mi = np.where(mask)[0]
+        opts = {
+            k: [fms[i] for i in mi] if fms is not None else None
+            for k, fms in {
+                'atoms': self.atoms,
+                'force_magnitudes': self.force_magnitudes,
+                'force_vectors': self.force_vectors,
+                'reactant_geometries': self.reactant_geometries,
+                'transition_state_geometries': self.transition_state_geometries,
+                'force_modified_reactant_geometries': self.force_modified_reactant_geometries,
+                'force_modified_transition_state_geometries': self.force_modified_transition_state_geometries
+            }.items()
+        } | {
+                k:[v[i] for i in mi]
+                for k, v in self.meta_fields.items()
+            }
+
+        return type(self)(
+            self.reactant_energies[mask],
+            self.fm_reactant_energies[mask],
+            self.transition_state_energies[mask],
+            self.fm_transition_state_energies[mask],
+            dataset=self.dataset,
             **opts
         )
 
-    def compare_profiles(self, other,
-                         distance_metric=None,
-                         metric_label=None,
-                         bonds=((0, 2), (1, 3)),
-                         figure=None,
-                         comparison_styles=None,
-                         labels=None,
-                         **opts):
-        figure = self.plot_profile(
-            distance_metric=distance_metric,
-            metric_label=metric_label,
-            bonds=bonds,
-            figure=figure,
-            **(opts | dict(label=labels[0] if labels is not None else None))
+    def get_filter_data(self, energy_units="Kilocalories/Mole", force_units="Picojoules/Meters"):
+        energy_props = {
+            'reactant_energies': self.reactant_energies,
+            'force_modified_reactant_energies': self.fm_reactant_energies,
+            'transition_state_energies': self.transition_state_energies,
+            'force_modified_transition_state_energies': self.fm_transition_state_energies,
+            'barrier': self.barriers,
+            'force_modified_barrier': self.fm_barriers,
+            'delta': self.deltas,
+            'delta_reactant': self.delta_r,
+            'delta_transition_state': self.delta_t,
+        }
+        energy_props = {
+            k:e * UnitsData.convert("Hartrees", energy_units)
+            for k,e in energy_props.items()
+        }
+        force_props = {
+            'force_magnitudes': self.force_magnitudes
+        }
+        force_props = {
+            k: e * UnitsData.convert("Hartrees/BohrRadius", force_units)
+            for k, e in force_props.items()
+        }
+        return energy_props | force_props | {
+            'atoms':self.atoms,
+            'transition_state_geometries':self.transition_state_geometries,
+            'force_modified_transition_state_geometries':self.force_modified_transition_state_geometries,
+            'reactant_geometries':self.reactant_geometries,
+            'force_modified_reactant_geometries':self.force_modified_reactant_geometries,
+            'force_vectors': self.force_vectors
+        } | self.meta_fields
+    def get_filter_mask(self,
+                        filter_map,
+                        energy_units="Kilocalories/Mole",
+                        force_units="Picojoules/Meters"
+                        ):
+        filter_data = self.get_filter_data(
+            energy_units=energy_units,
+            force_units=force_units
         )
-        if comparison_styles is None:
-            comparison_styles = {'linestyle':'dashed'}
-        other.plot_profile(
-            distance_metric=distance_metric,
-            metric_label=metric_label,
-            bonds=bonds,
-            figure=figure,
-            **(opts | comparison_styles | dict(label=labels[1] if labels is not None else None))
-        )
-        return figure
-
-    def animate_trajectory(self,
-                           bonds=None,
-                           **opts):
-        anim = None
-        base_mol = self.load_mol(0)
-        if bonds is None:
-            try:
-                anim = base_mol.plot(
-                    self.structures,
-                    bonds='recompute',
-                    **opts
+        mask = np.arange(len(self.reactant_energies))
+        if callable(filter_map): filter_map = [filter_map]
+        for filter_function in filter_map:
+            new = filter_function(filter_data)
+            sub = np.where(new)[0]
+            filter_data = {
+                k: (
+                    v[sub,]
+                        if isinstance(v, np.ndarray) else
+                    [v[i] for i in sub]
+                        if v is not None else
+                    None
                 )
-            except ValueError:
-                anim = None
-        if anim is None:
-            anim = base_mol.plot(
-                self.structures,
-                bonds=bonds,
-                **opts
-            )
-        return anim
+                for k,v in filter_data.items()
+            }
+            mask = mask[new]
+        _ = np.full(len(self.reactant_energies), False)
+        _[mask] = True
+        return _, filter_data
 
-def compare_profiles(
-        trajectory_data,
-        **opts
-):
-    if isinstance(trajectory_data, str):
-        d1 = DielsAlderReactionTrajectory.from_file(
-            trajectory_data,
-            which='final',
-        )
-        d2 = DielsAlderReactionTrajectory.from_file(
-            trajectory_data,
-            which='initial'
-        )
-    else:
-        d1 = DielsAlderReactionTrajectory.from_trajectory_data(
-            trajectory_data,
-            which='final',
-        )
-        d2 = DielsAlderReactionTrajectory.from_trajectory_data(
-            trajectory_data,
-            which='initial'
-        )
-    return d1.compare_profiles(d2, **opts)
+    def filter_by_props(self,
+                        filter_map,
+                        energy_units="Kilocalories/Mole",
+                        force_units="Picojoules/Meters"
+                        ):
+        mask, _ = self.get_filter_mask(filter_map, energy_units=energy_units, force_units=force_units)
+        return self.filter_by_mask(mask)
 
-# def compare_profiles_from_file(
-#         trajectory_file,
-#         **opts
-# ):
-#     return DielsAlderReactionTrajectory.from_file(
-#         trajectory_file,
-#         which='final',
-#     ).compare_profiles(
-#         DielsAlderReactionTrajectory.from_file(
-#             trajectory_file,
-#             which='initial'
-#         ),
-#         **opts
-#     )
+    def plot(self, color=None, force_units="Picojoules/Meters", **etc):
+        if color is None and self.force_magnitudes is not None:
+            force_units = force_units.replace("newtons", "Newtons").replace("Newtons", "joules/Meters")
+            color = self.force_magnitudes * UnitsData.convert("Hartrees/BohrRadius", force_units)
 
-# def plot_comp_traj(traj_data,
-#                    comp_data=None,
-#                    use_rmsd=None,
-#                    distance_metric=None,
-#                    metric_label=None,
-#                    **opts):
-#     min_e = np.min(np.concatenate([traj_data.final_energies[:5], traj_data.initial_energies[:5]]))
-#     if distance_metric is None:
-#         distance_metric = dienophile_distance
-#     elif use_rmsd is None:
-#         use_rmsd = False
-#     if use_rmsd:
-#         if metric_label is None:
-#             metric_label = "RMSD"
-#         x1 = np.array(traj_data.final_rmsds) * UnitsData.convert("BohrRadius", "Angstroms")
-#     else:
-#         if metric_label is None:
-#             metric_label = metric_label_map.get(distance_metric)
-#             if metric_label is None:
-#                 metric_label = distance_metric.__name__
-#         x1 = distance_metric(traj_data.final_trajectory, [[0, 2], [1, 3]]) * UnitsData.convert("BohrRadius",
-#                                                                                                "Angstroms")
-#     f1 = plt.Plot(
-#         x1,
-#         (traj_data.final_energies - min_e) * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
-#         **(dict(
-#             axes_labels=[
-#                 metric_label + r" ($\AA$)",
-#                 "E (kcal mol$^{-1}$)"
-#             ]
-#         ) | opts)
-#     )
-#     if comp_data is None:
-#         if use_rmsd:
-#             x2 = np.array(traj_data.initial_rmsds) * UnitsData.convert("BohrRadius", "Angstroms")
-#         else:
-#             x2 = distance_metric(traj_data.initial_trajectory, [[0, 2], [1, 3]]) * UnitsData.convert("BohrRadius",
-#                                                                                                      "Angstroms")
-#         plt.Plot(
-#             x2,
-#             (traj_data.initial_energies - min_e) * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
-#             figure=f1,
-#             linestyle='dashed'
-#         )
-#     else:
-#         if use_rmsd:
-#             x2 = np.array(comp_data.final_rmsds) * UnitsData.convert("BohrRadius", "Angstroms")
-#         else:
-#             x2 = distance_metric(comp_data.final_trajectory, [[0, 2], [1, 3]]) * UnitsData.convert("BohrRadius",
-#                                                                                                    "Angstroms")
-#         plt.Plot(
-#             x2,
-#             (comp_data.final_energies - min_e) * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
-#             figure=f1,
-#             linestyle='dashed'
-#         )
-#     return f1
+        fig = plt.ScatterPlot(self.barriers * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
+                              self.deltas * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
+                              **(
+                                      dict(
+                                      color=color,
+                                      axes_labels=[r"$E_a^\text{solv}$ (kcal mol$^{-1}$)",
+                                                   r"$\Delta E_a^\text{mech}$ (kcal mol$^{-1}$)"]
+                                  ) | etc
+                              )
+                              )
+        fig = plt.Plot(fig.plot_range[0], [0, 0], figure=fig, linestyle='dashed')
+        return fig
+
+    @classmethod
+    def from_dataset_loader(cls, loader,
+                            field_map=None,
+                            **etc):
+
+        if field_map is None:
+            field_map = {
+                'vectors':{
+                    'force_modified_transition_state_energies':'force_modified_transition_state_energies',
+                    'force_modified_reactant_energies':'force_modified_reactant_energies',
+                    'force_magnitudes':'force_magnitudes',
+                    'force_vectors':'force_vectors',
+                    'force_modified_transition_state_geometries':'force_modified_transition_state_geometries',
+                    'force_modified_reactant_geometries':'force_modified_reactant_geometries',
+                },
+                'scalars':{
+                    'atoms':'atoms',
+                    'reactant_energies':'reactant_energy',
+                    'transition_state_energies':'transition_state_energy',
+                    'reactant_geometries':'reactant_geometry',
+                    'transition_state_geometries':'transition_state_geometry'
+                }
+            }
+
+        results = {}
+        for f in field_map['vectors']:
+            results[f] = []
+        for f in field_map['scalars']:
+            results[f] = []
+
+        data_ids = []
+        fmrd_ids = []
+        direction_ids = []
+        magnitude_ids = []
+        for id,data in loader:
+            check = field_map['vectors']['force_modified_transition_state_energies']
+            fmres = data.get(check)
+            if fmres is None: continue
+
+            nterms = len(fmres)
+            for k,f in field_map['vectors'].items():
+                results[k].extend(data[f])
+            for k,f in field_map['scalars'].items():
+                results[k].extend([data[f]] * nterms)
+
+            data_ids.extend([id] * nterms)
+            group_values, group_indices = nput.group_by(np.arange(nterms), data['force_magnitudes'])[0]
+            mag_ids = np.zeros(nterms, dtype=int)
+            for i,f in enumerate(group_indices): mag_ids[f] = i
+            magnitude_ids.extend(mag_ids)
+
+            # directions swap whenever groups cycle
+            d_ids = np.zeros(nterms, dtype=int)
+            _, splits = nput.group_by(np.arange(nterms), mag_ids)[0]
+            old = splits[0][1]
+            i = 0
+            for i,s in enumerate(splits[0][2:]):
+                d_ids[old:s] = i + 1
+                old = s
+            d_ids[old:] = i + 1
+            direction_ids.extend(d_ids)
+
+            fmrd_ids.extend(np.arange(nterms))
+
+        reactant_energies = results.pop('reactant_energies')
+        fm_reactant_energies = results.pop('force_modified_reactant_energies')
+        transition_state_energies = results.pop('transition_state_energies')
+        fm_transition_state_energies = results.pop('force_modified_transition_state_energies')
+        return cls(
+            reactant_energies,
+            fm_reactant_energies,
+            transition_state_energies,
+            fm_transition_state_energies,
+            data_ids=data_ids,
+            direction_ids=direction_ids,
+            fmrd_ids=fmrd_ids,
+            magnitude_ids=magnitude_ids,
+            **etc,
+            **results
+        )
+
+    @classmethod
+    def from_file_list(cls, files, **opts):
+        def loader():
+            for f in files:
+                yield f, dev.read_json(f)
+        return cls.from_dataset_loader(loader(), **opts)
+
+    @classmethod
+    def from_file_pattern(cls, top_dir, js_pattern='**/pipeline_data.json', recursive=True, **opts):
+        return cls.from_file_list(
+            glob.glob(os.path.join(top_dir, js_pattern), recursive=recursive),
+            **opts
+        )
+
+    @classmethod
+    def from_tree(cls, tree, depth=1, **opts):
+        def loader(tree, depth, prefix=None):
+            for k, v in tree.items():
+                if depth > 0:
+                    if prefix is None:
+                        yield from loader(v, depth-1, (k,))
+                    else:
+                        yield from loader(v, depth-1, prefix=prefix+(k,))
+                else:
+                    if prefix is None:
+                        yield (k,), v
+                    else:
+                        yield prefix+(k,), v
+        return cls.from_dataset_loader(
+            loader(tree, depth),
+            dataset=tree,
+            **opts
+        )
