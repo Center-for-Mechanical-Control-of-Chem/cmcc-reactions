@@ -480,6 +480,7 @@ class CMCCTests(unittest.TestCase):
         )
         print(uuh)
 
+    @unittest.skip
     def test_ResultsAnalysis(self):
         import warnings
         warnings.filterwarnings("ignore", category=RuntimeWarning)

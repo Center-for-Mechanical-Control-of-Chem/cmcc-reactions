@@ -662,7 +662,7 @@ utils.register_namedtuple(ForceModifiedReactionData)
 
 class ForceOptimizer:
     default_options = {
-        'num_dirs':50,
+        'num_dirs':15,
         'optimizer':'scipy',
         'method':'cg',
         'max_iterations':100
@@ -705,6 +705,7 @@ class ForceOptimizer:
         self._internal_mols = None
         self._internal_modes = None
         self._internal_dirs = None
+        self._pure_internal_displacement_matrix = None
 
     def get_forces_from_coeffs(self, coeffs):
         coeffs = np.asanyarray(coeffs)
@@ -1059,6 +1060,20 @@ class ForceOptimizer:
                     @ self.internal_mols[1].get_internals_by_cartesians(1, strip_embedding=True)[0]
             )
         return self._internal_dirs
+    @property
+    def pure_internal_displacement_matrix(self):
+        if self._pure_internal_displacement_matrix is None:
+            if self.ts.potential_derivatives is None:
+                self.ts.potential_derivatives = self.ts.calculate_energy(order=2)[1:]
+                grad = self.ts.potential_derivatives[0]
+            elif nput.is_zero(self.ts.potential_derivatives[0]):
+                grad = self.ts.calculate_energy(order=1)[1]
+            else:
+                grad = self.ts.potential_derivatives[0]
+            exp = self.internal_mols[1].get_cartesians_by_internals(1, strip_embedding=True)[0]
+            signs = np.sign(exp @ grad[:, np.newaxis])[:, 0]
+            self._pure_internal_displacement_matrix = np.diag(signs)
+        return self._pure_internal_displacement_matrix
 
     @property
     def rs_modes(self):
@@ -1074,10 +1089,11 @@ class ForceOptimizer:
             self.ts.potential_derivatives = self.ts.calculate_energy(order=2)[1:]
 
         (dirs, coeffs), modes = reaction_force_dirs(self.rs, self.ts,
-                                               prepped_modes=self.prepped_modes,
-                                               use_mode_space=self.use_mode_space, **self.opts)
+                                                    prepped_modes=self.prepped_modes,
+                                                    use_mode_space=self.use_mode_space, **self.opts)
         if self.reorder:
-            gammas, dirs, ord = reorder_force_dirs(self.rs, self.ts, dirs, use_mode_space=self.use_mode_space,
+            gammas, dirs, ord = reorder_force_dirs(self.rs, self.ts, dirs,
+                                                   use_mode_space=self.use_mode_space,
                                                    return_ordering=True)
             coeffs = coeffs[:, ord]
         else:
@@ -1146,14 +1162,17 @@ class ForceOptimizer:
     def mode_force_function(self, mode, magnitude=1,
                             use_internals=False,
                             mass_weight=True,
+                            displacements=None,
                             remove_transrot=True,
                             remove_orientation=True
                             ):
-        displacements = self.get_displacement_dirs(mass_weight=mass_weight, use_internals=use_internals)
+        displacements = self.get_displacement_dirs(mass_weight=mass_weight, use_internals=use_internals,
+                                                   displacements=displacements)
         d = displacements[mode] * magnitude
 
         def force_modification(coords, base_grad):
             if use_internals:
+                coords = np.asanyarray(coords).reshape((-1, 3))
                 force_mol = self.internal_mols[0].modify(coords=coords)
                 dx = force_mol.get_cartesians_by_internals(1, strip_embedding=True)[0]
                 rot = np.dot(d, dx).reshape(base_grad.shape)
@@ -1225,6 +1244,7 @@ class ForceOptimizer:
                               remove_orientation=None,
                               output_dir=None,
                               info_file='force_modified_{mode}_{mag}.json',
+                              displacements=None,
                               **opts):
         smol_mode = nput.is_int(mode)
         smol_force = nput.is_numeric(magnitude)
@@ -1257,6 +1277,7 @@ class ForceOptimizer:
                         remove_transrot = not apply_constraints
                     gradient_modification_function, force_vector = self.mode_force_function(mode,
                                                                                             magnitude=magnitude,
+                                                                                            displacements=displacements,
                                                                                             use_internals=use_internals,
                                                                                             mass_weight=mass_weight,
                                                                                             remove_transrot=remove_transrot,
@@ -1297,8 +1318,8 @@ class ForceOptimizer:
                             [[-initial_ts_step, initial_ts_step, num_ts_steps]],
                             which=[0],
                             coordinate_expansion=[self.ts.get_normal_modes().coords_by_modes],
-                            internals='reembed' if use_internals else False,
-                            strip_embedding=True if use_internals else False
+                            # internals='reembed' if use_internals else False,
+                            # strip_embedding=True if use_internals else False
                         )
 
                         if ts_opt_settings is None:
@@ -1410,6 +1431,28 @@ class ForceOptimizer:
         else:
             return res
 
+    def reoptimize_internals_with_force(self,
+                                        which,
+                                        magnitude=50,
+                                        units='PicoJoules/Meters',
+                                        displacements=None,
+                                        use_internals=True,
+                                        **opts
+                                        ):
+        if displacements is None:
+            displacements = self.pure_internal_displacement_matrix
+        if not nput.is_int(which):
+            which = coordops.zmatrix_indices(self.internals, which)
+        return self.reoptimize_with_force(
+            which,
+            magnitude=magnitude,
+            units=units,
+            displacements=displacements,
+            use_internals=use_internals,
+            **opts
+        )
+    # def reoptimize
+
     def direction_overlap(self, other, mol='ts'):
         fds = self.force_dirs
         if isinstance(fds, np.ndarray):
@@ -1475,19 +1518,26 @@ class ForceOptimizer:
         else:
             return [-.5, .5]
     def get_displacement_dirs(self,
+                              displacements=None,
                               mass_weight=True,
                               use_internals=False):
+        no_disp = displacements is None
         if use_internals:
-            displacements = self.internal_dirs
-            if not mass_weight:
+            if no_disp:
+                displacements = self.internal_dirs
+                ref_dirs = self.force_dirs
+            else:
+                ref_dirs = displacements @ self.internal_mols[1].get_cartesians_by_internals(1, strip_embedding=True)[0]
+            if not no_disp or not mass_weight:
                 _, norms = mass_weighted_normalize_displacements(self.ts,
                                                                  mass_weight=mass_weight,
-                                                                 expansion=self.force_dirs,
+                                                                 expansion=ref_dirs,
                                                                  return_norms=True)
                 displacements = displacements / norms[:, np.newaxis]
         else:
-            displacements = self.force_dirs
-            if not mass_weight:
+            if displacements is None:
+                displacements = self.force_dirs
+            if not no_disp or not mass_weight:
                 displacements = mass_weighted_normalize_displacements(self.rs,
                                                                       mass_weight=mass_weight,
                                                                       expansion=displacements)
@@ -1504,8 +1554,8 @@ class ForceOptimizer:
         if disp_max is None:
             disp_max = defaults[1]
 
-        if displacements is None:
-            displacements = self.get_displacement_dirs(mass_weight=mass_weight, use_internals=use_internals)
+        displacements = self.get_displacement_dirs(mass_weight=mass_weight, use_internals=use_internals,
+                                                   displacements=displacements)
 
         if use_internals:
             r, t = self.internal_mols
@@ -1551,9 +1601,15 @@ class ForceOptimizer:
                                 order=None,
                                 shift=True,
                                 use_internals=False,
+                                displacements=None,
                                 mass_weight=True):
         x, sr, st = self.get_displaced_geometries(mode, disp_min=disp_min, disp_max=disp_max, steps=steps,
-                                                  mass_weight=mass_weight, use_internals=use_internals)
+                                                  mass_weight=mass_weight, use_internals=use_internals,
+                                                  displacements=displacements)
+        if displacements is not None:
+            displacements = self.get_displacement_dirs(mass_weight=mass_weight, use_internals=use_internals,
+                                                       displacements=displacements)
+
         eng_r = self.rs.calculate_energy(coords=sr, order=order)
         eng_ts = self.ts.calculate_energy(coords=st, order=order)
         if order is None:
@@ -1577,10 +1633,18 @@ class ForceOptimizer:
                 ft = ft[:, rem, :]
                 fr = fr[:, rem, :]
                 # print(ft.shape, self.internal_dirs.shape, fr.shape, rem.shape)
-                disps_t = self.internal_dirs[np.newaxis] @ ft
-                disps_r = self.internal_dirs[np.newaxis] @ fr
+                if displacements is None:
+                    disps_t = self.internal_dirs[np.newaxis] @ ft
+                    disps_r = self.internal_dirs[np.newaxis] @ fr
+                else:
+                    disps_t = displacements[np.newaxis] @ ft
+                    disps_r = displacements[np.newaxis] @ fr
             else:
-                disps_r = disps_t = self.force_dirs
+                if displacements is None:
+                    disps_r = disps_t = self.force_dirs
+                else:
+                    disps_r = disps_t = displacements
+
             eng_r = eng_r[:1] + nput.tensor_reexpand([disps_r], eng_r[1:], axes=[-1, -1])
             eng_ts = eng_ts[:1] + nput.tensor_reexpand([disps_t], eng_ts[1:], axes=[-1, -1])
 
@@ -1623,7 +1687,7 @@ class ForceOptimizer:
                 units = units.split("/")
             conv = UnitsData.convert("Hartrees", units[0]) / (
                 UnitsData.convert("BohrRadius", units[1])
-            ) * UnitsData.convert("Kilocalories/Mole", "Hartrees")
+            ) * UnitsData.convert("Kilocalories/Mole", "Hartrees") # cancels out `plot_eng_comp`
             e_r = e_r * conv
             e_t = e_t * conv
 
@@ -1634,21 +1698,22 @@ class ForceOptimizer:
                                  **opts
                                  )
     def plot_distortion_energies(self, mode, disp_min=None, disp_max=None, steps=50, mass_weight=True,
-                                 use_internals=False,
+                                 use_internals=False, displacements=None,
                                  **opts):
         x, eng_r, eng_ts = self.get_distortion_energies(mode, disp_min=disp_min, disp_max=disp_max, steps=steps,
-                                                        use_internals=use_internals,
+                                                        use_internals=use_internals, displacements=displacements,
                                                         mass_weight=mass_weight)
         return self.plot_eng_comp(x, eng_r, eng_ts, **opts)
 
     def plot_distortion_forces(self, mode, disp_min=None, disp_max=None, steps=50,
-                               units=None,
+                               units=None, displacements=None,
                                force_unit='kcal mol$^{-1}$/a$_0$-ish',
                                mass_weight=True,
                                use_internals=False,
                                **opts):
         x, exp_r, exp_t = self.get_distortion_energies(mode, disp_min=disp_min, disp_max=disp_max, steps=steps, order=1,
-                                                       mass_weight=mass_weight, use_internals=use_internals)
+                                                       mass_weight=mass_weight, use_internals=use_internals,
+                                                       displacements=displacements)
         return self.plot_force_comp(mode, x, exp_r, exp_t,
                                     units=units,
                                     force_unit=force_unit,
@@ -1770,6 +1835,7 @@ class ForceOptimizer:
                                     units=None,
                                     disp_min=None,
                                     disp_max=None,
+                                    displacements=None,
                                     steps=50,
                                     nearest=False,
                                     mass_weight=True,
@@ -1780,21 +1846,24 @@ class ForceOptimizer:
         if disp_min is None or nput.is_numeric(disp_min):
             x, exp_r, exp_t = self.get_distortion_energies(mode,
                                                            disp_min=disp_min, disp_max=disp_max, steps=steps, order=1,
-                                                           mass_weight=mass_weight, use_internals=use_internals)
+                                                           mass_weight=mass_weight, use_internals=use_internals,
+                                                           displacements=displacements)
         else:
             d1, D1 = disp_min
             d2, D2 = disp_max
 
             if d1 is not None:
                 x1, exp_r1, exp_t1 = self.get_distortion_energies(mode,
-                                                               disp_min=d1, disp_max=D1, steps=steps, order=1,
-                                                               mass_weight=mass_weight, use_internals=use_internals)
+                                                                  disp_min=d1, disp_max=D1, steps=steps, order=1,
+                                                                  mass_weight=mass_weight, use_internals=use_internals,
+                                                                  displacements=displacements)
             else:
                 x1 = None
             if d2 is not None:
                 x2, exp_r2, exp_t2 = self.get_distortion_energies(mode,
-                                                               disp_min=d2, disp_max=D2, steps=steps, order=1,
-                                                               mass_weight=mass_weight, use_internals=use_internals)
+                                                                  disp_min=d2, disp_max=D2, steps=steps, order=1,
+                                                                  mass_weight=mass_weight, use_internals=use_internals,
+                                                                  displacements=displacements)
             else:
                 x2 = None
 
@@ -1881,7 +1950,27 @@ class ForceOptimizer:
                 max_recursion=max_recursion-1,
                 max_disp_mag=max_disp_mag,
                 prev_expansion=[x, exp_r, exp_t],
-                use_internals=use_internals
+                use_internals=use_internals,
+                displacements=displacements
             )
 
         return ((ts_data[0] - r_data[0]), (r_data, ts_data)) + ((x, exp_r, exp_t),)
+
+    def predicted_internal_delta_from_forces(self,
+                                             which,
+                                             forces,
+                                             displacements=None,
+                                             use_internals=True,
+                                             **opts
+                                             ):
+        if displacements is None:
+            displacements = self.pure_internal_displacement_matrix
+        if not nput.is_int(which):
+            which = coordops.zmatrix_indices(self.internals, which)
+        return self.predicted_delta_from_forces(
+            which,
+            forces,
+            displacements=displacements,
+            use_internals=use_internals,
+            **opts
+        )
