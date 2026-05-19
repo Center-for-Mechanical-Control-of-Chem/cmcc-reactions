@@ -410,8 +410,9 @@ def run_force_optimization(trajectory,
                            remove_fragment_transrot=True,
                            remove_local_transrot=True,
                            allow_mode_mixing=True,
+                           which='final',
                            **opts):
-    trajectory = rda.DielsAlderReactionTrajectory.from_trajectory_data(trajectory)
+    trajectory = rda.DielsAlderReactionTrajectory.from_trajectory_data(trajectory, which=which)
     ref = trajectory.reactant
     if dev.str_is(internals, 'auto'):
         if breakpoints is not None:
