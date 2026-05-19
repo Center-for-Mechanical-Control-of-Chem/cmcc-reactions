@@ -408,11 +408,11 @@ def run_force_optimization(trajectory,
     return opt
 
 def run_fmrds(optimizer,
-              nmodes=10,
+              nmodes=15,
               magnitude=(-200, -100, -50, 50, 100, 200),
               pool=None,
               **opts):
-    nmodes = max(optimizer.force_coeffs.shape[0], nmodes)
+    nmodes = min(optimizer.force_coeffs.shape[0], nmodes)
     return optimizer.reoptimize_with_force(
         list(range(nmodes)),
         magnitude=magnitude,
