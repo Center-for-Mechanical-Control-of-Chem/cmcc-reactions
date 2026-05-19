@@ -211,6 +211,8 @@ class BarrierHeightDataset:
         self.fm_barriers = self.fm_transition_state_energies - self.fm_reactant_energies
         self.deltas = self.fm_barriers - self.barriers
         self.dataset = dataset
+        for k, v in meta_fields.items():
+            setattr(self, k, v)
 
     def get_tree_data(self, index):
         if self.dataset is None:
@@ -246,8 +248,8 @@ class BarrierHeightDataset:
             res0.fmrds = [res0.fmrds[index] for index in force_indices]
         return res0
 
-    def __getattr__(self, name):
-        return self.meta_fields[name]
+    # def __getattr__(self, name):
+    #     return self.meta_fields[name]
 
     def filter_by_mask(self, mask):
         mi = np.where(mask)[0]
