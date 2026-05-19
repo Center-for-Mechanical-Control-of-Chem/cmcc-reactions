@@ -444,11 +444,14 @@ class BarrierHeightDataset:
         )
 
     @classmethod
-    def from_file_list(cls, files, **opts):
+    def from_file_list(cls, files, dataset=None, **opts):
+        if dataset is None:
+            dataset = {}
         def loader():
             for f in files:
-                yield f, dev.read_json(f)
-        return cls.from_dataset_loader(loader(), **opts)
+                dataset[f] = dev.read_json(f)
+                yield f, dataset[f]
+        return cls.from_dataset_loader(loader(), dataset=dataset, **opts)
 
     @classmethod
     def from_file_pattern(cls, top_dir, js_pattern='**/pipeline_data.json', recursive=True, **opts):
