@@ -308,9 +308,9 @@ def register_namedtuple(type):
 def write_namedtuple(file, obj, compress=False, mode='json', **opts):
     d = obj._asdict() | {"_type":type(obj).__name__}
     return write_tree(file, d, compress=compress, mode=mode, **opts)
-def dumps_namedtuple(file, obj, compress=False, mode='json', **opts):
+def dumps_namedtuple(obj, compress=False, mode='json', **opts):
     d = obj._asdict() | {"_type":type(obj).__name__}
-    return dumps_tree(file, d, compress=compress, mode=mode, **opts)
+    return dumps_tree(d, compress=compress, mode=mode, **opts)
 def make_namedtuple(obj, nt_type=None, key=None, in_place=False):
     if key is not None:
         if not isinstance(key, str):
