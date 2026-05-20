@@ -1102,7 +1102,7 @@ def refine_trajectory(product_data: InitialProductData|ReoptimizedTrajectoryData
                       thresh=None,
                       tol=None,
                       max_displacement=None,
-                      refine_endpoints=False,
+                      refine_endpoints=True,
                       refine_ts=True,
                       optimizer_settings=None,
                       which='final',
