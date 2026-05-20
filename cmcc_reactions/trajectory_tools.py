@@ -225,6 +225,9 @@ def refine_trajectory(product_data: ReoptimizedTrajectoryData|TrajectoryData,
                       refine_ts=True,
                       optimizer_settings=None,
                       which='final',
+                      max_iterations=None,
+                      max_refinement_iterations=None,
+                      logger=None,
                       **calc_options
                       ):
     if trajectory_data is None:
@@ -275,14 +278,24 @@ def refine_trajectory(product_data: ReoptimizedTrajectoryData|TrajectoryData,
     _, inds = get_critical_points(None, energy_evaluator, refine_endpoints)
     if refine_endpoints:
         # uh = traj[0]
-        traj[inds.react] = traj[inds.react].optimize()
+        traj[inds.react] = traj[inds.react].optimize(max_iterations=max_iterations, logger=logger)
         # print(traj[0].calculate_energy() - uh.calculate_energy())
         # uh2 = traj[-1]
-        traj[inds.prod] = traj[inds.prod].optimize()
+        traj[inds.prod] = traj[inds.prod].optimize(max_iterations=max_iterations, logger=logger)
         # print(traj[-1].calculate_energy() - uh2.calculate_energy())
 
 
     if refine_ts:
+        if ts_opt_generator is not None:
+            if ts_opt_settings is None:
+                ts_opt_settings = optimizer_settings | dict(optimizer=ts_opt_optimizer)
+            if 'max_iterations' not in ts_opt_settings:
+                ts_opt_settings['max_iterations'] = max_iterations
+            elif max_refinement_iterations is None:
+                max_refinement_iterations = max_iterations
+        elif max_refinement_iterations is None:
+            max_refinement_iterations = max_iterations
+
         rxn = Reaction([traj[inds.react]], [traj[inds.prod]])
         if method_options is None:
             method_options = {}
@@ -292,6 +305,8 @@ def refine_trajectory(product_data: ReoptimizedTrajectoryData|TrajectoryData,
                                          **method_options)
         new_images = prof.generate(base_images=traj,
                                    optimizer_settings=optimizer_settings,
+                                   logger=logger,
+                                   max_iterations=max_refinement_iterations,
                                    **calc_options)
         new_energies = [i.calculate_energy() for i in new_images]
 
@@ -302,9 +317,8 @@ def refine_trajectory(product_data: ReoptimizedTrajectoryData|TrajectoryData,
                                              energy_evaluator=energy_evaluator,
                                              climb=climb,
                                              **method_options)
-            if ts_opt_settings is None:
-                ts_opt_settings = optimizer_settings | dict(optimizer=ts_opt_optimizer)
             new_images = prof.generate(base_images=new_images,
+                                       logger=logger,
                                        **ts_opt_settings)
     else:
         new_images = traj

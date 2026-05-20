@@ -19,6 +19,7 @@ import tempfile as tf
 import cmcc_reactions.reaction_data_schema as schema
 # import cmcc_reactions.data_analysis_tools as thc_tools
 import cmcc_reactions.generate_reaction_products as gen_prods
+import cmcc_reactions.trajectory_tools as trajt
 import cmcc_reactions.reaction_data_analysis as rda
 import cmcc_reactions.coordinate_choice as cocho
 import cmcc_reactions.optimal_directions as fopt
@@ -505,6 +506,23 @@ class CMCCTests(unittest.TestCase):
         print(uuh.force_coeffs.shape,
               uuh2.force_coeffs.shape)
 
+    def test_Refinements(self):
+        import warnings
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+        traj = utils.read_namedtuple(test_data('reopt_test.json'))
+        yeesh = gen_prods.refine_trajectory(
+            traj,
+            refine_endpoints=False,
+            profile_generator='neb',
+            ts_opt_generator='pys-ts',
+            spring_constant=.01,
+            max_iterations=50,
+            max_refinement_iterations=3,
+            logger=True
+        )
+        trajt.compare_profiles(yeesh, marker='o').show()
 
 if __name__ == '__main__':
     os.chdir(root)
