@@ -1299,8 +1299,12 @@ class ForceOptimizer:
                             ]) | ts_opt_settings
 
                         def pre_displace(coords):
-                            displacements = self.get_displacement_dirs(mass_weight=mass_weight, use_internals=use_internals)
-                            d = displacements[mode] * initial_reactants_step
+                            dd = self.get_displacement_dirs(
+                                mass_weight=mass_weight,
+                                use_internals=use_internals,
+                                displacements=displacements
+                            )
+                            d = dd[mode] * initial_reactants_step
                             if use_internals:
                                 force_mol = self.internal_mols[1].modify(coords=coords)
                                 dx = force_mol.get_cartesians_by_internals(1, strip_embedding=True)[0]
@@ -1361,8 +1365,12 @@ class ForceOptimizer:
                         ]
 
                     def pre_displace(coords):
-                        displacements = self.get_displacement_dirs(mass_weight=mass_weight, use_internals=use_internals)
-                        d = displacements[mode] * initial_reactants_step
+                        dd = self.get_displacement_dirs(
+                            mass_weight=mass_weight,
+                            use_internals=use_internals,
+                            displacements=displacements
+                        )
+                        d = dd[mode] * initial_reactants_step
                         if use_internals:
                             force_mol = self.internal_mols[0].modify(coords=coords)
                             dx = force_mol.get_cartesians_by_internals(1, strip_embedding=True)[0]
@@ -1431,18 +1439,38 @@ class ForceOptimizer:
         else:
             return res
 
+    @property
+    def _internals_selectors(self):
+        return {
+            'dihedrals':self._select_dihedrals
+        }
+    @classmethod
+    def _select_dihedrals(cls, internals):
+        return [i for i,c in enumerate(internals) if len(c) == 4]
     def reoptimize_internals_with_force(self,
                                         which,
                                         magnitude=50,
+                                        max_internals=None,
                                         units='PicoJoules/Meters',
                                         displacements=None,
                                         use_internals=True,
+                                        lookup_internals_index=None,
                                         **opts
                                         ):
         if displacements is None:
             displacements = self.pure_internal_displacement_matrix
-        if not nput.is_int(which):
+        if isinstance(which, str):
+            which = self._internals_selectors[which]
+        if callable(which):
+            which = which(coordops.extract_zmatrix_internals(self.internals, strip_embedding=True))
+            if lookup_internals_index is None:
+                lookup_internals_index = False
+        elif lookup_internals_index is None:
+            lookup_internals_index = True
+        if not nput.is_int(which) and lookup_internals_index:
             which = coordops.zmatrix_indices(self.internals, which)
+        if max_internals is not None and not nput.is_int(which):
+            which = which[:max_internals]
         return self.reoptimize_with_force(
             which,
             magnitude=magnitude,

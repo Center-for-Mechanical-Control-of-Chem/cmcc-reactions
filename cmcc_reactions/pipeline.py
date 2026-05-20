@@ -585,8 +585,20 @@ def run_fmrds(optimizer,
         **opts
     )
 
+def run_internal_fmrds(optimizer,
+                       internal_selector='dihedral',
+                       magnitude=(-200, -100, -50, 50, 100, 200),
+                       pool=None,
+                       **opts):
+    return optimizer.reoptimize_internals_with_force(
+        internal_selector,
+        magnitude=magnitude,
+        pool=pool,
+        **opts
+    )
+
 def run_optimization_pipeline(
-        input_data:str|gen_prods.InitialProductData|OptimizedForceResults|OptimizedForcePipelineData,
+        input_data: str | gen_prods.InitialProductData | OptimizedForceResults | OptimizedForcePipelineData,
         output_file=None,
         steps=None,
         verbose=False,
@@ -594,6 +606,7 @@ def run_optimization_pipeline(
         refined_trajectory_optimization_settings=None,
         optimized_force_settings=None,
         force_modification_settings=None,
+        internal_force_modification_settings=None,
         max_iterations=500,
         tol=1e-8,
         energy_evaluator=None,
@@ -699,6 +712,29 @@ def run_optimization_pipeline(
             force_modification_settings = global_options | force_modification_settings
             fmrds = run_fmrds(optimizer, **force_modification_settings)
             input_data.fmrds = [f[2] for f in fmrds]
+
+            if output_file is not None:
+                input_data.save(output_file)
+
+        if 'internals' in steps:
+            if optimizer is None:
+                opt_force = input_data.optimized_forces
+                if opt_force is None:
+                    raise ValueError("optimized forces needed to get force modified reaction data")
+                optimizer = fopt.ForceOptimizer.from_data(opt_force)
+            if verbose:
+                print('running internal forces')
+
+            if internal_force_modification_settings is None:
+                internal_force_modification_settings = force_modification_settings
+            if internal_force_modification_settings is None:
+                internal_force_modification_settings = {}
+            internal_force_modification_settings = global_options | internal_force_modification_settings
+            fmrds = run_internal_fmrds(optimizer, **internal_force_modification_settings)
+            if input_data.fmrds is None:
+                input_data.fmrds = [f[2] for f in fmrds]
+            else:
+                input_data.fmrds = input_data.fmrds + [f[2] for f in fmrds]
 
             if output_file is not None:
                 input_data.save(output_file)

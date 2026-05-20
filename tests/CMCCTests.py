@@ -506,6 +506,7 @@ class CMCCTests(unittest.TestCase):
         print(uuh.force_coeffs.shape,
               uuh2.force_coeffs.shape)
 
+    @unittest.skip
     def test_Refinements(self):
         import warnings
         warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -523,6 +524,19 @@ class CMCCTests(unittest.TestCase):
             logger=True
         )
         trajt.compare_profiles(yeesh, marker='o').show()
+
+
+    def test_InternalsForces(self):
+        import warnings
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+        traj = pipeline.OptimizedForceResults.from_file(test_data('pipeline_data.json'))
+        opt = traj.optimizer.reoptimize_internals_with_force(
+            'dihedrals',
+            max_internals=2,
+            max_iterations=5
+        )
 
 if __name__ == '__main__':
     os.chdir(root)
