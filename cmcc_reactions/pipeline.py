@@ -375,7 +375,7 @@ class OptimizedForceResults:
                 baseline = traj.energies[traj.reactant_index]
             else:
                 baseline = fmrd.reactant_energy
-        rda.plot_reaction_lines(
+        return rda.plot_reaction_lines(
             coords,
             engs,
             connect=True,
@@ -505,7 +505,7 @@ def run_initial_sampling(product, output_dir=None, **opts):
     )
 
 def run_refined_trajectory(traj, output_dir=None, **opts):
-    return gen_prods.refine_trajectory(
+    return rda.refine_trajectory(
         traj,
         output_dir=output_dir,
         **opts

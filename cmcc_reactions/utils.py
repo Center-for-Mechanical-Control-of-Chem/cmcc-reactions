@@ -7,6 +7,7 @@ import base64
 import numbers
 import glob
 import os
+import io
 
 import McUtils.Devutils as dev
 
@@ -16,8 +17,10 @@ __all__ = [
     "write_json",
     "read_json",
     "write_namedtuple",
+    "dumps_namedtuple",
     "make_namedtuple",
     "read_namedtuple",
+    "loads_namedtuple",
     "isnamedtupleinstance"
 ]
 
@@ -243,6 +246,11 @@ def write_tree(file, data, compress=True, mode='npz', **opts):
             visited_keys=visited_keys,
             **arrays
         )
+def dumps_tree(data, compress=True, mode='npz', **opts):
+    buf = io.StringIO() if mode == 'json' else io.BytesIO()
+    write_tree(buf, data, compress=compress, mode=mode, **opts)
+    buf.seek(0)
+    return buf.read()
 def normalize_tree(data):
     if isinstance(data, dict):
         was_pick, obj = BaseEncoder.check_unpickle_dict(data)
@@ -287,6 +295,11 @@ def read_tree(file, decompress=True, mode='npz', **opts):
             return decompress_tree(compressed)
         else:
             return compressed
+def loads_tree(data, decompress=True, mode='npz', **opts):
+    buf = io.StringIO() if isinstance(data, str) else io.BytesIO()
+    buf.write(data)
+    buf.seek(0)
+    return read_tree(buf, decompress=decompress, mode=mode, **opts)
 
 namedtuple_registry = {}
 def register_namedtuple(type):
@@ -295,6 +308,9 @@ def register_namedtuple(type):
 def write_namedtuple(file, obj, compress=False, mode='json', **opts):
     d = obj._asdict() | {"_type":type(obj).__name__}
     return write_tree(file, d, compress=compress, mode=mode, **opts)
+def dumps_namedtuple(file, obj, compress=False, mode='json', **opts):
+    d = obj._asdict() | {"_type":type(obj).__name__}
+    return dumps_tree(file, d, compress=compress, mode=mode, **opts)
 def make_namedtuple(obj, nt_type=None, key=None, in_place=False):
     if key is not None:
         if not isinstance(key, str):
@@ -312,6 +328,9 @@ def make_namedtuple(obj, nt_type=None, key=None, in_place=False):
     return nt_type(**obj)
 def read_namedtuple(file, nt_type=None, decompress=False, mode='json', key=None, **opts):
     obj = read_tree(file, decompress=decompress, mode=mode, **opts)
+    return make_namedtuple(obj, nt_type=nt_type, key=key, in_place=True)
+def loads_namedtuple(buf, nt_type=None, decompress=False, mode='json', key=None, **opts):
+    obj = loads_tree(buf, decompress=decompress, mode=mode, **opts)
     return make_namedtuple(obj, nt_type=nt_type, key=key, in_place=True)
 def isnamedtupleinstance(obj, nt_types):
     if not isinstance(nt_types, tuple):
