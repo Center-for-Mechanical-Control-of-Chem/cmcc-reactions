@@ -97,8 +97,8 @@ utils.register_namedtuple(OptimizedForcePipelineData,
                           defaults={
                               'initial_trajectory_gradients': None,
                               'initial_trajectory_hessians': None,
-                              'final_trajectory_gradients': None,
-                              'final_trajectory_hessians': None,
+                              'refined_trajectory_gradients': None,
+                              'refined_trajectory_hessians': None,
                           }
                           )
 
