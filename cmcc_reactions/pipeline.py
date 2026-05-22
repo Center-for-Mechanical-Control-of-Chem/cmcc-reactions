@@ -850,6 +850,7 @@ def generate_from_product_library(
                     energy_evaluator=energy_evaluator,
                     verbose=verbose,
                     sbatch_kwargs={}, # disable stuff
+                    post_processor=None,
                     **global_options
                 )
                 if verbose:
@@ -868,6 +869,7 @@ def generate_from_product_library(
                     verbose=verbose,
                     **global_options
                 )
+                print(f"Wrote to `{out_file}`")
         finally:
             os.chdir(curdir)
 
