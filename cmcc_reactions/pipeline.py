@@ -98,6 +98,8 @@ class OptimizedForceResults:
     optimized_forces: fopt.OptimizedForceData|None = None
     fmrds: list[fopt.ForceModifiedReactionData]|None = None
 
+    _optimizer = None
+
     field_mapping = {
         'product':
             {
@@ -327,13 +329,16 @@ class OptimizedForceResults:
         if self.optimized_forces is None:
             return None
         else:
-            return fopt.ForceOptimizer.from_data(self.optimized_forces)
+            if self._optimizer is None:
+                self._optimizer = fopt.ForceOptimizer.from_data(self.optimized_forces)
+            return self._optimizer
 
     def trajectory_analyzer(self, **opts):
         return rda.DielsAlderReactionTrajectory.from_trajectory_data(self.trajectory, **opts)
 
     def plot_fmrd_lines(self,
                         fmrd_index,
+                        fmrd=None,
                         bar_color='gray',
                         bar_spacing=.2,
                         distance_metric=None,
@@ -344,7 +349,8 @@ class OptimizedForceResults:
                         **etc
                         ):
         distance_metric = rda.resolve_distance_metric(distance_metric)
-        fmrd: fopt.ForceModifiedReactionData = self.fmrds[fmrd_index]
+        if fmrd is None:
+            fmrd: fopt.ForceModifiedReactionData = self.fmrds[fmrd_index]
         if traj is None:
             traj = self.trajectory_analyzer()
         product_energy = traj.energies[traj.product_index]
@@ -387,6 +393,7 @@ class OptimizedForceResults:
         )
     def plot_profile(self,
                      fmrd_index=None,
+                     fmrd=None,
                      distance_metric=None,
                      bonds=((0, 2), (1, 3)),
                      bar_color='gray',
@@ -400,7 +407,7 @@ class OptimizedForceResults:
             distance_metric=distance_metric,
             **opts
         )
-        if fmrd_index is not None:
+        if fmrd_index is not None or fmrd is not None:
             if dev.str_is(force_modified, 'both'):
                 if isinstance(bar_color, str):
                     bar_color = [
@@ -409,6 +416,7 @@ class OptimizedForceResults:
                     ]
                 self.plot_fmrd_lines(
                     fmrd_index,
+                    fmrd=fmrd,
                     distance_metric=distance_metric,
                     bonds=bonds,
                     bar_color=bar_color[0],
@@ -419,6 +427,7 @@ class OptimizedForceResults:
                 )
                 self.plot_fmrd_lines(
                     fmrd_index,
+                    fmrd=fmrd,
                     distance_metric=distance_metric,
                     bonds=bonds,
                     bar_color=bar_color[1],
@@ -430,6 +439,7 @@ class OptimizedForceResults:
             else:
                 self.plot_fmrd_lines(
                     fmrd_index,
+                    fmrd=fmrd,
                     distance_metric=distance_metric,
                     bonds=bonds,
                     bar_color=bar_color,
@@ -443,6 +453,7 @@ class OptimizedForceResults:
                          bar_color='gray',
                          bar_spacing=.2,
                          force_modified=True,
+                         fmrd=None,
                          **opts):
         traj = rda.DielsAlderReactionTrajectory.from_trajectory_data(self.trajectory)
         figure, x = traj.compare_profiles(
@@ -451,7 +462,7 @@ class OptimizedForceResults:
             distance_metric=distance_metric,
             **opts
         )
-        if fmrd_index is not None:
+        if fmrd_index is not None or fmrd is not None:
             if dev.str_is(force_modified, 'both'):
                 if isinstance(bar_color, str):
                     bar_color = [
@@ -467,6 +478,7 @@ class OptimizedForceResults:
                     figure=figure,
                     force_modified=False,
                     traj=traj,
+                    fmrd=fmrd
                 )
                 self.plot_fmrd_lines(
                     fmrd_index,
@@ -476,7 +488,8 @@ class OptimizedForceResults:
                     bar_spacing=bar_spacing,
                     figure=figure,
                     force_modified=True,
-                    traj=traj
+                    traj=traj,
+                    fmrd=fmrd
                 )
             else:
                 self.plot_fmrd_lines(
@@ -487,7 +500,8 @@ class OptimizedForceResults:
                     bar_spacing=bar_spacing,
                     figure=figure,
                     force_modified=force_modified,
-                    traj=traj
+                    traj=traj,
+                    fmrd=fmrd
                 )
         return figure
 

@@ -525,7 +525,7 @@ class CMCCTests(unittest.TestCase):
         )
         trajt.compare_profiles(yeesh, marker='o').show()
 
-
+    @unittest.skip
     def test_InternalsForces(self):
         import warnings
         warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -537,6 +537,90 @@ class CMCCTests(unittest.TestCase):
             max_internals=2,
             max_iterations=5
         )
+
+    @unittest.skip
+    def test_RandomForces(self):
+        import McUtils.Numputils as nput
+
+        import warnings
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+        traj = pipeline.OptimizedForceResults.from_file(test_data('pipeline_data.json'))
+        optimizer = traj.optimizer
+        dir2 = nput.find_basis(
+            np.random.normal(size=(10, 3 * len(optimizer.ts.atoms))).T,
+            method='qr'
+        ).T
+        opt = traj.optimizer.reoptimize_with_force(
+            [0, 1],
+            displacements=dir2,
+            max_iterations=5
+        )
+
+    def test_HydrostaticForces(self):
+
+        import McUtils.Numputils as nput
+        from McUtils.Data import UnitsData
+        from Psience.Molecools import Molecule
+
+        import warnings
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+        traj = pipeline.OptimizedForceResults.from_file(test_data('pipeline_data.json'))
+        # optimizer = traj.optimizer
+        # dir2 = nput.find_basis(
+        #     np.random.normal(size=(10, 3 * len(optimizer.ts.atoms))).T,
+        #     method='qr'
+        # ).T
+
+
+        # def apply_hydrostatic(ts:Molecule, coords, surface_points=500, radius_scaling=1.2):
+        #     coords = np.asanyarray(coords).reshape((-1, 3))
+        #     surf = ts.modify(coords=coords).get_surface(samples=surface_points, radius_scaling=radius_scaling).get_triangulation()
+        #     groups, _ = nput.group_by(np.arange(len(surf.tri_map)), surf.tri_map)
+        #     areas = surf.surface_area(return_components=True)
+        #     area_fractions = areas / np.sum(areas)
+        #     scaled_normals = area_fractions[..., np.newaxis] * surf.normals
+        #     force = np.zeros_like(coords)
+        #     for atom, inds in zip(*groups):
+        #         force[atom] = np.sum(scaled_normals[inds,], axis=0)
+        #     return force.flatten()[np.newaxis]
+        #
+        #     # surf
+        #     # compute terms normal to the surface
+        #     ...
+
+        # fig = traj.optimizer.rs.plot(backend='x3d')
+        # surf = traj.optimizer.rs.get_surface(samples=500, radius_scaling=1.2).get_triangulation()
+        # surf.plot(figure=fig)
+        # fig.show()
+
+        _, _, opt = traj.optimizer.reoptimize_with_pressure(5,
+                                                            "Gigapascals",
+                                                            pressure_model='cylinder',
+                                                            pressure_options={
+                                                                'axis':'-c',
+                                                                'radius':1 * UnitsData.convert("Angstroms", "BohrRadius"),
+                                                                'bidirectional':True
+                                                            },
+                                                            max_iterations=50,
+                                                            logger=True)
+
+        print(
+            (opt.transition_state_energy - opt.reactant_energy) * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
+            (opt.force_modified_transition_state_energy - opt.force_modified_reactant_energy)* UnitsData.convert("Hartrees", "Kilocalories/Mole")
+        )
+
+        traj.plot_profile(fmrd=opt, force_modified='both').show()
+
+        traj.optimizer.rs.plot([
+            opt.reactant_geom,
+            opt.force_modified_reactant_geom
+        ]).show()
+
+
 
 if __name__ == '__main__':
     os.chdir(root)

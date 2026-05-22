@@ -1166,11 +1166,19 @@ class ForceOptimizer:
                             remove_transrot=True,
                             remove_orientation=True
                             ):
-        displacements = self.get_displacement_dirs(mass_weight=mass_weight, use_internals=use_internals,
+        displacements = self.get_displacement_dirs(mass_weight=mass_weight,
+                                                   use_internals=use_internals,
                                                    displacements=displacements)
-        d = displacements[mode] * magnitude
+        if not callable(displacements):
+            def get_direction(ref, _):
+                return displacements[mode] * magnitude
+        else:
+            def get_direction(ref, coords):
+                d = displacements(ref, coords)
+                return d[mode] * magnitude
 
         def force_modification(coords, base_grad):
+            d = get_direction(self.ts, coords)
             if use_internals:
                 coords = np.asanyarray(coords).reshape((-1, 3))
                 force_mol = self.internal_mols[0].modify(coords=coords)
@@ -1219,7 +1227,7 @@ class ForceOptimizer:
             #     backend='x3d'
             # ).show()
             return rot
-        return force_modification, d
+        return force_modification, get_direction(self.ts, self.ts.coords)
 
     def reoptimize_with_force(self, mode,
                               magnitude=50,
@@ -1245,6 +1253,7 @@ class ForceOptimizer:
                               output_dir=None,
                               info_file='force_modified_{mode}_{mag}.json',
                               displacements=None,
+                              # displacement_generator=None,
                               **opts):
         smol_mode = nput.is_int(mode)
         smol_force = nput.is_numeric(magnitude)
@@ -1258,17 +1267,20 @@ class ForceOptimizer:
         else:
             mags = magnitude
 
+        if units is not None:
+            if isinstance(units, str):
+                units = units.replace("Newtons", "Joules/Meters")
+                units = units.split("/")
+            conv = UnitsData.convert(units[0], "Hartrees") / (
+                UnitsData.convert(units[1], "BohrRadius")
+            )
+        else:
+            conv = 1
 
         res = []
         for mode in modes:
             for magnitude in mags:
-                if units is not None:
-                    if isinstance(units, str):
-                        units = units.split("/")
-                    conv = UnitsData.convert(units[0], "Hartrees") / (
-                        UnitsData.convert(units[1], "BohrRadius")
-                    )
-                    magnitude = conv * magnitude
+                magnitude = conv * magnitude
 
                 if modify_forces:
                     if remove_orientation is None:
@@ -1370,7 +1382,10 @@ class ForceOptimizer:
                             use_internals=use_internals,
                             displacements=displacements
                         )
-                        d = dd[mode] * initial_reactants_step
+                        if not callable(dd):
+                            d = dd[mode] * initial_reactants_step
+                        else:
+                            d = dd(self.ts, coords)[mode] * initial_reactants_step
                         if use_internals:
                             force_mol = self.internal_mols[0].modify(coords=coords)
                             dx = force_mol.get_cartesians_by_internals(1, strip_embedding=True)[0]
@@ -1434,7 +1449,7 @@ class ForceOptimizer:
                     )
                 res.append([r, ts, fmrd])
 
-        if smol_mode and smol_mode:
+        if smol_mode and smol_force:
             return res[0]
         else:
             return res
@@ -1480,6 +1495,145 @@ class ForceOptimizer:
             **opts
         )
     # def reoptimize
+    def _hcff_pressure(self, ts: Molecule, coords, *, pressure, radius_scaling=1):
+        coords = np.asanyarray(coords).reshape((-1, 3))
+        surf = ts.modify(coords=coords).get_surface(radius_scaling=radius_scaling)
+        area = surf.surface_area()
+        fmax = area * pressure
+        centroid = np.average(coords, axis=0)
+        normals = coords - centroid[np.newaxis]
+        dists = np.linalg.norm(normals, axis=1)
+        normals = normals / dists[:, np.newaxis]
+        dist_fractions = dists / np.max(dists)
+        scaled_normals = dist_fractions[..., np.newaxis] * normals * fmax
+        return scaled_normals.reshape((1, -1))
+    def _xhcff_pressure(self, ts: Molecule, coords, *, pressure, surface_points=200, radius_scaling=1.2):
+        coords = np.asanyarray(coords).reshape((-1, 3))
+        surf = ts.modify(coords=coords).get_surface(samples=surface_points,
+                                                    radius_scaling=radius_scaling).get_triangulation()
+        groups, _ = nput.group_by(np.arange(len(surf.tri_map)), surf.tri_map)
+        areas = surf.surface_area(return_components=True)
+        area_fractions = areas #/ np.sum(areas)
+        normals = surf.normals
+        scaled_normals = area_fractions[..., np.newaxis] * normals * pressure
+        force = np.zeros_like(coords)
+        for atom, inds in zip(*groups):
+            force[atom] = np.sum(scaled_normals[inds,], axis=0)
+        return force.reshape((1, -1))
+    def _cylinder_pressure(self, ts: Molecule, coords, *, pressure,
+                           axis, radius=1, centroid=None,
+                           surface_points=200, radius_scaling=1.2, bidirectional=False):
+        coords = np.asanyarray(coords).reshape((-1, 3))
+        mol = ts.modify(coords=coords)
+        surf = mol.get_surface(samples=surface_points, radius_scaling=radius_scaling)
+        atom_areas = 4 * np.pi * surf.radii**2
+        if centroid is None:
+            centroid = mol.center_of_mass
+        centroid = np.asanyarray(centroid)
+        axis = nput.vec_normalize(axis) #TODO: do outside loop for a quick opt
+
+        atom_points = surf.atom_sampling_points
+        # ids = np.concatenate([[i] * len(p) for i,p in enumerate(atom_points)])
+        shifted_surf_ponts = np.concatenate(atom_points, axis=0) - centroid[np.newaxis, :]
+        axis_projection = shifted_surf_ponts @ axis[:, np.newaxis]
+        axis_distance = nput.vec_norms(shifted_surf_ponts - axis_projection * axis[np.newaxis, :])
+        if bidirectional:
+            mask = (axis_distance < radius)
+            max_dist = np.max(np.abs(axis_projection[mask]))
+        else:
+            mask = (axis_distance < radius) & (axis_projection.flatten() > 0)
+            max_dist = np.max(axis_projection[mask])
+        axis_projection = axis_projection / max_dist
+
+        split_regions = np.cumsum([len(p) for p in atom_points])
+        mask_inds = np.array_split(np.arange(split_regions[-1]), split_regions[:-1])
+        force = np.zeros_like(coords)
+        for atom, x_block in enumerate(mask_inds):
+            # fraction of the total surface
+            # scaled by atom contrib to total
+            nt = np.sum(mask[x_block,])
+            if nt == 0: continue
+            mask_block = mask[x_block,]
+            frac = nt / len(mask_inds)
+            axis_term = axis_projection[x_block,][mask_block]
+            contrib = axis * atom_areas[atom] * frac * pressure * np.average(axis_term)
+            force[atom] = contrib
+        return force.reshape((1, -1))
+    def pressure_model_generator(self, pressure_model, pressure, **opts):
+        if dev.str_is(pressure_model, 'hcff'):
+            pressure_model = self._hcff_pressure
+        elif dev.str_is(pressure_model, 'xhcff'):
+            pressure_model = self._xhcff_pressure
+        elif dev.str_is(pressure_model, 'cylinder'):
+            if opts.get('axis') is None:
+                opts['axis'] = 'c'
+            _, axes = nput.moments_of_inertia(self.ts.coords, self.ts.atomic_masses)
+            if dev.str_is(opts['axis'], 'c'):
+                opts['axis'] = axes[:, 2]
+            elif dev.str_is(opts['axis'], '-c'):
+                opts['axis'] = -axes[:, 2]
+            elif dev.str_is(opts['axis'], 'a'):
+                opts['axis'] = axes[:, 0]
+            elif dev.str_is(opts['axis'], '-a'):
+                opts['axis'] = -axes[:, 0]
+            elif dev.str_is(opts['axis'], 'b'):
+                opts['axis'] = axes[:, 1]
+            elif dev.str_is(opts['axis'], '-b'):
+                opts['axis'] = -axes[:, 1]
+            else:
+                raise NotImplementedError(f"can't handle axis '{opts['axis']}'")
+            pressure_model = self._cylinder_pressure
+        elif not callable(pressure_model):
+            raise NotImplementedError(f"pressure model `{pressure_model}` not implemented")
+
+        def apply_pressure(ref, coords):
+            return pressure_model(ref, coords, pressure=pressure, **opts)
+        return apply_pressure
+
+    def reoptimize_with_pressure(self,
+                                 magnitude=200,
+                                 pressure_units="Megapascals",
+                                 *,
+                                 which=0,
+                                 pressure_model='xhcff',
+                                 pressure_options=None,
+                                 apply_constraints=False,
+                                 remove_orientation=False,
+                                 displacements=None,
+                                 **etc
+                                 ):
+        if isinstance(pressure_units, str):
+            pressure_units = pressure_units.replace("pascals", "Pascals").replace("Pascals", "Newtons/MetersSquared")
+            pressure_units = pressure_units.rsplit("/", 1)
+        force_units, area_units = pressure_units
+        area_scaling = UnitsData.convert(area_units, "BohrRadiusSquared")
+        if isinstance(force_units, str):
+            force_units = force_units.replace("Newtons", "Joules/Meters")
+            force_units = force_units.split("/")
+        conv = UnitsData.convert(force_units[0], "Hartrees") / (
+            UnitsData.convert(force_units[1], "BohrRadius")
+        )
+        pressure_scaling = conv / area_scaling
+        force_units = "Hartrees/BohrRadius"
+        if displacements is None:
+            if pressure_options is None:
+                pressure_options = {}
+            displacements = self.pressure_model_generator(pressure_model,
+                                                          pressure=pressure_scaling,
+                                                          **pressure_options
+                                                          )
+        else:
+            magnitude = np.asanyarray(magnitude) * pressure_scaling
+        return self.reoptimize_with_force(
+            which,
+            magnitude=magnitude,
+            displacements=displacements,
+            units=force_units,
+            remove_orientation=remove_orientation,
+            apply_constraints=apply_constraints,
+            **etc
+        )
+
 
     def direction_overlap(self, other, mol='ts'):
         fds = self.force_dirs
@@ -1550,25 +1704,28 @@ class ForceOptimizer:
                               mass_weight=True,
                               use_internals=False):
         no_disp = displacements is None
-        if use_internals:
-            if no_disp:
-                displacements = self.internal_dirs
-                ref_dirs = self.force_dirs
+        if not callable(displacements):
+            if use_internals:
+                if no_disp:
+                    displacements = self.internal_dirs
+                    ref_dirs = self.force_dirs
+                else:
+                    ref_dirs = displacements @ self.internal_mols[1].get_cartesians_by_internals(1, strip_embedding=True)[0]
+                if not no_disp or not mass_weight:
+                    _, norms = mass_weighted_normalize_displacements(self.ts,
+                                                                     mass_weight=mass_weight,
+                                                                     expansion=ref_dirs,
+                                                                     return_norms=True)
+                    displacements = displacements / norms[:, np.newaxis]
             else:
-                ref_dirs = displacements @ self.internal_mols[1].get_cartesians_by_internals(1, strip_embedding=True)[0]
-            if not no_disp or not mass_weight:
-                _, norms = mass_weighted_normalize_displacements(self.ts,
-                                                                 mass_weight=mass_weight,
-                                                                 expansion=ref_dirs,
-                                                                 return_norms=True)
-                displacements = displacements / norms[:, np.newaxis]
+                if displacements is None:
+                    displacements = self.force_dirs
+                if not no_disp or not mass_weight:
+                    displacements = mass_weighted_normalize_displacements(self.rs,
+                                                                          mass_weight=mass_weight,
+                                                                          expansion=displacements)
         else:
-            if displacements is None:
-                displacements = self.force_dirs
-            if not no_disp or not mass_weight:
-                displacements = mass_weighted_normalize_displacements(self.rs,
-                                                                      mass_weight=mass_weight,
-                                                                      expansion=displacements)
+            ...
         return displacements
     def get_displaced_geometries(self, mode,
                                  disp_min=None, disp_max=None, steps=50,
