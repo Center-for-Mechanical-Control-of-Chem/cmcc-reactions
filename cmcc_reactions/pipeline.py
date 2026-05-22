@@ -426,7 +426,7 @@ class OptimizedForceResults:
                      bar_color='gray',
                      bar_spacing=.2,
                      which='initial',
-                     force_modified=True,
+                     force_modified='both',
                      **opts):
         traj = rda.DielsAlderReactionTrajectory.from_trajectory_data(self.trajectory, which=which)
         figure, x = traj.plot_profile(
@@ -434,6 +434,8 @@ class OptimizedForceResults:
             distance_metric=distance_metric,
             **opts
         )
+        if force_modified and fmrd_index is None and fmrd is None:
+            fmrd_index = 0
         if fmrd_index is not None or fmrd is not None:
             if dev.str_is(force_modified, 'both'):
                 if isinstance(bar_color, str):
@@ -476,10 +478,12 @@ class OptimizedForceResults:
                     traj=traj
                 )
         return figure
-    def compare_profiles(self, fmrd_index=None, distance_metric=None, bonds=((0, 2), (1, 3)),
+    def compare_profiles(self,
+                         fmrd_index=None,
+                         distance_metric=None, bonds=((0, 2), (1, 3)),
                          bar_color='gray',
                          bar_spacing=.2,
-                         force_modified=True,
+                         force_modified='both',
                          fmrd=None,
                          **opts):
         traj = rda.DielsAlderReactionTrajectory.from_trajectory_data(self.trajectory)
@@ -489,6 +493,8 @@ class OptimizedForceResults:
             distance_metric=distance_metric,
             **opts
         )
+        if force_modified and fmrd_index is None and fmrd is None:
+            fmrd_index = 0
         if fmrd_index is not None or fmrd is not None:
             if dev.str_is(force_modified, 'both'):
                 if isinstance(bar_color, str):

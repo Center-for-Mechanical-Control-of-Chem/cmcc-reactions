@@ -591,8 +591,12 @@ def plot_reaction_profile(
         reactant_idx=None,
         mark_critical_points=True,
         baseline=None,
+        hessians=None,
         **opts):
-    energies, (ts, r, p) = get_critical_points(None, energies, ts_idx=ts_idx, reactant_idx=reactant_idx)
+    energies, (ts, r, p) = get_critical_points(None, energies,
+                                               ts_idx=ts_idx,
+                                               hessians=hessians,
+                                               reactant_idx=reactant_idx)
     energies = np.asanyarray(energies)
     if distance_metric is None:
         distance_metric = cc_single_normalized_distance
@@ -764,21 +768,24 @@ class DielsAlderReactionTrajectory:
         if self._ts_idx is None:
             _, (self._ts_idx, self._reactant_idx, self._product_idx) = get_critical_points(self.mols,
                                                                                            energies=self.energies,
-                                                                                           hessians=self._hessians)
+                                                                                           hessians=self._hessians,
+                                                                                           ts_idx=self._ts_idx)
         return self._ts_idx
     @property
     def reactant_index(self):
         if self._reactant_idx is None:
             _, (self._ts_idx, self._reactant_idx, self._product_idx) = get_critical_points(self.mols,
                                                                                            energies=self.energies,
-                                                                                           hessians=self._hessians)
+                                                                                           hessians=self._hessians,
+                                                                                           ts_idx=self._ts_idx)
         return self._reactant_idx
     @property
     def product_index(self):
         if self._product_idx is None:
             _, (self._ts_idx, self._reactant_idx, self._product_idx) = get_critical_points(self.mols,
                                                                                            energies=self.energies,
-                                                                                           hessians=self._hessians)
+                                                                                           hessians=self._hessians,
+                                                                                           ts_idx=self._ts_idx)
         return self._product_idx
     @property
     def transition_state(self):
@@ -913,8 +920,7 @@ class DielsAlderReactionTrajectory:
                      metric_label=None,
                      bonds=((0, 2), (1, 3)),
                      return_metrics=False,
-                     **opts
-                     ):
+                     **opts):
         return plot_reaction_profile(
             self.structures,
             self.energies,
