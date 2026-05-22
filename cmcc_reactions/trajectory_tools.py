@@ -316,15 +316,15 @@ def get_critical_points(trajectory, energies=None, initial=None, gradients=None,
         react_idx = reactant_idx
     return energies, CriticalPointIndices(ts_idx, react_idx, product_idx)
 
-def refine_trajectory(product_data: ReoptimizedTrajectoryData|TrajectoryData,
-                      trajectory_data: ReoptimizedTrajectoryData|TrajectoryData = None,
+def refine_trajectory(product_data: ReoptimizedTrajectoryData | TrajectoryData,
+                      trajectory_data: ReoptimizedTrajectoryData | TrajectoryData = None,
                       energy_evaluator=None,
                       profile_generator='pys-dimer',
                       output_dir=None,
                       info_file='refined.json',
                       method_options=None,
                       climb=True,
-                      ts_opt_generator=None,#'pys-dimer',
+                      ts_opt_generator=None,  # 'pys-dimer',
                       ts_opt_settings=None,
                       ts_opt_optimizer=None,
                       # thresh='gau_tight',
@@ -337,6 +337,7 @@ def refine_trajectory(product_data: ReoptimizedTrajectoryData|TrajectoryData,
                       which='final',
                       max_iterations=None,
                       max_refinement_iterations=None,
+                      fix_ts=False,
                       logger=None,
                       **calc_options
                       ):
@@ -421,6 +422,8 @@ def refine_trajectory(product_data: ReoptimizedTrajectoryData|TrajectoryData,
                                          energy_evaluator=energy_evaluator,
                                          climb=climb,
                                          **method_options)
+        if fix_ts:
+            calc_options['fixed_images'] = [inds.ts]
         new_images = prof.generate(base_images=traj,
                                    optimizer_settings=optimizer_settings,
                                    logger=logger,
