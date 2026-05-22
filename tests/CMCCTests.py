@@ -636,6 +636,9 @@ class CMCCTests(unittest.TestCase):
         npdat = utils.dumps_namedtuple(res.to_data(), mode='npz')
         print(utils.loads_namedtuple(npdat, mode='npz', decompress=True))
 
+        res.compare_profiles().show()
+
+
 if __name__ == '__main__':
     os.chdir(root)
     unittest.main('tests.CMCCTests')

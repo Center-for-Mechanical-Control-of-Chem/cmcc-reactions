@@ -434,7 +434,7 @@ class OptimizedForceResults:
             distance_metric=distance_metric,
             **opts
         )
-        if force_modified and fmrd_index is None and fmrd is None:
+        if force_modified and fmrd_index is None and fmrd is None and self.fmrds is not None:
             fmrd_index = 0
         if fmrd_index is not None or fmrd is not None:
             if dev.str_is(force_modified, 'both'):
@@ -493,7 +493,7 @@ class OptimizedForceResults:
             distance_metric=distance_metric,
             **opts
         )
-        if force_modified and fmrd_index is None and fmrd is None:
+        if force_modified and fmrd_index is None and fmrd is None and self.fmrds is not None:
             fmrd_index = 0
         if fmrd_index is not None or fmrd is not None:
             if dev.str_is(force_modified, 'both'):
