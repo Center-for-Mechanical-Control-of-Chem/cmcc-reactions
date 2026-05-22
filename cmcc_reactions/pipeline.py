@@ -67,10 +67,12 @@ OptimizedForcePipelineData = collections.namedtuple(
         'initial_trajectory_energies',
         'initial_trajectory_gradients',
         'initial_trajectory_hessians',
+        'initial_trajectory_ts_index',
         'refined_trajectory',
         'refined_trajectory_energies',
         'refined_trajectory_gradients',
         'refined_trajectory_hessians',
+        'refined_trajectory_ts_index',
         'trajectory_optimization_settings',
         'reactant_geometry',
         'reactant_energy',
@@ -97,8 +99,10 @@ utils.register_namedtuple(OptimizedForcePipelineData,
                           defaults={
                               'initial_trajectory_gradients': None,
                               'initial_trajectory_hessians': None,
+                              'initial_trajectory_ts_index': None,
                               'refined_trajectory_gradients': None,
                               'refined_trajectory_hessians': None,
+                              'refined_trajectory_ts_index': None,
                           }
                           )
 
@@ -129,10 +133,12 @@ class OptimizedForceResults:
                 'initial_trajectory_energies':'initial_energies',
                 'initial_trajectory_gradients':'initial_gradients',
                 'initial_trajectory_hessians':'initial_hessians',
+                'initial_trajectory_ts_index':'initial_ts_index',
                 'refined_trajectory':'final_trajectory',
                 'refined_trajectory_energies':'final_energies',
                 'refined_trajectory_gradients':'final_gradients',
                 'refined_trajectory_hessians':'final_hessians',
+                'refined_trajectory_ts_index':'final_ts_index',
                 'trajectory_optimization_settings':'optimization_settings'
             },
         'optimized_forces':
@@ -240,11 +246,13 @@ class OptimizedForceResults:
                 final_energies=data.refined_trajectory_energies,
                 final_gradients=data.refined_trajectory_gradients,
                 final_hessians=data.refined_trajectory_hessians,
+                final_ts_index=data.refined_trajectory_ts_index,
                 final_rmsds=None,  # not stored in pipeline data
                 initial_trajectory=data.initial_trajectory,
                 initial_energies=data.initial_trajectory_energies,
                 initial_gradients=data.initial_trajectory_gradients,
                 initial_hessians=data.initial_trajectory_hessians,
+                initial_ts_index=data.initial_trajectory_ts_index,
                 initial_rmsds=None,  # not stored in pipeline data
                 raw_pre_sampling=None,  # not stored in pipeline data
                 raw_pre_energies=None,  # not stored in pipeline data
