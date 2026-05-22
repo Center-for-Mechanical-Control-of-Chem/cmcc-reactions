@@ -65,8 +65,12 @@ OptimizedForcePipelineData = collections.namedtuple(
         'product_optimization_settings',
         'initial_trajectory',
         'initial_trajectory_energies',
+        'initial_trajectory_gradients',
+        'initial_trajectory_hessians',
         'refined_trajectory',
         'refined_trajectory_energies',
+        'refined_trajectory_gradients',
+        'refined_trajectory_hessians',
         'trajectory_optimization_settings',
         'reactant_geometry',
         'reactant_energy',
@@ -89,7 +93,14 @@ OptimizedForcePipelineData = collections.namedtuple(
         'force_optimizer_settings'
     ]
 )
-utils.register_namedtuple(OptimizedForcePipelineData)
+utils.register_namedtuple(OptimizedForcePipelineData,
+                          defaults={
+                              'initial_trajectory_gradients': None,
+                              'initial_trajectory_hessians': None,
+                              'final_trajectory_gradients': None,
+                              'final_trajectory_hessians': None,
+                          }
+                          )
 
 @dataclass
 class OptimizedForceResults:
@@ -223,9 +234,13 @@ class OptimizedForceResults:
                 atoms=data.atoms,
                 final_trajectory=data.refined_trajectory,
                 final_energies=data.refined_trajectory_energies,
+                final_gradients=data.refined_trajectory_gradients,
+                final_hessians=data.refined_trajectory_hessians,
                 final_rmsds=None,  # not stored in pipeline data
                 initial_trajectory=data.initial_trajectory,
                 initial_energies=data.initial_trajectory_energies,
+                initial_gradients=data.initial_trajectory_gradients,
+                initial_hessians=data.initial_trajectory_hessians,
                 initial_rmsds=None,  # not stored in pipeline data
                 raw_pre_sampling=None,  # not stored in pipeline data
                 raw_pre_energies=None,  # not stored in pipeline data
@@ -871,6 +886,7 @@ def generate_from_product_library(
             output_dir = '.'
         for n,f in enumerate(glob.glob(f"{output_dir}/**/product.json", recursive=True)):
             product_data = utils.read_namedtuple(f)
+            print(f"Submitting updates for {f}")
             callback(product_data, f)
             if max_products is not None and n >= max_products:
                 break
