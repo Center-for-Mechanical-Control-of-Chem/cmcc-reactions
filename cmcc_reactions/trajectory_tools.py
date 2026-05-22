@@ -298,7 +298,7 @@ def get_critical_points(trajectory, energies=None, initial=None, gradients=None,
 
             choices = [
                 i for i,f in enumerate(freqs)
-                if np.sum((f < 0) & np.abs(f) > small_freq_cutoff & np.abs(f) < large_freq_cutoff) == 1
+                if np.sum((f < 0) & (np.abs(f) > small_freq_cutoff) & (np.abs(f) < large_freq_cutoff)) == 1
             ]
             if len(choices) == 0:
                 ts_idx = np.argmax(energies)
