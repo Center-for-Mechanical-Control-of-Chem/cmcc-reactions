@@ -933,7 +933,8 @@ def compress_pipeline_data(
         tree = utils.construct_namedtuple_file_tree(
             top_dir,
             patterns=patterns,
-            recursive=recursive
+            recursive=recursive,
+            unwrap=True
         )
     tree = {
         a:{b:v['pipeline_data'] for b,v in v1.items()} for a,v1 in tree.items()

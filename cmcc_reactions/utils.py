@@ -426,7 +426,7 @@ def construct_json_file_tree(top_dir, js_patterns="**/*.json", recursive=True):
         subtree[name] = dev.read_json(os.path.join(top_dir, f))
     return tree
 
-def construct_namedtuple_file_tree(top_dir, patterns="**/*.json", recursive=True):
+def construct_namedtuple_file_tree(top_dir, patterns="**/*.json", recursive=True, unwrap=False):
     tree = {}
     if isinstance(patterns, str):
         patterns = [patterns]
@@ -441,7 +441,10 @@ def construct_namedtuple_file_tree(top_dir, patterns="**/*.json", recursive=True
                 subtree[s] = {}
             subtree = subtree[s]
         name = os.path.splitext(segments[-1])[0]
-        subtree[name] = read_namedtuple(os.path.join(top_dir, f))
+        nt = read_namedtuple(os.path.join(top_dir, f))
+        if unwrap:
+            nt = nt._asdict()
+        subtree[name] = nt
     return tree
 
 def annotate_json_file_tree(top_dir, js_patterns, get_annotations=None, recursive=True, **opts):
