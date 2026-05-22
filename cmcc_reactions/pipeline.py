@@ -912,20 +912,56 @@ def generate_from_product_library(
                 break
 
 def compress_pipeline_data(
-        top_dir, js_patterns="**/pipeline_data.json", recursive=True,
+        top_dir,
+        patterns="**/pipeline_data.json",
+        loader=None,
+        recursive=True,
+        output_mode=None,
         output_file=None
 ):
-    tree = utils.construct_json_file_tree(
-        top_dir,
-        js_patterns=js_patterns,
-        recursive=recursive
-    )
+    if loader is None:
+        if isinstance(patterns, str):
+            patterns = [patterns]
+        loader = os.path.splitext(patterns[0])[1].strip(".")
+    if loader == 'json':
+        tree = utils.construct_json_file_tree(
+            top_dir,
+            js_patterns=patterns,
+            recursive=recursive
+        )
+    else:
+        tree = utils.construct_namedtuple_file_tree(
+            top_dir,
+            patterns=patterns,
+            recursive=recursive
+        )
     tree = {
         a:{b:v['pipeline_data'] for b,v in v1.items()} for a,v1 in tree.items()
     }
     if output_file is not None:
-        dev.write_json(output_file, tree)
+        if output_mode is None:
+            if isinstance(output_file, str):
+                if os.path.splitext(top_dir)[1] == '.json':
+                    output_mode = 'json'
+                else:
+                    output_mode = 'npz'
+            else:
+                output_mode = loader
+        if output_mode == 'json':
+            dev.write_json(output_file, tree)
+        else:
+            utils.write_tree(output_file, tree,
+                             mode=output_mode,
+                             precompression_function=(
+                                 utils.prep_compressed_namedtuple_data
+                                    if loader != 'json' else
+                                 None
+                             ))
+
     return tree
+
+def read_compressed_pipeline_data(pipeline_file):
+    return utils.read_tree(pipeline_file, decompression_function=utils.decompress_namedtuple_data)
 
 # def submit_if_not_found(glob_pattern, target_file,
 #                         overwrite=False,
