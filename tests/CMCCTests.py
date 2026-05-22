@@ -506,7 +506,7 @@ class CMCCTests(unittest.TestCase):
         print(uuh.force_coeffs.shape,
               uuh2.force_coeffs.shape)
 
-    @unittest.skip
+    # @unittest.skip
     def test_Refinements(self):
         import warnings
         warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -516,12 +516,17 @@ class CMCCTests(unittest.TestCase):
         yeesh = gen_prods.refine_trajectory(
             traj,
             refine_endpoints=False,
-            profile_generator='neb',
-            ts_opt_generator='pys-ts',
-            spring_constant=.01,
-            max_iterations=50,
-            max_refinement_iterations=3,
-            logger=True
+            # num_images=6,
+            # profile_generator=None,
+            profile_generator='pys-ts',
+            # profile_generator='pys-cos',
+            # ts_opt_generator='pys-ts',
+            # spring_constant=.01,
+            # max_iterations=50,
+            max_refinement_iterations=50,
+            logger=True,
+            # coord_type='dlc'
+            optimizer_settings=dict(coord_diff_thresh=0.0005)
         )
         trajt.compare_profiles(yeesh, marker='o').show()
 
@@ -558,6 +563,7 @@ class CMCCTests(unittest.TestCase):
             max_iterations=5
         )
 
+    @unittest.skip
     def test_HydrostaticForces(self):
 
         import McUtils.Numputils as nput

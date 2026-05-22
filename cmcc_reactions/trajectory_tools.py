@@ -4,11 +4,11 @@ import os.path
 
 import numpy as np
 
-from . import reaction_data_schema as schema
+# from . import reaction_data_schema as schema
 from . import utils
 
 from Psience.Reactions import Reaction
-from McUtils.Data import UnitsData, BondData
+from McUtils.Data import UnitsData
 import McUtils.Numputils as nput
 import McUtils.Plots as plt
 from Psience.Molecools import Molecule
@@ -24,20 +24,38 @@ TrajectoryData = collections.namedtuple(
         "atoms",
         "coordinates",
         "energies",
+        "gradients",
+        "hessians",
         "rmsds",
         "evaluator"
     ]
 )
-utils.register_namedtuple(TrajectoryData)
+utils.register_namedtuple(TrajectoryData,
+                          defaults={
+                              "gradients": None,
+                              "hessians": None,
+                          })
 
-def create_trajectory_data(structures, energies=None, energy_evaluator=None, rmsds=None):
+def create_trajectory_data(structures, energies=None, energy_evaluator=None, rmsds=None,
+                           gradients=None, hessians=None
+                           ):
     if energy_evaluator is None:
         energy_evaluator = structures[0].energy_evaluator
         if energies is None:
-            energies = [g.calculate_energy() for g in structures]
+            expansions = [g.modify(energy_evaluator=energy_evaluator).calculate_energy(order=2) for g in structures]
+            energies = [e[0] for e in expansions]
+            if gradients is None:
+                gradients = [e[1] for e in expansions]
+            if hessians is None:
+                hessians = [e[2] for e in expansions]
     else:
         if energies is None:
-            energies = [g.modify(energy_evaluator=energy_evaluator).calculate_energy() for g in structures]
+            expansions = [g.modify(energy_evaluator=energy_evaluator).calculate_energy(order=2) for g in structures]
+            energies = [e[0] for e in expansions]
+            if gradients is None:
+                gradients = [e[1] for e in expansions]
+            if hessians is None:
+                hessians = [e[2] for e in expansions]
 
     coords = [s.coords for s in structures]
     if rmsds is None:
@@ -47,8 +65,10 @@ def create_trajectory_data(structures, energies=None, energy_evaluator=None, rms
         atoms=structures[0].atoms,
         coordinates=coords,
         energies=energies,
+        gradients=gradients,
+        hessians=hessians,
         rmsds=rmsds,
-        evaluator=energy_evaluator
+        evaluator=energy_evaluator,
     )
 def write_trajectory(output_dir, structures, energies=None, energy_evaluator=None, rmsds=None,
                      info_file='profile.json'
@@ -67,9 +87,13 @@ ReoptimizedTrajectoryData = collections.namedtuple(
         "atoms",
         "final_trajectory",
         "final_energies",
+        "final_gradients",
+        "final_hessians",
         "final_rmsds",
         "initial_trajectory",
         "initial_energies",
+        "initial_gradients",
+        "initial_hessians",
         "initial_rmsds",
         "raw_pre_sampling",
         "raw_pre_energies",
@@ -78,13 +102,23 @@ ReoptimizedTrajectoryData = collections.namedtuple(
     ],
     defaults=[None]
 )
-utils.register_namedtuple(ReoptimizedTrajectoryData)
+utils.register_namedtuple(ReoptimizedTrajectoryData,
+                          defaults={
+                              "initial_gradients": None,
+                              "initial_hessians": None,
+                              "final_gradients": None,
+                              "final_hessians": None,
+                          })
 
 def create_refined_trajectory_data(initial_trajectory:TrajectoryData,
                                    final_trajectory:TrajectoryData,
                                    initial_energies=None,
+                                   initial_gradients=None,
+                                   initial_hessians=None,
                                    initial_rmsds=None,
                                    final_energies=None,
+                                   final_gradients=None,
+                                   final_hessians=None,
                                    final_rmsds=None,
                                    pre_sampling=None,
                                    pre_sampling_energies=None,
@@ -93,13 +127,17 @@ def create_refined_trajectory_data(initial_trajectory:TrajectoryData,
     if not hasattr(initial_trajectory, 'atoms'):
         initial_trajectory = create_trajectory_data(initial_trajectory,
                                                     energies=initial_energies,
+                                                    gradients=initial_gradients,
+                                                    hessians=initial_hessians,
                                                     rmsds=initial_rmsds,
                                                     energy_evaluator=energy_evaluator)
     if not hasattr(final_trajectory, 'atoms'):
         final_trajectory = create_trajectory_data(final_trajectory,
-                                                    energies=final_energies,
-                                                    rmsds=final_rmsds,
-                                                    energy_evaluator=energy_evaluator)
+                                                  energies=final_energies,
+                                                  gradients=final_gradients,
+                                                  hessians=final_hessians,
+                                                  rmsds=final_rmsds,
+                                                  energy_evaluator=energy_evaluator)
     if pre_sampling is not None and not hasattr(pre_sampling, 'atoms'):
         pre_sampling = create_trajectory_data(pre_sampling,
                                               energies=pre_sampling_energies)
@@ -107,9 +145,13 @@ def create_refined_trajectory_data(initial_trajectory:TrajectoryData,
         atoms=initial_trajectory.atoms,
         final_trajectory=final_trajectory.coordinates,
         final_energies=final_trajectory.energies,
+        final_gradients=final_trajectory.gradients,
+        final_hessians=final_trajectory.hessians,
         final_rmsds=final_trajectory.rmsds,
         initial_trajectory=initial_trajectory.coordinates,
         initial_energies=initial_trajectory.energies,
+        initial_gradients=initial_trajectory.gradients,
+        initial_hessians=initial_trajectory.hessians,
         initial_rmsds=initial_trajectory.rmsds,
         raw_pre_sampling=pre_sampling.coordinates if pre_sampling is not None else None,
         raw_pre_energies=pre_sampling.energies if pre_sampling is not None else None,
@@ -143,63 +185,126 @@ def write_refined_trajectory(output_dir,
         traj_data
     )
     return traj_data
-def reoptimize_trajectory(mol,
-                          init_traj,
-                          max_iterations=500,
-                          profile_generator='neb',
-                          energy_evaluator='aimnet2',
-                          **optimization_settings
-                          ):
-    base_structs = [
-        mol.modify(coords=t, energy_evaluator=energy_evaluator)
-        for t in init_traj
-    ]
-    init_engs, (ts, r, p) = get_critical_points(base_structs)
-    if p < r:
-        traj_structs = list(reversed(base_structs[p:r+1]))
-        traj_engs = list(reversed(init_engs[p:r+1]))
+def update_trajectory_data(traj_data:TrajectoryData|ReoptimizedTrajectoryData):
+    # make it easier to update pre-scanned data
+    if hasattr(traj_data, 'initial_energies'):
+        traj_data:ReoptimizedTrajectoryData
+        if traj_data.initial_gradients is None:
+            mols = [
+                Molecule(traj_data.atoms, c, energy_evaluator=traj_data.evaluator)
+                for c in traj_data.initial_trajectory
+            ]
+            expansions = [m.calculate_energy(order=2) for m in mols]
+            grads = [e[1] for e in expansions]
+            hessians = [e[2] for e in expansions]
+            traj_data = traj_data._replace(
+                initial_gradients=grads,
+                initial_hessians=hessians,
+            )
+        if traj_data.final_gradients is None:
+            mols = [
+                Molecule(traj_data.atoms, c, energy_evaluator=traj_data.evaluator)
+                for c in traj_data.final_trajectory
+            ]
+            expansions = [m.calculate_energy(order=2) for m in mols]
+            grads = [e[1] for e in expansions]
+            hessians = [e[2] for e in expansions]
+            traj_data = traj_data._replace(
+                final_gradients=grads,
+                final_hessians=hessians
+            )
     else:
-        traj_structs = base_structs[r:p+1]
-        traj_engs = init_engs[r:p+1]
-
-    eeee = Reaction([traj_structs[0]], [traj_structs[-1]],
-                    profile_generator=profile_generator,
-                    energy_evaluator=energy_evaluator
-                    )
-    prof = eeee.get_profile_generator(
-        energy_evaluator=energy_evaluator
-    )
-    new_geoms = prof.generate(
-        base_images=traj_structs,
-        max_iterations=max_iterations,
-        **optimization_settings
-    )
-
-    new_rmsds = prof.evaluate_profile_distances(new_geoms, normalize=False)
-    new_engs = prof.evaluate_profile_energies(new_geoms)
-    old_rmsds = prof.evaluate_profile_distances(traj_structs, normalize=False)
-
-    return ReoptimizedTrajectoryData(
-        atoms=base_structs[0].atoms,
-        final_trajectory=np.array([t.coords for t in new_geoms]),
-        final_energies=new_engs,
-        final_rmsds=new_rmsds,
-        initial_trajectory=np.array([t.coords for t in traj_structs]),
-        initial_energies=traj_engs,
-        initial_rmsds=old_rmsds,
-        raw_pre_sampling=init_traj,
-        raw_pre_energies=init_engs,
-        evaluator=energy_evaluator
-    )
+        traj_data:TrajectoryData
+        if traj_data.gradients is None:
+            mols = [
+                Molecule(traj_data.atoms, c, energy_evaluator=traj_data.evaluator)
+                for c in traj_data.coordinates
+            ]
+            expansions = [m.calculate_energy(order=2) for m in mols]
+            grads = [e[1] for e in expansions]
+            hessians = [e[2] for e in expansions]
+            traj_data = traj_data._replace(
+                gradients=grads,
+                hessians=hessians
+            )
+    return traj_data
+# def reoptimize_trajectory(mol,
+#                           init_traj,
+#                           max_iterations=500,
+#                           profile_generator='neb',
+#                           energy_evaluator='aimnet2',
+#                           **optimization_settings
+#                           ):
+#     base_structs = [
+#         mol.modify(coords=t, energy_evaluator=energy_evaluator)
+#         for t in init_traj
+#     ]
+#     init_engs, (ts, r, p) = get_critical_points(base_structs)
+#     if p < r:
+#         traj_structs = list(reversed(base_structs[p:r+1]))
+#         traj_engs = list(reversed(init_engs[p:r+1]))
+#     else:
+#         traj_structs = base_structs[r:p+1]
+#         traj_engs = init_engs[r:p+1]
+#
+#     eeee = Reaction([traj_structs[0]], [traj_structs[-1]],
+#                     profile_generator=profile_generator,
+#                     energy_evaluator=energy_evaluator
+#                     )
+#     prof = eeee.get_profile_generator(
+#         energy_evaluator=energy_evaluator
+#     )
+#     new_geoms = prof.generate(
+#         base_images=traj_structs,
+#         max_iterations=max_iterations,
+#         **optimization_settings
+#     )
+#
+#     new_rmsds = prof.evaluate_profile_distances(new_geoms, normalize=False)
+#     new_engs = prof.evaluate_profile_energies(new_geoms)
+#     old_rmsds = prof.evaluate_profile_distances(traj_structs, normalize=False)
+#
+#     return ReoptimizedTrajectoryData(
+#         atoms=base_structs[0].atoms,
+#         final_trajectory=np.array([t.coords for t in new_geoms]),
+#         final_energies=new_engs,
+#         final_rmsds=new_rmsds,
+#         initial_trajectory=np.array([t.coords for t in traj_structs]),
+#         initial_energies=traj_engs,
+#         initial_rmsds=old_rmsds,
+#         raw_pre_sampling=init_traj,
+#         raw_pre_energies=init_engs,
+#         evaluator=energy_evaluator
+#     )
 
 CriticalPointIndices = collections.namedtuple('CriticalPointIndices',
                                               ['ts', 'react', 'prod'])
-def get_critical_points(trajectory, energies=None, initial=None):
+def get_critical_points(trajectory, energies=None, initial=None, gradients=None,
+                        hessians=None,
+                        small_freq_cutoff=5e-4, # roughly 100 cm-1
+                        large_freq_cutoff=5e-3  # roughly 1000 cm-1
+                        ):
     if energies is None:
         energies = [g.calculate_energy() for g in trajectory]
 
     product_idx = np.argmin(energies)
-    ts_idx = np.argmax(energies)
+    if trajectory is not None and hessians is not None:
+        freqs = [
+            g.modify(potential_derivatives=[0, h]).get_normal_modes().freqs
+            for g,h in zip(trajectory, hessians)
+        ]
+
+        choices = [
+            i for i,f in enumerate(freqs)
+            if np.sum((f < 0) & np.abs(f) > small_freq_cutoff & np.abs(f) < large_freq_cutoff) == 1
+        ]
+        if len(choices) == 0:
+            ts_idx = np.argmax(energies)
+        else:
+            subidx = np.argmax([energies[c] for c in choices])
+            ts_idx = choices[subidx]
+    else:
+        ts_idx = np.argmax(energies)
     if product_idx > ts_idx:
         react_idx = np.argmin(energies[:ts_idx])
     else:
@@ -249,21 +354,29 @@ def refine_trajectory(product_data: ReoptimizedTrajectoryData|TrajectoryData,
             optimizer_settings[k] = v
 
     if hasattr(trajectory_data, 'final_trajectory'):
+        trajectory_data: ReoptimizedTrajectoryData
         if which == 'initial':
             trajectory = trajectory_data.initial_trajectory
             energies = trajectory_data.initial_energies
+            grads = trajectory_data.initial_gradients
+            hess = trajectory_data.initial_hessians
             rmsds = trajectory_data.initial_rmsds
             raw_pre_sampling = None
             raw_pre_energies = None
         else:
             trajectory = trajectory_data.final_trajectory
             energies = trajectory_data.final_energies
+            grads = trajectory_data.final_gradients
+            hess = trajectory_data.final_hessians
             rmsds = trajectory_data.final_rmsds
             raw_pre_sampling = trajectory_data.raw_pre_sampling
             raw_pre_energies = trajectory_data.raw_pre_energies
     else:
+        trajectory_data: TrajectoryData
         trajectory = trajectory_data.coordinates
         energies = trajectory_data.energies
+        grads = trajectory_data.gradients
+        hess = trajectory_data.hessians
         rmsds = trajectory_data.rmsds
         raw_pre_sampling = None
         raw_pre_energies = None
@@ -275,7 +388,7 @@ def refine_trajectory(product_data: ReoptimizedTrajectoryData|TrajectoryData,
         for c in trajectory
     ]
 
-    _, inds = get_critical_points(None, energy_evaluator, refine_endpoints)
+    _, inds = get_critical_points(traj, energies=energies, hessians=hess)
     if refine_endpoints:
         # uh = traj[0]
         traj[inds.react] = traj[inds.react].optimize(max_iterations=max_iterations, logger=logger)
@@ -308,30 +421,49 @@ def refine_trajectory(product_data: ReoptimizedTrajectoryData|TrajectoryData,
                                    logger=logger,
                                    max_iterations=max_refinement_iterations,
                                    **calc_options)
-        new_energies = [i.calculate_energy() for i in new_images]
+        expansions = [i.calculate_energy(order=2) for i in new_images]
+        new_energies = [e[0] for e in expansions]
+        new_grads = [e[1] for e in expansions]
+        new_hessians = [e[2] for e in expansions]
 
         if ts_opt_generator is not None:
-            _, subinds = get_critical_points(None, energy_evaluator, refine_endpoints)
+            _, subinds = get_critical_points(traj, energies=energies, hessians=new_hessians)
             rxn = Reaction([new_images[subinds.react]], [new_images[subinds.prod]])
             prof = rxn.get_profile_generator(ts_opt_generator,
                                              energy_evaluator=energy_evaluator,
                                              climb=climb,
                                              **method_options)
-            new_images = prof.generate(base_images=new_images,
+            new_images2 = prof.generate(base_images=new_images,
                                        logger=logger,
                                        **ts_opt_settings)
+
+            mod_pos = [
+                (i,m) for i,m in enumerate(new_images2)
+                if m not in new_images
+            ]
+            new_expansions = [(i,m.calculate_energy(order=2)) for i,m in mod_pos]
+            for i,e in new_expansions:
+                new_energies[i] = e[0]
+                new_grads[i] = e[1]
+                new_hessians[i] = e[2]
     else:
         new_images = traj
         new_energies = energies
+        new_grads = grads
+        new_hessians = hess
 
     new_coords = np.array([t.coords for t in new_images])
     new_traj = ReoptimizedTrajectoryData(
         atoms=product_data.atoms,
         final_trajectory=np.array([t.coords for t in new_images]),
         final_energies=new_energies,
+        final_gradients=new_grads,
+        final_hessians=new_hessians,
         final_rmsds=nput.incremental_eckart_rmsd(new_coords, masses=new_images[0].masses, mass_weighted=False),
         initial_trajectory=trajectory,
         initial_energies=energies,
+        initial_gradients=grads,
+        initial_hessians=hess,
         initial_rmsds=rmsds,
         raw_pre_sampling=raw_pre_sampling,
         raw_pre_energies=raw_pre_energies,
@@ -506,6 +638,8 @@ class DielsAlderReactionTrajectory:
     #      and subclass in specifically the `diene_atoms` etc.
     def __init__(self, atoms, structures,
                  energies=None,
+                 hessians=None,
+                 gradients=None,
                  ts_index=None,
                  reactant_index=None,
                  product_index=None,
@@ -517,6 +651,8 @@ class DielsAlderReactionTrajectory:
         self.atoms = atoms
         self.structures = np.asanyarray(structures)
         self._energies = energies
+        self._gradients = gradients
+        self._hessians = hessians
         self._mols = [None] * len(self.structures)
         self._ts_idx = ts_index
         self._reactant_idx = reactant_index
@@ -541,8 +677,21 @@ class DielsAlderReactionTrajectory:
     @property
     def energies(self):
         if self._energies is None:
-            self._energies = [g.calculate_energy() for g in self.mols]
+            self._energies, self._gradients, self._hessians = self._load_expansions()
         return self._energies
+    @property
+    def gradients(self):
+        if self._gradients is None:
+            self._energies, self._gradients, self._hessians = self._load_expansions()
+        return self._gradients
+    @property
+    def hessians(self):
+        if self._hessians is None:
+            self._energies, self._gradients, self._hessians = self._load_expansions()
+        return self._hessians
+    def _load_expansions(self):
+        expansions = [g.calculate_energy(order=2) for g in self.mols]
+        return [e[0] for e in expansions], [e[1] for e in expansions], [e[2] for e in expansions]
 
     @property
     def mols(self):
@@ -553,17 +702,23 @@ class DielsAlderReactionTrajectory:
     @property
     def ts_index(self):
         if self._ts_idx is None:
-            _, (self._ts_idx, self._reactant_idx, self._product_idx) = get_critical_points(None, self.energies)
+            _, (self._ts_idx, self._reactant_idx, self._product_idx) = get_critical_points(self.mols,
+                                                                                           energies=self.energies,
+                                                                                           hessians=self._hessians)
         return self._ts_idx
     @property
     def reactant_index(self):
         if self._reactant_idx is None:
-            _, (self._ts_idx, self._reactant_idx, self._product_idx) = get_critical_points(None, self.energies)
+            _, (self._ts_idx, self._reactant_idx, self._product_idx) = get_critical_points(self.mols,
+                                                                                           energies=self.energies,
+                                                                                           hessians=self._hessians)
         return self._reactant_idx
     @property
     def product_index(self):
         if self._product_idx is None:
-            _, (self._ts_idx, self._reactant_idx, self._product_idx) = get_critical_points(None, self.energies)
+            _, (self._ts_idx, self._reactant_idx, self._product_idx) = get_critical_points(self.mols,
+                                                                                           energies=self.energies,
+                                                                                           hessians=self._hessians)
         return self._product_idx
     @property
     def transition_state(self):
@@ -580,6 +735,8 @@ class DielsAlderReactionTrajectory:
                              trajectory_data,
                              structures=None,
                              energies=None,
+                             gradients=None,
+                             hessians=None,
                              energy_evaluator=None,
                              which='final',
                              **etc):
@@ -591,6 +748,8 @@ class DielsAlderReactionTrajectory:
                     atoms=trajectory_data['atoms'],
                     coordinates=trajectory_data['trajectory'],
                     energies=trajectory_data['trajectory_energies'],
+                    gradients=trajectory_data['trajectory_gradients'],
+                    hessians=trajectory_data['trajectory_hessians'],
                     rmsds=None,
                     evaluator=energy_evaluator
                 )
@@ -599,8 +758,12 @@ class DielsAlderReactionTrajectory:
                     atoms=trajectory_data['atoms'],
                     initial_trajectory=trajectory_data['initial_trajectory'],
                     initial_energies=trajectory_data['initial_trajectory_energies'],
+                    initial_gradients=trajectory_data['initial_trajectory_gradients'],
+                    initial_hessians=trajectory_data['initial_trajectory_hessians'],
                     final_trajectory=trajectory_data['refined_trajectory'],
                     final_energies=trajectory_data['refined_trajectory_energies'],
+                    final_gradients=trajectory_data['refined_trajectory_gradients'],
+                    final_hessians=trajectory_data['refined_trajectory_hessians'],
                     initial_rmsds=None,
                     final_rmsds=None,
                     raw_pre_energies=None,
@@ -614,12 +777,20 @@ class DielsAlderReactionTrajectory:
 
         if energies is None:
             if hasattr(trajectory_data, 'final_energies'):
+                trajectory_data: ReoptimizedTrajectoryData
                 if which == 'final':
                     energies = trajectory_data.final_energies
+                    gradients = trajectory_data.final_gradients
+                    hessians = trajectory_data.final_hessians
                 else:
                     energies = trajectory_data.initial_energies
+                    gradients = trajectory_data.initial_gradients
+                    hessians = trajectory_data.initial_hessians
             else:
+                trajectory_data: TrajectoryData
                 energies = trajectory_data.energies
+                gradients = trajectory_data.gradients
+                hessians = trajectory_data.hessians
 
         if structures is None:
             if hasattr(trajectory_data, 'final_energies'):
@@ -636,6 +807,8 @@ class DielsAlderReactionTrajectory:
             trajectory_data.atoms,
             structures=structures,
             energies=energies,
+            gradients=gradients,
+            hessians=hessians,
             energy_evaluator=energy_evaluator,
             **etc
         )

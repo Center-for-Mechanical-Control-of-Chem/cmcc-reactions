@@ -525,6 +525,9 @@ def run_refined_trajectory(traj, output_dir=None, **opts):
         **opts
     )
 
+def run_update_trajectory(traj, **opts):
+    return rda.update_trajectory_data(traj **opts)
+
 def run_force_optimization(trajectory,
                            internals='auto',
                            breakpoints=((0, 2), (1, 3)),
@@ -618,6 +621,7 @@ def run_optimization_pipeline(
         verbose=False,
         trajectory_optimization_settings=None,
         refined_trajectory_optimization_settings=None,
+        update_trajectory_settings=None,
         optimized_force_settings=None,
         force_modification_settings=None,
         internal_force_modification_settings=None,
@@ -678,6 +682,17 @@ def run_optimization_pipeline(
             if verbose:
                 print('running sampling')
             input_data.trajectory = run_initial_sampling(product, **trajectory_optimization_settings)
+
+            if output_file is not None:
+                input_data.save(output_file)
+
+        if 'update_trajectory' in steps:
+            if update_trajectory_settings is None:
+                update_trajectory_settings = {}
+            # update_trajectory_settings = global_options | update_trajectory_settings
+            if verbose:
+                print('running updates')
+            input_data.trajectory = run_update_trajectory(input_data.trajectory, **update_trajectory_settings)
 
             if output_file is not None:
                 input_data.save(output_file)

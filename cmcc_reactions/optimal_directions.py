@@ -17,7 +17,7 @@ import McUtils.Plots as plt
 from Psience.Reactions import Reaction
 
 from . import utils
-from . import reaction_data_analysis as rda
+from . import trajectory_tools as trajt
 
 __all__ = [
     "find_optimal_displacement_coordinate",
@@ -102,28 +102,28 @@ def scipy_optimize_forces(gs_hess, ts_hess, guess_dir, proj_dirs, *,
 
     return np.dot(nput.vec_normalize(x), reduced_basis.T), min
 
-    min = scipy_opt(fun, guess_dir, method=method, **opts)
-    opts = options | dict(options={'maxiter':max_iterations})
-    if method in {'cg', 'bfgs'}:
-        opts['jac'] = jac
-
-    if logger is not None:
-        logger = Logger.lookup(logger)
-        prev_re = [guess_dir]
-        opts['callback'] = lambda intermediate_result, prev_re=prev_re: (
-            logger.log_print(
-                [
-                    "Struct: {intermediate_result}",
-                    "Step: {intermediate_step}"
-                ],
-                intermediate_result=intermediate_result,
-                intermediate_step=intermediate_result - prev_re[-1]
-            ),
-            prev_re.append(intermediate_result)
-        )
-
-    min = scipy_opt(fun, guess_dir, method=method, **opts)
-    return np.dot(nput.vec_normalize(min.x), reduced_basis.T), min
+    # min = scipy_opt(fun, guess_dir, method=method, **opts)
+    # opts = options | dict(options={'maxiter':max_iterations})
+    # if method in {'cg', 'bfgs'}:
+    #     opts['jac'] = jac
+    #
+    # if logger is not None:
+    #     logger = Logger.lookup(logger)
+    #     prev_re = [guess_dir]
+    #     opts['callback'] = lambda intermediate_result, prev_re=prev_re: (
+    #         logger.log_print(
+    #             [
+    #                 "Struct: {intermediate_result}",
+    #                 "Step: {intermediate_step}"
+    #             ],
+    #             intermediate_result=intermediate_result,
+    #             intermediate_step=intermediate_result - prev_re[-1]
+    #         ),
+    #         prev_re.append(intermediate_result)
+    #     )
+    #
+    # min = scipy_opt(fun, guess_dir, method=method, **opts)
+    # return np.dot(nput.vec_normalize(min.x), reduced_basis.T), min
 
 def mcutils_optimize_forces(gs_hess, ts_hess, guess_dir, proj_dirs, *, max_iterations,
                             logger=None,
@@ -784,9 +784,9 @@ class ForceOptimizer:
     @classmethod
     def from_trajectory(cls, trajectory, **opts):
         if isinstance(trajectory, str):
-            trajectory = rda.DielsAlderReactionTrajectory.from_file(trajectory)
-        elif not isinstance(trajectory, rda.DielsAlderReactionTrajectory):
-            trajectory = rda.DielsAlderReactionTrajectory.from_trajectory_data(trajectory)
+            trajectory = trajt.DielsAlderReactionTrajectory.from_file(trajectory)
+        elif not isinstance(trajectory, trajt.DielsAlderReactionTrajectory):
+            trajectory = trajt.DielsAlderReactionTrajectory.from_trajectory_data(trajectory)
 
         return cls(trajectory.reactant, trajectory.transition_state, **opts)
 

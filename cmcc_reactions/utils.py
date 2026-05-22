@@ -302,8 +302,11 @@ def loads_tree(data, decompress=True, mode='npz', **opts):
     return read_tree(buf, decompress=decompress, mode=mode, **opts)
 
 namedtuple_registry = {}
-def register_namedtuple(type):
+namedtuple_defaults = {}
+def register_namedtuple(type, defaults=None):
     namedtuple_registry[type.__name__] = type
+    if defaults is not None:
+        namedtuple_defaults[type] = defaults
     return type
 def write_namedtuple(file, obj, compress=False, mode='json', **opts):
     d = obj._asdict() | {"_type":type(obj).__name__}
@@ -324,6 +327,9 @@ def make_namedtuple(obj, nt_type=None, key=None, in_place=False):
         nt_type = tn
     if isinstance(nt_type, str):
         nt_type = namedtuple_registry[nt_type]
+    defaults = namedtuple_defaults.get(nt_type)
+    if defaults is not None:
+        obj = defaults | obj
 
     return nt_type(**obj)
 def read_namedtuple(file, nt_type=None, decompress=False, mode='json', key=None, **opts):
