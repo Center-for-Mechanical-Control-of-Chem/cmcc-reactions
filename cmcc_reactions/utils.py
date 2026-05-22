@@ -27,14 +27,25 @@ __all__ = [
 def dictify_lists(tree:dict):
     tree = tree.copy()
     for k,subtree in tree.items():
-        if isinstance(subtree, (list, tuple)) and all(isinstance(d, dict) for d in subtree):
-            tree[k] = {
-                f'_list_item_{i}':dictify_lists(v)
-                for i,v in enumerate(subtree)
-            }
-            tree[k]['_num_list_items'] = len(subtree)
-        elif isinstance(subtree, dict):
+        if isinstance(subtree, dict):
             tree[k] = dictify_lists(subtree)
+        elif isinstance(subtree, (list, tuple)):
+            if all(isinstance(d, dict) for d in subtree):
+                tree[k] = {
+                    f'_list_item_{i}':dictify_lists(v)
+                    for i,v in enumerate(subtree)
+                }
+                tree[k]['_num_list_items'] = len(subtree)
+            elif (
+                    isinstance(subtree, (list, tuple))
+                    and dev.is_list_like(subtree[0])
+                    and len(np.unique([len(y) for y in subtree])) > 1
+            ):
+                tree[k] = {
+                    f'_list_item_{i}': v
+                    for i, v in enumerate(subtree)
+                }
+                tree[k]['_num_list_items'] = len(subtree)
     return tree
 def compress_tree(tree_obj, top_level=True, prep_tree=True):
     if prep_tree:
@@ -49,6 +60,8 @@ def compress_tree(tree_obj, top_level=True, prep_tree=True):
             subtrees[k] = compress_tree(v, top_level=False, prep_tree=False)
         elif isinstance(v, (int, bool, float, str, numbers.Number)):
             subtrees[k] = ((0,-1), np.array([v]))
+        elif v is None:
+            subtrees[k] = ((0,-1), np.array([np.nan]))
         else:
             v = np.asanyarray(v)
             if v.shape == ():
@@ -146,6 +159,11 @@ def decompress_tree(serial_tree, unprep_tree=True):
                     block_size = np.prod(shape, dtype=int)
                 arr = array_data[array_pointer:array_pointer+block_size].reshape(shape)
                 block_pointers[k] = (shape_offset+1, array_pointer + block_size)
+                if arr.ndim == 0:
+                    if np.issubdtype(arr.dtype, np.dtype(float)) and np.isnan(arr):
+                        arr = None
+                    elif np.issubdtype(arr.dtype, np.dtype(str)):
+                        arr = arr.tolist()
                 tree[s] = arr
             else:
                 tree[s] = {}
@@ -212,7 +230,12 @@ def read_json(file, normalize=True, **opts):
     else:
         return data
 
-def write_tree(file, data, compress=True, mode='npz', **opts):
+def write_tree(file, data, compress=None, mode=None, precompression_function=None, **opts):
+    if mode is None:
+        if isinstance(file, str) and os.path.splitext(file)[-1] == '.json':
+            mode = 'json'
+        else:
+            mode = 'npz'
     if mode == 'json':
         if not hasattr(file, 'write'):
             with open(file, 'w+') as fp:
@@ -220,7 +243,11 @@ def write_tree(file, data, compress=True, mode='npz', **opts):
         else:
             json.dump(data, file, cls=BaseEncoder, **opts)
     else:
+        if compress is None:
+            compress = True
         if compress:
+            if precompression_function is not None:
+                data = precompression_function(data)
             compressed = compress_tree(data)
         else:
             compressed = data
@@ -246,7 +273,9 @@ def write_tree(file, data, compress=True, mode='npz', **opts):
             visited_keys=visited_keys,
             **arrays
         )
-def dumps_tree(data, compress=True, mode='npz', **opts):
+def dumps_tree(data, compress=None, mode='json', **opts):
+    if compress is None:
+        compress = mode != 'json'
     buf = io.StringIO() if mode == 'json' else io.BytesIO()
     write_tree(buf, data, compress=compress, mode=mode, **opts)
     buf.seek(0)
@@ -261,7 +290,12 @@ def normalize_tree(data):
     else:
         return data
 
-def read_tree(file, decompress=True, mode='npz', **opts):
+def read_tree(file, decompress=None, mode=None, decompression_function=None, **opts):
+    if mode is None:
+        if isinstance(file, str) and os.path.splitext(file)[-1] == '.json':
+            mode = 'json'
+        else:
+            mode = 'npz'
     if mode == 'json':
         if not hasattr(file, 'read'):
             with open(file) as fp:
@@ -270,6 +304,7 @@ def read_tree(file, decompress=True, mode='npz', **opts):
             data = json.load(file, **opts)
         return normalize_tree(data)
     else:
+        if decompress is None: decompress = True
         zdata = np.load(file)
         key_names = zdata['key_names']
         visited_keys = zdata['visited_keys']
@@ -292,10 +327,13 @@ def read_tree(file, decompress=True, mode='npz', **opts):
             compressed[k] = (shape, array)
 
         if decompress:
-            return decompress_tree(compressed)
+            data = decompress_tree(compressed)
+            if decompression_function is not None:
+                data = decompression_function(data)
+            return data
         else:
             return compressed
-def loads_tree(data, decompress=True, mode='npz', **opts):
+def loads_tree(data, decompress=None, mode='npz', **opts):
     buf = io.StringIO() if isinstance(data, str) else io.BytesIO()
     buf.write(data)
     buf.seek(0)
@@ -308,12 +346,17 @@ def register_namedtuple(type, defaults=None):
     if defaults is not None:
         namedtuple_defaults[type] = defaults
     return type
-def write_namedtuple(file, obj, compress=False, mode='json', **opts):
+def prep_compressed_namedtuple_data(data):
+    for k, v in data.items():
+        if k.endswith('_settings') and isinstance(v, dict):
+            data[k] = {k + tag:d for tag, d in v.items()}
+    return data
+def write_namedtuple(file, obj, compress=None, mode=None, **opts):
     d = obj._asdict() | {"_type":type(obj).__name__}
-    return write_tree(file, d, compress=compress, mode=mode, **opts)
-def dumps_namedtuple(obj, compress=False, mode='json', **opts):
+    return write_tree(file, d, compress=compress, mode=mode, precompression_function=prep_compressed_namedtuple_data, **opts)
+def dumps_namedtuple(obj, compress=None, mode='json', **opts):
     d = obj._asdict() | {"_type":type(obj).__name__}
-    return dumps_tree(d, compress=compress, mode=mode, **opts)
+    return dumps_tree(d, compress=compress, mode=mode, precompression_function=prep_compressed_namedtuple_data, **opts)
 def make_namedtuple(obj, nt_type=None, key=None, in_place=False):
     if key is not None:
         if not isinstance(key, str):
@@ -332,11 +375,20 @@ def make_namedtuple(obj, nt_type=None, key=None, in_place=False):
         obj = defaults | obj
 
     return nt_type(**obj)
-def read_namedtuple(file, nt_type=None, decompress=False, mode='json', key=None, **opts):
-    obj = read_tree(file, decompress=decompress, mode=mode, **opts)
+def decompress_namedtuple_data(data):
+    for k, v in data.items():
+        if k.endswith('_settings') and isinstance(v, dict):
+            tl = len(k)
+            data[k] = {
+                tag[tl:] if tag.startswith(k) else tag:d
+                for tag, d in v.items()
+            }
+    return data
+def read_namedtuple(file, nt_type=None, decompress=None, mode=None, key=None, **opts):
+    obj = read_tree(file, decompress=decompress, mode=mode, decompression_function=decompress_namedtuple_data, **opts)
     return make_namedtuple(obj, nt_type=nt_type, key=key, in_place=True)
-def loads_namedtuple(buf, nt_type=None, decompress=False, mode='json', key=None, **opts):
-    obj = loads_tree(buf, decompress=decompress, mode=mode, **opts)
+def loads_namedtuple(buf, nt_type=None, decompress=None, mode='json', key=None, **opts):
+    obj = loads_tree(buf, decompress=decompress, decompression_function=decompress_namedtuple_data, mode=mode, **opts)
     return make_namedtuple(obj, nt_type=nt_type, key=key, in_place=True)
 def isnamedtupleinstance(obj, nt_types):
     if not isinstance(nt_types, tuple):

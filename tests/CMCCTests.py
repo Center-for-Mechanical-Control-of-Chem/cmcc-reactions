@@ -506,7 +506,7 @@ class CMCCTests(unittest.TestCase):
         print(uuh.force_coeffs.shape,
               uuh2.force_coeffs.shape)
 
-    # @unittest.skip
+    @unittest.skip
     def test_Refinements(self):
         import warnings
         warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -626,7 +626,15 @@ class CMCCTests(unittest.TestCase):
             opt.force_modified_reactant_geom
         ]).show()
 
+    def test_ExportNew(self):
+        import warnings
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+        res = pipeline.OptimizedForceResults.from_file(test_data('pipeline_data.json'))
+
+        npdat = utils.dumps_namedtuple(res.to_data(), mode='npz')
+        print(utils.loads_namedtuple(npdat, mode='npz', decompress=True))
 
 if __name__ == '__main__':
     os.chdir(root)
