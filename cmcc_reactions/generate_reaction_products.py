@@ -443,6 +443,7 @@ def _generate_products_and_optimize(smiles_iterator,
                                     optimizer_settings,
                                     smiles_hash_generator,
                                     output_dir,
+                                    info_file='product.json',
                                     rmsd_cutoff=.025,
                                     preopt_iterations=50,
                                     verbose=False,
@@ -465,7 +466,7 @@ def _generate_products_and_optimize(smiles_iterator,
                     smiles_label = str(smiles_index)
                 if os.path.isfile(os.path.join(output_dir, smiles_label, 'conformer_info.json')):
                     if callback is not None:
-                        for f in glob.glob(os.path.join(output_dir, smiles_label, '*', 'product.json')):
+                        for f in glob.glob(os.path.join(output_dir, smiles_label, '*', info_file)):
                             product_data = utils.read_namedtuple(f)
                             callback(product_data, f)
                     continue
@@ -528,10 +529,11 @@ def _generate_products_and_optimize(smiles_iterator,
                     struct, diene_inds,
                     energy=engs[i],
                     smiles=smiles,
-                    energy_evaluator=energy_evaluator
+                    energy_evaluator=energy_evaluator,
+                    info_file=info_file
                 )
                 if callback is not None:
-                    callback(product_data, os.path.join(output_dir, smiles_label, str(i), 'product.json'))
+                    callback(product_data, os.path.join(output_dir, smiles_label, str(i), info_file))
             else:
                 product_data = create_product_data(
                     struct, diene_inds,
@@ -585,6 +587,7 @@ def generate_products_and_optimize_from_iterator(
         preoptimize=True,
         optimizer_settings=None,
         smiles_hash_generator='inchi',
+        info_file='product.json',
         output_dir=None,
         parallelizer=None,
         batch_size=50,
@@ -607,6 +610,7 @@ def generate_products_and_optimize_from_iterator(
             optimizer_settings=optimizer_settings,
             smiles_hash_generator=smiles_hash_generator,
             output_dir=output_dir,
+            info_file=info_file,
             verbose=verbose,
             callback=callback
         )
@@ -634,6 +638,7 @@ def generate_products_and_optimize_from_iterator(
                     optimizer_settings=optimizer_settings,
                     smiles_hash_generator=smiles_hash_generator,
                     output_dir=output_dir,
+                    info_file=info_file,
                     verbose=verbose,
                     callback=callback
                 ),

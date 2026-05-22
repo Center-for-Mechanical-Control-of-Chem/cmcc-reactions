@@ -824,6 +824,7 @@ def generate_from_product_library(
         parallelizer=None,
         batch_size=50,
         verbose=True,
+        input_file=None,
         output_file="pipeline_data.json",
         steps=None,
         trajectory_optimization_settings=None,
@@ -835,9 +836,11 @@ def generate_from_product_library(
         max_products=None,
         **global_options
 ):
-    def callback(product_data, product_file):
+    def callback(product_data, product_file, input_file=input_file):
         targ_dir = os.path.dirname(product_file)
         product_file = os.path.basename(product_file)
+        if input_file is None:
+            input_file = product_file
         curdir = os.getcwd()
         try:
             os.chdir(targ_dir)
@@ -845,7 +848,7 @@ def generate_from_product_library(
             if submit:
                 script, _ = sbatch_python_job(
                     run_optimization_pipeline,
-                    product_file,
+                    input_file,
                     out_file,
                     steps=steps,
                     trajectory_optimization_settings=trajectory_optimization_settings,
@@ -904,7 +907,9 @@ def generate_from_product_library(
     else:
         if output_dir is None:
             output_dir = '.'
-        for n,f in enumerate(glob.glob(f"{output_dir}/**/product.json", recursive=True)):
+        if input_file is None:
+            input_file = 'product.json'
+        for n,f in enumerate(glob.glob(f"{output_dir}/**/{input_file}", recursive=True)):
             product_data = utils.read_namedtuple(f)
             print(f"Submitting updates for {f}")
             callback(product_data, f)
