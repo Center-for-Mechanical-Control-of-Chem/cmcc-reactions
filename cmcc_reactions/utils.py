@@ -63,7 +63,11 @@ def compress_tree(tree_obj, top_level=True, prep_tree=True):
         elif v is None:
             subtrees[k] = ((0,-1), np.array([np.nan]))
         else:
-            v = np.asanyarray(v)
+            try:
+                v = np.asanyarray(v)
+            except ValueError:
+                print(k, s, v)
+                raise
             if v.shape == ():
                 subtrees[k] = ((0,-1), np.array([v]))
             else:
