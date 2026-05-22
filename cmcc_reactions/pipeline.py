@@ -960,8 +960,16 @@ def compress_pipeline_data(
 
     return tree
 
+def _unwrap_nts(pipeline_data):
+    return {
+        k:utils.make_namedtuple(v) if '_type' in v else _unwrap_nts(v)
+        for k,v in pipeline_data.items()
+    }
+    # for k,v in pipeline_data.items():
+    #     if '_type' in v:
 def read_compressed_pipeline_data(pipeline_file):
-    return utils.read_tree(pipeline_file, decompression_function=utils.decompress_namedtuple_data)
+    base_data = utils.read_tree(pipeline_file, decompression_function=utils.decompress_namedtuple_data)
+    return _unwrap_nts(base_data)
 
 # def submit_if_not_found(glob_pattern, target_file,
 #                         overwrite=False,
