@@ -856,7 +856,7 @@ def generate_from_product_library(
                     energy_evaluator=energy_evaluator,
                     verbose=verbose,
                     sbatch_kwargs={}, # disable stuff
-                    post_processor=None,
+                    post_processor='none',
                     **global_options
                 )
                 if verbose:
