@@ -127,8 +127,12 @@ class OptimizedForceResults:
             {
                 'initial_trajectory':'initial_trajectory',
                 'initial_trajectory_energies':'initial_energies',
+                'initial_trajectory_gradients':'initial_gradients',
+                'initial_trajectory_hessians':'initial_hessians',
                 'refined_trajectory':'final_trajectory',
                 'refined_trajectory_energies':'final_energies',
+                'refined_trajectory_gradients':'final_gradients',
+                'refined_trajectory_hessians':'final_hessians',
                 'trajectory_optimization_settings':'optimization_settings'
             },
         'optimized_forces':
@@ -541,7 +545,7 @@ def run_refined_trajectory(traj, output_dir=None, **opts):
     )
 
 def run_update_trajectory(traj, **opts):
-    return rda.update_trajectory_data(traj **opts)
+    return rda.update_trajectory_data(traj, **opts)
 
 def run_force_optimization(trajectory,
                            internals='auto',
