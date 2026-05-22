@@ -281,34 +281,39 @@ CriticalPointIndices = collections.namedtuple('CriticalPointIndices',
                                               ['ts', 'react', 'prod'])
 def get_critical_points(trajectory, energies=None, initial=None, gradients=None,
                         hessians=None,
-                        small_freq_cutoff=5e-4, # roughly 100 cm-1
-                        large_freq_cutoff=5e-3  # roughly 1000 cm-1
-                        ):
+                        small_freq_cutoff=5e-4,  # roughly 100 cm-1
+                        large_freq_cutoff=5e-3,  # roughly 1000 cm-1
+                        ts_idx=None,
+                        reactant_idx=None):
     if energies is None:
         energies = [g.calculate_energy() for g in trajectory]
 
     product_idx = np.argmin(energies)
-    if trajectory is not None and hessians is not None:
-        freqs = [
-            g.modify(potential_derivatives=[0, h]).get_normal_modes().freqs
-            for g,h in zip(trajectory, hessians)
-        ]
+    if ts_idx is None:
+        if trajectory is not None and hessians is not None:
+            freqs = [
+                g.modify(potential_derivatives=[0, h]).get_normal_modes().freqs
+                for g,h in zip(trajectory, hessians)
+            ]
 
-        choices = [
-            i for i,f in enumerate(freqs)
-            if np.sum((f < 0) & np.abs(f) > small_freq_cutoff & np.abs(f) < large_freq_cutoff) == 1
-        ]
-        if len(choices) == 0:
-            ts_idx = np.argmax(energies)
+            choices = [
+                i for i,f in enumerate(freqs)
+                if np.sum((f < 0) & np.abs(f) > small_freq_cutoff & np.abs(f) < large_freq_cutoff) == 1
+            ]
+            if len(choices) == 0:
+                ts_idx = np.argmax(energies)
+            else:
+                subidx = np.argmax([energies[c] for c in choices])
+                ts_idx = choices[subidx]
         else:
-            subidx = np.argmax([energies[c] for c in choices])
-            ts_idx = choices[subidx]
+            ts_idx = np.argmax(energies)
+    if reactant_idx is None:
+        if product_idx > ts_idx:
+            react_idx = np.argmin(energies[:ts_idx])
+        else:
+            react_idx = np.argmin(energies[ts_idx:]) + ts_idx
     else:
-        ts_idx = np.argmax(energies)
-    if product_idx > ts_idx:
-        react_idx = np.argmin(energies[:ts_idx])
-    else:
-        react_idx = np.argmin(energies[ts_idx:]) + ts_idx
+        react_idx = reactant_idx
     return energies, CriticalPointIndices(ts_idx, react_idx, product_idx)
 
 def refine_trajectory(product_data: ReoptimizedTrajectoryData|TrajectoryData,
@@ -541,8 +546,11 @@ def plot_reaction_profile(
         metric_label=None,
         bonds=((0, 2), (1, 3)),
         return_metrics=False,
+        ts_idx=None,
+        reactant_idx=None,
+        baseline=None,
         **opts):
-    energies, (ts, r, p) = get_critical_points(None, energies)
+    energies, (ts, r, p) = get_critical_points(None, energies, ts_idx=ts_idx, reactant_idx=reactant_idx)
     energies = np.asanyarray(energies)
     if distance_metric is None:
         distance_metric = cc_single_normalized_distance
@@ -551,9 +559,11 @@ def plot_reaction_profile(
         if metric_label is None:
             metric_label = distance_metric.__name__
     x1 = distance_metric(coordinates, bonds) * UnitsData.convert("BohrRadius", "Angstroms")
+    if baseline is None:
+        baseline = energies[r]
     figure = plt.Plot(
         x1,
-        (energies - energies[r]) * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
+        (energies - baseline) * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
         **(dict(
             axes_labels=[
                 metric_label + r" ($\AA$)",
@@ -848,6 +858,8 @@ class DielsAlderReactionTrajectory:
             metric_label=metric_label,
             bonds=bonds,
             return_metrics=return_metrics,
+            ts_idx=self.ts_index,
+            reactant_idx=self.reactant_index,
             **opts
         )
 
@@ -859,13 +871,17 @@ class DielsAlderReactionTrajectory:
                          comparison_styles=None,
                          labels=None,
                          return_metrics=False,
+                         baseline=None,
                          **opts):
+        if baseline is None:
+            baseline = self.energies[self.reactant_index]
         figure, metrics = self.plot_profile(
             distance_metric=distance_metric,
             metric_label=metric_label,
             bonds=bonds,
             figure=figure,
             return_metrics=True,
+            baseline=baseline,
             **(opts | dict(label=labels[0] if labels is not None else None))
         )
         if comparison_styles is None:
@@ -875,6 +891,7 @@ class DielsAlderReactionTrajectory:
             metric_label=metric_label,
             bonds=bonds,
             figure=figure,
+            baseline=baseline,
             **(opts | comparison_styles | dict(label=labels[1] if labels is not None else None))
         )
         if return_metrics:
