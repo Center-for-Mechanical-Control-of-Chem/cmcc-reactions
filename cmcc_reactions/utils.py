@@ -166,7 +166,7 @@ def decompress_tree(serial_tree, unprep_tree=True):
                 if arr.ndim == 0:
                     if np.issubdtype(arr.dtype, np.dtype(float)) and np.isnan(arr):
                         arr = None
-                    elif np.issubdtype(arr.dtype, np.dtype(str)):
+                    else:
                         arr = arr.tolist()
                 tree[s] = arr
             else:
