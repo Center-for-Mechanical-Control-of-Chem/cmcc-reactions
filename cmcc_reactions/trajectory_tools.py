@@ -551,6 +551,7 @@ def plot_reaction_profile(
         return_metrics=False,
         ts_idx=None,
         reactant_idx=None,
+        mark_critical_points=True,
         baseline=None,
         **opts):
     energies, (ts, r, p) = get_critical_points(None, energies, ts_idx=ts_idx, reactant_idx=reactant_idx)
@@ -564,9 +565,10 @@ def plot_reaction_profile(
     x1 = distance_metric(coordinates, bonds) * UnitsData.convert("BohrRadius", "Angstroms")
     if baseline is None:
         baseline = energies[r]
+    e = (energies - baseline) * UnitsData.convert("Hartrees", "Kilocalories/Mole")
     figure = plt.Plot(
         x1,
-        (energies - baseline) * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
+        e,
         **(dict(
             axes_labels=[
                 metric_label + r" ($\AA$)",
@@ -574,6 +576,13 @@ def plot_reaction_profile(
             ]
         ) | opts)
     )
+    if mark_critical_points:
+        plt.ScatterPlot(
+            [x1[r], x1[ts], x1[p]],
+            [e[r], e[ts], e[p]],
+            color='black',
+            figure=figure
+        )
     if return_metrics:
         return figure, x1
     else:
