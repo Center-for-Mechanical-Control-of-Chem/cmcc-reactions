@@ -2,6 +2,7 @@ from __future__ import annotations
 import typing
 
 
+import gc
 import collections
 import os
 import numpy as np
@@ -1183,6 +1184,12 @@ class ForceOptimizer:
                 coords = np.asanyarray(coords).reshape((-1, 3))
                 force_mol = self.internal_mols[0].modify(coords=coords)
                 dx = force_mol.get_cartesians_by_internals(1, strip_embedding=True)[0]
+                force_mol.embedding._jacobians.clear()
+                del force_mol
+                # if force_mol.embedding.registered_converters is not None:
+                #     for r in force_mol.embedding.registered_converters:
+                #         r.deregister()
+                # force_mol.internal_coordinates.system.deregister()
                 rot = np.dot(d, dx).reshape(base_grad.shape)
             else:
                 coords = coords.reshape((-1,) + self.ts.coords.shape)
@@ -1254,6 +1261,7 @@ class ForceOptimizer:
                               info_file='force_modified_{mode}_{mag}.json',
                               displacements=None,
                               verbose=False,
+                              run_gc=True,
                               # displacement_generator=None,
                               **opts):
         smol_mode = nput.is_int(mode)
@@ -1433,6 +1441,9 @@ class ForceOptimizer:
                         initial_reactants_step=initial_reactants_step
                     ) | opts
                 )
+
+                if run_gc:
+                    gc.collect()
 
                 if output_dir is not None:
                     conv2 = UnitsData.convert("Hartrees", "Picojoules") / (
