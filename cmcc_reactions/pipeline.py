@@ -841,7 +841,6 @@ def generate_from_product_library(
         product_file = os.path.basename(product_file)
         if input_file is None:
             input_file = product_file
-        print("?", input_file)
         curdir = os.getcwd()
         try:
             os.chdir(targ_dir)
