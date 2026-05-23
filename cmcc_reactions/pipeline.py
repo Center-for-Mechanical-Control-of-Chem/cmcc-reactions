@@ -818,8 +818,9 @@ def run_optimization_pipeline(
             if internal_force_modification_settings is None:
                 internal_force_modification_settings = {}
             internal_force_modification_settings = global_options | internal_force_modification_settings
+            overwrite = internal_force_modification_settings.pop('overwrite', False)
             fmrds = run_internal_fmrds(optimizer, **internal_force_modification_settings)
-            if input_data.fmrds is None:
+            if input_data.fmrds is None or overwrite:
                 input_data.fmrds = [f[2] for f in fmrds]
             else:
                 input_data.fmrds = input_data.fmrds + [f[2] for f in fmrds]
