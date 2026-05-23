@@ -459,6 +459,7 @@ def _generate_products_and_optimize(smiles_iterator,
         if take_unique:
             u_smiles = Chem.CanonSmiles(smiles)
             if u_smiles in smiles_cache: continue
+            smiles_cache.add(u_smiles)
             if output_dir is not None:
                 if smiles_hash_generator is not None:
                     smiles_label = smiles_hash_generator(u_smiles)
@@ -470,7 +471,6 @@ def _generate_products_and_optimize(smiles_iterator,
                             product_data = utils.read_namedtuple(f)
                             callback(product_data, f)
                     continue
-            smiles_cache.add(u_smiles)
 
         if verbose:
             print("Processing SMILES: ", smiles)
