@@ -540,24 +540,24 @@ class CMCCTests(unittest.TestCase):
 
         import subprocess
         import memray
-        # import os
-        # try:
-        #     os.remove(os.path.expanduser("~/Desktop/memprof.out"))
-        # except:
-        #     ...
-        # with memray.Tracker("/Users/Mark/Desktop/memprof.out"):
-        opt = traj.optimizer.reoptimize_internals_with_force(
-            'dihedrals',
-            max_internals=2,
-            max_iterations=100
-        )
+        import os
+        try:
+            os.remove(os.path.expanduser("~/Desktop/memprof.out"))
+        except:
+            ...
+        with memray.Tracker("/Users/Mark/Desktop/memprof.out"):
+            opt = traj.optimizer.reoptimize_internals_with_force(
+                'dihedrals',
+                max_internals=2,
+                max_iterations=100
+            )
 
-        # try:
-        #     os.remove(os.path.expanduser("~/Desktop/memprof_graph.html"))
-        # except:
-        #     ...
-        # subprocess.run(["memray", "flamegraph", os.path.expanduser("~/Desktop/memprof.out"), "-o", os.path.expanduser("~/Desktop/memprof_graph.html")])
-        # subprocess.run(["open",  os.path.expanduser("~/Desktop/memprof_graph.html")])
+        try:
+            os.remove(os.path.expanduser("~/Desktop/memprof_graph.html"))
+        except:
+            ...
+        subprocess.run(["memray", "flamegraph", os.path.expanduser("~/Desktop/memprof.out"), "-o", os.path.expanduser("~/Desktop/memprof_graph.html")])
+        subprocess.run(["open",  os.path.expanduser("~/Desktop/memprof_graph.html")])
 
     @unittest.skip
     def test_RandomForces(self):

@@ -1182,14 +1182,7 @@ class ForceOptimizer:
             d = get_direction(self.ts, coords)
             if use_internals:
                 coords = np.asanyarray(coords).reshape((-1, 3))
-                force_mol = self.internal_mols[0].modify(coords=coords)
-                dx = force_mol.get_cartesians_by_internals(1, strip_embedding=True)[0]
-                force_mol.embedding._jacobians.clear()
-                del force_mol
-                # if force_mol.embedding.registered_converters is not None:
-                #     for r in force_mol.embedding.registered_converters:
-                #         r.deregister()
-                # force_mol.internal_coordinates.system.deregister()
+                dx = self.internal_mols[0].get_cartesians_by_internals(1, strip_embedding=True)[0]
                 rot = np.dot(d, dx).reshape(base_grad.shape)
             else:
                 coords = coords.reshape((-1,) + self.ts.coords.shape)
@@ -1329,8 +1322,7 @@ class ForceOptimizer:
                             )
                             d = dd[mode] * initial_reactants_step
                             if use_internals:
-                                force_mol = self.internal_mols[1].modify(coords=coords)
-                                dx = force_mol.get_cartesians_by_internals(1, strip_embedding=True)[0]
+                                dx = self.internal_mols[1].get_cartesians_by_internals(1, coords=coords, strip_embedding=True)[0]
                                 d = np.dot(d, dx)
                             return coords + d.reshape(-1, 3)
 
@@ -1398,8 +1390,7 @@ class ForceOptimizer:
                         else:
                             d = dd(self.ts, coords)[mode] * initial_reactants_step
                         if use_internals:
-                            force_mol = self.internal_mols[0].modify(coords=coords)
-                            dx = force_mol.get_cartesians_by_internals(1, strip_embedding=True)[0]
+                            dx = self.internal_mols[0].get_cartesians_by_internals(1, strip_embedding=True)[0]
                             d = np.dot(d, dx)
                         return coords + d.reshape(-1, 3)
 
