@@ -636,7 +636,7 @@ def run_fmrds(optimizer,
     )
 
 def run_internal_fmrds(optimizer,
-                       internal_selector='dihedral',
+                       internal_selector='dihedrals',
                        magnitude=(-200, -100, -50, 50, 100, 200),
                        pool=None,
                        **opts):

@@ -1457,11 +1457,27 @@ class ForceOptimizer:
     @property
     def _internals_selectors(self):
         return {
-            'dihedrals':self._select_dihedrals
+            'dihedrals':self._select_dihedrals,
+            'angles':self._select_angles,
+            'bonds':self._select_bonds,
         }
     @classmethod
-    def _select_dihedrals(cls, internals):
-        return [i for i,c in enumerate(internals) if len(c) == 4]
+    def _select_by_filter(cls, internals, *, filter, optimizer, fragment_indices=None):
+        base_sel = [i for i,c in enumerate(internals) if filter(c)]
+        if fragment_indices is not None:
+            if nput.is_int(fragment_indices):
+                fragment_indices = optimizer.rs.fragment_indices[fragment_indices]
+            base_sel = [b for b in base_sel if all(i in fragment_indices for i in internals[b])]
+        return base_sel
+    @classmethod
+    def _select_dihedrals(cls, internals, *, optimizer, fragment_indices=None):
+        return cls._select_by_filter(internals, filter=lambda x:len(x)==4, optimizer=optimizer, fragment_indices=fragment_indices)
+    @classmethod
+    def _select_bonds(cls, internals, *, optimizer, fragment_indices=None):
+        return cls._select_by_filter(internals, filter=lambda x:len(x)==2, optimizer=optimizer, fragment_indices=fragment_indices)
+    @classmethod
+    def _select_angles(cls, internals, *, optimizer, fragment_indices=None):
+        return cls._select_by_filter(internals, filter=lambda x:len(x)==3, optimizer=optimizer, fragment_indices=fragment_indices)
     def reoptimize_internals_with_force(self,
                                         which,
                                         magnitude=50,
@@ -1470,14 +1486,27 @@ class ForceOptimizer:
                                         displacements=None,
                                         use_internals=True,
                                         lookup_internals_index=None,
+                                        fragment_indices=None,
                                         **opts
                                         ):
         if displacements is None:
             displacements = self.pure_internal_displacement_matrix
-        if isinstance(which, str):
-            which = self._internals_selectors[which]
-        if callable(which):
-            which = which(coordops.extract_zmatrix_internals(self.internals, strip_embedding=True))
+        if isinstance(which, str) or callable(which):
+            which = {
+                'selector':which
+            }
+        if isinstance(which, dict):
+            which = which.copy()
+            if fragment_indices is None:
+                fragment_indices = self.opts.get('fragment_indices')
+            if fragment_indices is not None:
+                which['fragment_indices'] = fragment_indices
+            selector = which.pop('selector')
+            if isinstance(selector, str):
+                selector = self._internals_selectors[selector]
+            which = selector(coordops.extract_zmatrix_internals(self.internals, strip_embedding=True),
+                             optimizer=self,
+                             **which)
             if lookup_internals_index is None:
                 lookup_internals_index = False
         elif lookup_internals_index is None:
