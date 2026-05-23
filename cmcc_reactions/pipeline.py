@@ -641,15 +641,34 @@ def run_internal_fmrds(optimizer,
                        max_internals=10,
                        verbose=True,
                        pool=None,
+                       memprof=None,
                        **opts):
-    return optimizer.reoptimize_internals_with_force(
-        internal_selector,
-        magnitude=magnitude,
-        pool=pool,
-        max_internals=max_internals,
-        verbose=verbose,
-        **opts
-    )
+    if memprof is not None:
+        import memray
+        try:
+            os.remove(memprof)
+        except FileNotFoundError:
+            ...
+        with memray.Tracker(memprof) as tracker:
+            return run_internal_fmrds(
+                optimizer,
+                internal_selector=internal_selector,
+                magnitude=magnitude,
+                max_internals=max_internals,
+                verbose=verbose,
+                pool=pool,
+                memprof=None,
+                **opts
+            )
+    else:
+        return optimizer.reoptimize_internals_with_force(
+            internal_selector,
+            magnitude=magnitude,
+            pool=pool,
+            max_internals=max_internals,
+            verbose=verbose,
+            **opts
+        )
 
 def run_optimization_pipeline(
         input_data: str | gen_prods.InitialProductData | OptimizedForceResults | OptimizedForcePipelineData,

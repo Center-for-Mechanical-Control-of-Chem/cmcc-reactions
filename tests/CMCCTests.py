@@ -530,18 +530,34 @@ class CMCCTests(unittest.TestCase):
         )
         trajt.compare_profiles(yeesh, marker='o').show()
 
-    @unittest.skip
+    # @unittest.skip
     def test_InternalsForces(self):
         import warnings
         warnings.filterwarnings("ignore", category=RuntimeWarning)
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         traj = pipeline.OptimizedForceResults.from_file(test_data('pipeline_data.json'))
+
+        import subprocess
+        import memray
+        # import os
+        # try:
+        #     os.remove(os.path.expanduser("~/Desktop/memprof.out"))
+        # except:
+        #     ...
+        # with memray.Tracker("/Users/Mark/Desktop/memprof.out"):
         opt = traj.optimizer.reoptimize_internals_with_force(
             'dihedrals',
             max_internals=2,
-            max_iterations=5
+            max_iterations=100
         )
+
+        # try:
+        #     os.remove(os.path.expanduser("~/Desktop/memprof_graph.html"))
+        # except:
+        #     ...
+        # subprocess.run(["memray", "flamegraph", os.path.expanduser("~/Desktop/memprof.out"), "-o", os.path.expanduser("~/Desktop/memprof_graph.html")])
+        # subprocess.run(["open",  os.path.expanduser("~/Desktop/memprof_graph.html")])
 
     @unittest.skip
     def test_RandomForces(self):
@@ -626,6 +642,7 @@ class CMCCTests(unittest.TestCase):
             opt.force_modified_reactant_geom
         ]).show()
 
+    @unittest.skip
     def test_ExportNew(self):
         import warnings
         warnings.filterwarnings("ignore", category=RuntimeWarning)
