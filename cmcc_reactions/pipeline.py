@@ -743,6 +743,7 @@ def run_optimization_pipeline(
             input_data.trajectory = run_refined_trajectory(input_data.trajectory, **refined_trajectory_optimization_settings)
 
             if output_file is not None:
+                print(f"saving to {output_file}...")
                 input_data.save(output_file)
 
         trajectory:gen_prods.ReoptimizedTrajectoryData = input_data.trajectory
@@ -761,6 +762,7 @@ def run_optimization_pipeline(
             input_data.optimized_forces = optimizer.to_data()
 
             if output_file is not None:
+                print(f"saving to {output_file}...")
                 input_data.save(output_file)
 
         if 'fmrds' in steps:
@@ -780,6 +782,7 @@ def run_optimization_pipeline(
             input_data.fmrds = [f[2] for f in fmrds]
 
             if output_file is not None:
+                print(f"saving to {output_file}...")
                 input_data.save(output_file)
 
         if 'internals' in steps:
@@ -803,9 +806,11 @@ def run_optimization_pipeline(
                 input_data.fmrds = input_data.fmrds + [f[2] for f in fmrds]
 
             if output_file is not None:
+                print(f"saving to {output_file}...")
                 input_data.save(output_file)
     finally:
         if output_file is not None:
+            print(f"saving to {output_file}...")
             input_data.save(output_file)
 
     return input_data
@@ -836,10 +841,13 @@ def generate_from_product_library(
         force_modification_settings=None,
         max_iterations=500,
         tol=1e-8,
+        sbatch_kwargs=None,
         submit=True,
         max_products=None,
         **global_options
 ):
+    if sbatch_kwargs is None:
+        sbatch_kwargs = {'mem':'15G', 'time':'8:00:00'}
     def callback(product_data, product_file, input_file=input_file):
         targ_dir = os.path.dirname(product_file)
         product_file = os.path.basename(product_file)
@@ -862,7 +870,7 @@ def generate_from_product_library(
                     tol=tol,
                     energy_evaluator=energy_evaluator,
                     verbose=verbose,
-                    sbatch_kwargs={}, # disable stuff
+                    sbatch_kwargs=sbatch_kwargs, # disable stuff
                     post_processor='none',
                     **global_options
                 )
