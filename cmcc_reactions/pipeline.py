@@ -644,6 +644,7 @@ def run_internal_fmrds(optimizer,
                        memprof=None,
                        **opts):
     if memprof is not None:
+        print(f"Writing memory profile to {memprof}")
         import memray
         try:
             os.remove(memprof)
