@@ -1478,9 +1478,36 @@ class ForceOptimizer:
     @classmethod
     def _select_angles(cls, internals, *, optimizer, fragment_indices=None):
         return cls._select_by_filter(internals, filter=lambda x:len(x)==3, optimizer=optimizer, fragment_indices=fragment_indices)
+
+    def compute_gammas(self, which=None, mass_weight=True, displacements=None, use_internals=False):
+        dd = self.get_displacement_dirs(
+            mass_weight=mass_weight,
+            use_internals=use_internals,
+            displacements=displacements
+        )
+        if which is not None:
+            d = dd[which,]
+        else:
+            d = dd
+        if use_internals:
+            dx_ts = self.internal_mols[1].get_cartesians_by_internals(1, strip_embedding=True)[0]
+            direction_ts = np.dot(d, dx_ts)
+
+            dx_rs = self.internal_mols[0].get_cartesians_by_internals(1, strip_embedding=True)[0]
+            dirs = np.dot(d, dx_rs)
+        else:
+            dirs = direction_ts = d
+
+        return compute_reaction_gamma(self.rs, self.ts,
+                                      dirs,
+                                      direction_ts=direction_ts,
+                                      use_mode_space=self.use_mode_space,
+                                      # modes=self.prepped_modes
+                                      )
     def reoptimize_internals_with_force(self,
                                         which,
                                         magnitude=50,
+                                        mass_weight=False,
                                         max_internals=None,
                                         units='PicoJoules/Meters',
                                         displacements=None,
@@ -1513,8 +1540,11 @@ class ForceOptimizer:
             lookup_internals_index = True
         if not nput.is_int(which) and lookup_internals_index:
             which = coordops.zmatrix_indices(self.internals, which)
-        if max_internals is not None and not nput.is_int(which):
-            which = which[:max_internals]
+        if max_internals is not None and not nput.is_int(which) and len(which) > max_internals:
+            which = np.asanyarray(which)
+            gammas = self.compute_gammas(which, use_internals=use_internals, displacements=displacements, mass_weight=mass_weight)
+            sel = np.argpartition(gammas, -max_internals)[-max_internals:]
+            which = which[sel,]
         return self.reoptimize_with_force(
             which,
             magnitude=magnitude,
