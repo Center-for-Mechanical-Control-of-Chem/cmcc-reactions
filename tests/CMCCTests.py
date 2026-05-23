@@ -18,13 +18,13 @@ import pprint
 import tempfile as tf
 import cmcc_reactions.reaction_data_schema as schema
 # import cmcc_reactions.data_analysis_tools as thc_tools
-import cmcc_reactions.generate_reaction_products as gen_prods
 import cmcc_reactions.trajectory_tools as trajt
 import cmcc_reactions.reaction_data_analysis as rda
-import cmcc_reactions.coordinate_choice as cocho
-import cmcc_reactions.optimal_directions as fopt
 import cmcc_reactions.utils as utils
 import cmcc_reactions.pipeline as pipeline
+import cmcc_reactions.generate_reaction_products as gen_prods
+import cmcc_reactions.coordinate_choice as cocho
+import cmcc_reactions.optimal_directions as fopt
 
 __all__ = [
     "CMCCTests"
