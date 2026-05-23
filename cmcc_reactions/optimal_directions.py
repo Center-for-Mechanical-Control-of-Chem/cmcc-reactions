@@ -1253,6 +1253,7 @@ class ForceOptimizer:
                               output_dir=None,
                               info_file='force_modified_{mode}_{mag}.json',
                               displacements=None,
+                              verbose=False,
                               # displacement_generator=None,
                               **opts):
         smol_mode = nput.is_int(mode)
@@ -1278,6 +1279,8 @@ class ForceOptimizer:
             conv = 1
 
         res = []
+        if verbose:
+            print(f"Optimizing forces over modes {modes} and magnitudes {mags}")
         for mode in modes:
             for magnitude in mags:
                 magnitude = conv * magnitude
@@ -1514,6 +1517,7 @@ class ForceOptimizer:
                                         use_internals=True,
                                         lookup_internals_index=None,
                                         fragment_indices=None,
+                                        verbose=False,
                                         **opts
                                         ):
         if displacements is None:
@@ -1551,6 +1555,7 @@ class ForceOptimizer:
             units=units,
             displacements=displacements,
             use_internals=use_internals,
+            verbose=verbose,
             **opts
         )
     # def reoptimize
