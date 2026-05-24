@@ -592,6 +592,7 @@ def plot_reaction_profile(
         ts_idx=None,
         reactant_idx=None,
         mark_critical_points=True,
+        critical_point_style=None,
         baseline=None,
         hessians=None,
         **opts):
@@ -621,11 +622,12 @@ def plot_reaction_profile(
         ) | opts)
     )
     if mark_critical_points:
+        if critical_point_style is None:
+            critical_point_style = {'color':'black'}
         plt.ScatterPlot(
             [x1[r], x1[ts], x1[p]],
             [e[r], e[ts], e[p]],
-            color='black',
-            figure=figure
+            **(dict(figure=figure) | critical_point_style)
         )
     if return_metrics:
         return figure, x1
