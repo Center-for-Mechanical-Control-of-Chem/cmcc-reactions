@@ -338,6 +338,33 @@ class BarrierHeightDataset:
         _[mask] = True
         return _, filter_data
 
+    @classmethod
+    def group_mask(cls, values, keys, filter):
+        ids1 = nput.group_by(np.arange(len(keys)), keys)[0]
+        mask = np.full(len(keys), False)
+        for id, g in zip(*ids1):
+            submask = filter(id, values[g,])
+            mask[g[submask]] = True
+        return mask
+    @classmethod
+    def mask_first(cls, data, n):
+        mask = np.full(len(data), False)
+        mask[:n] = True
+        return mask
+    @classmethod
+    def mask_last(cls, data, n):
+        mask = np.full(len(data), False)
+        mask[-n:] = True
+        return mask
+    @classmethod
+    def last_few(cls, keys, n):
+        return cls.group_mask(np.zeros(len(keys)), keys,
+                              lambda d:cls.mask_last(d, n))
+    @classmethod
+    def first_few(cls, keys, n):
+        return cls.group_mask(np.zeros(len(keys)), keys,
+                              lambda d:cls.mask_first(d, n))
+
     def filter_by_props(self,
                         filter_map,
                         energy_units="Kilocalories/Mole",
@@ -365,10 +392,12 @@ class BarrierHeightDataset:
         return fig
 
     @classmethod
-    def from_dataset_loader(cls, loader,
+    def from_dataset_loader(cls,
+                            loader,
                             field_map=None,
                             filter=None,
                             discarded_keys=None,
+                            annotation_generator=None,
                             **etc):
 
         if field_map is None:
@@ -440,6 +469,16 @@ class BarrierHeightDataset:
 
             fmrd_ids.extend(np.arange(nterms))
 
+
+            if annotation_generator is not None:
+                annotation_data = annotation_generator(id, data)
+                for k,v in annotation_data.items():
+                    if dev.is_atomic(v) or len(v) < nterms:
+                        v = [v] * nterms
+                    if k not in results: results[k] = []
+                    results[k].extend(v)
+
+
         reactant_energies = results.pop('reactant_energies')
         fm_reactant_energies = results.pop('force_modified_reactant_energies')
         transition_state_energies = results.pop('transition_state_energies')
@@ -458,7 +497,8 @@ class BarrierHeightDataset:
         )
 
     @classmethod
-    def from_file_list(cls, files, dataset=None,
+    def from_file_list(cls, files,
+                       dataset=None,
                        discarded_keys=("initial_trajectory_hessians", "refined_trajectory_hessians"),
                        file_loader=None, **opts):
         if dataset is None:
