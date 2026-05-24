@@ -836,24 +836,7 @@ def run_optimization_pipeline(
 
     return input_data
 
-def generate_from_product_library(
-        template=None,
-        fragments=None,
-        active_sites=None,
-        chiralities=None,
-        output_dir=None,
-        conf_gen_options=None,
-        take_unique=True,
-        num_structs=10,
-        calc=None,
-        evaluate_energy=True,
-        energy_evaluator='aimnet2',
-        preoptimize=True,
-        optimizer_settings=None,
-        smiles_hash_generator='inchi',
-        parallelizer=None,
-        batch_size=50,
-        verbose=True,
+def generator_callback(
         input_file=None,
         output_file="pipeline_data.json",
         steps=None,
@@ -864,7 +847,8 @@ def generate_from_product_library(
         tol=1e-8,
         sbatch_kwargs=None,
         submit=True,
-        max_products=None,
+        energy_evaluator=None,
+        verbose=True,
         **global_options
 ):
     if sbatch_kwargs is None:
@@ -914,40 +898,118 @@ def generate_from_product_library(
                 print(f"Wrote to `{out_file}`")
         finally:
             os.chdir(curdir)
+    return callback
 
-    if steps is None or 'products' in steps:
-        gen_prods.generate_products_and_optimize(
-            template,
-            fragments,
-            active_sites,
-            chiralities=chiralities,
-            output_dir=output_dir,
-            conf_gen_options=conf_gen_options,
-            take_unique=take_unique,
-            num_structs=num_structs,
-            calc=calc,
-            evaluate_energy=evaluate_energy,
-            energy_evaluator=energy_evaluator,
-            preoptimize=preoptimize,
-            optimizer_settings=optimizer_settings,
-            smiles_hash_generator=smiles_hash_generator,
-            parallelizer=parallelizer,
-            batch_size=batch_size,
-            verbose=verbose,
-            max_products=max_products,
-            callback=callback
-        )
-    else:
-        if output_dir is None:
-            output_dir = '.'
-        if input_file is None:
-            input_file = 'product.json'
-        for n,f in enumerate(glob.glob(f"{output_dir}/**/{input_file}", recursive=True)):
-            product_data = utils.read_namedtuple(f)
-            print(f"Submitting updates for {f}")
-            callback(product_data, f)
-            if max_products is not None and n >= max_products:
-                break
+def generate_from_product_library(
+        template=None,
+        fragments=None,
+        active_sites=None,
+        chiralities=None,
+        output_dir=None,
+        conf_gen_options=None,
+        take_unique=True,
+        num_structs=10,
+        calc=None,
+        evaluate_energy=True,
+        energy_evaluator='aimnet2',
+        preoptimize=True,
+        optimizer_settings=None,
+        smiles_hash_generator='inchi',
+        parallelizer=None,
+        batch_size=50,
+        verbose=True,
+        input_file=None,
+        max_products=None,
+        steps=None,
+        output_file="pipeline_data.json",
+        trajectory_optimization_settings=None,
+        optimized_force_settings=None,
+        force_modification_settings=None,
+        max_iterations=500,
+        tol=1e-8,
+        sbatch_kwargs=None,
+        submit=True,
+        **global_options
+):
+    callback = generator_callback(
+        input_file=input_file,
+        output_file=output_file,
+        steps=steps,
+        trajectory_optimization_settings=trajectory_optimization_settings,
+        optimized_force_settings=optimized_force_settings,
+        force_modification_settings=force_modification_settings,
+        max_iterations=max_iterations,
+        tol=tol,
+        sbatch_kwargs=sbatch_kwargs,
+        submit=submit,
+        energy_evaluator=energy_evaluator,
+        verbose=verbose,
+        **global_options
+    )
+    gen_prods.generate_products_and_optimize(
+        template,
+        fragments,
+        active_sites,
+        chiralities=chiralities,
+        output_dir=output_dir,
+        conf_gen_options=conf_gen_options,
+        take_unique=take_unique,
+        num_structs=num_structs,
+        calc=calc,
+        evaluate_energy=evaluate_energy,
+        energy_evaluator=energy_evaluator,
+        preoptimize=preoptimize,
+        optimizer_settings=optimizer_settings,
+        smiles_hash_generator=smiles_hash_generator,
+        parallelizer=parallelizer,
+        batch_size=batch_size,
+        verbose=verbose,
+        max_products=max_products,
+        callback=callback
+    )
+
+def generate_from_directory(
+        output_dir,
+        energy_evaluator='aimnet2',
+        verbose=True,
+        input_file=None,
+        max_products=None,
+        steps=None,
+        output_file="pipeline_data.json",
+        trajectory_optimization_settings=None,
+        optimized_force_settings=None,
+        force_modification_settings=None,
+        max_iterations=500,
+        tol=1e-8,
+        sbatch_kwargs=None,
+        submit=True,
+        **global_options
+):
+    callback = generator_callback(
+        input_file=input_file,
+        output_file=output_file,
+        steps=steps,
+        trajectory_optimization_settings=trajectory_optimization_settings,
+        optimized_force_settings=optimized_force_settings,
+        force_modification_settings=force_modification_settings,
+        max_iterations=max_iterations,
+        tol=tol,
+        sbatch_kwargs=sbatch_kwargs,
+        submit=submit,
+        energy_evaluator=energy_evaluator,
+        verbose=verbose,
+        **global_options
+    )
+    if output_dir is None:
+        output_dir = '.'
+    if input_file is None:
+        input_file = 'product.json'
+    for n, f in enumerate(glob.glob(f"{output_dir}/**/{input_file}", recursive=True)):
+        product_data = utils.read_namedtuple(f)
+        print(f"Submitting updates for {f}")
+        callback(product_data, f)
+        if max_products is not None and n >= max_products:
+            break
 
 def compress_pipeline_data(
         top_dir,

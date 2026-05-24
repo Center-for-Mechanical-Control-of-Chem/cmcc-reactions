@@ -499,7 +499,7 @@ def refine_trajectory(product_data: ReoptimizedTrajectoryData | TrajectoryData,
             _, subinds = get_critical_points(new_images, energies=new_energies, hessians=new_hessians,
                                              ts_idx=(subinds.ts if fix_ts and len(new_images) == len(traj) else None))
 
-            if post_opt_optimizer is not None:
+            if post_opt_generator is not None:
                 if post_opt_settings is None:
                     post_opt_settings = optimizer_settings
                 post_opt_settings = dict(
