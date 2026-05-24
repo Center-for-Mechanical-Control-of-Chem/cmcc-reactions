@@ -368,6 +368,7 @@ class BarrierHeightDataset:
     def from_dataset_loader(cls, loader,
                             field_map=None,
                             filter=None,
+                            discarded_keys=None,
                             **etc):
 
         if field_map is None:
@@ -406,6 +407,13 @@ class BarrierHeightDataset:
             if filter is not None:
                 test = filter(data)
                 if not test: continue
+            if discarded_keys is not None:
+                needs_copy = True
+                for k in discarded_keys:
+                    if needs_copy and k in data:
+                        data = data.copy()
+                        needs_copy = False
+                    data.pop(k)
 
             nterms = len(fmres)
             for k,f in field_map['vectors'].items():
@@ -450,12 +458,24 @@ class BarrierHeightDataset:
         )
 
     @classmethod
-    def from_file_list(cls, files, dataset=None, **opts):
+    def from_file_list(cls, files, dataset=None,
+                       discarded_keys=("initial_trajectory_hessians", "refined_trajectory_hessians"),
+                       file_loader=None, **opts):
         if dataset is None:
             dataset = {}
+        if file_loader is None:
+            file_loader = dev.read_json
         def loader():
             for f in files:
-                dataset[f] = dev.read_json(f)
+                data = file_loader(f)
+                if discarded_keys is not None:
+                    needs_copy = True
+                    for k in discarded_keys:
+                        if needs_copy and k in data:
+                            data = data.copy()
+                            needs_copy = False
+                        data.pop(k)
+                dataset[f] = data
                 yield f, dataset[f]
         return cls.from_dataset_loader(loader(), dataset=dataset, **opts)
 

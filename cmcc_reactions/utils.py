@@ -224,28 +224,22 @@ def write_json(file, data, **opts):
     return file
 
 def read_json(file, normalize=True, **opts):
-    if not hasattr(file, 'read'):
-        with open(file) as fp:
-            data = json.load(fp)
-    else:
-        data = json.load(file)
+    data = dev.read_json(file, **opts)
     if normalize:
         return normalize_tree(data)
     else:
         return data
 
-def write_tree(file, data, compress=None, mode=None, precompression_function=None, **opts):
+def write_tree(file, data, compress=None, mode=None, encoder=None, writer=None, precompression_function=None, **opts):
     if mode is None:
         if isinstance(file, str) and os.path.splitext(file)[-1] == '.json':
             mode = 'json'
         else:
             mode = 'npz'
     if mode == 'json':
-        if not hasattr(file, 'write'):
-            with open(file, 'w+') as fp:
-                json.dump(data, fp, cls=BaseEncoder, **opts)
-        else:
-            json.dump(data, file, cls=BaseEncoder, **opts)
+        if (writer is None or writer is json.dump) and encoder is None:
+            encoder = BaseEncoder
+        return dev.write_json(file, data, writer=writer, encoder=encoder, **opts)
     else:
         if compress is None:
             compress = True
