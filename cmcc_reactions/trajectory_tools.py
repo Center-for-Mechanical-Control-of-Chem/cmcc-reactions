@@ -484,7 +484,6 @@ def refine_trajectory(product_data: ReoptimizedTrajectoryData | TrajectoryData,
                                              climb=climb,
                                              **method_options)
             new_images2 = prof.generate(base_images=new_images,
-                                       logger=logger,
                                        **ts_opt_settings)
 
             mod_pos = [
