@@ -367,6 +367,7 @@ class BarrierHeightDataset:
     @classmethod
     def from_dataset_loader(cls, loader,
                             field_map=None,
+                            filter=None,
                             **etc):
 
         if field_map is None:
@@ -402,6 +403,9 @@ class BarrierHeightDataset:
             check = field_map['vectors']['force_modified_transition_state_energies']
             fmres = data.get(check)
             if fmres is None: continue
+            if filter is not None:
+                test = filter(data)
+                if not test: continue
 
             nterms = len(fmres)
             for k,f in field_map['vectors'].items():
@@ -456,9 +460,17 @@ class BarrierHeightDataset:
         return cls.from_dataset_loader(loader(), dataset=dataset, **opts)
 
     @classmethod
-    def from_file_pattern(cls, top_dir, js_pattern='**/pipeline_data.json', recursive=True, **opts):
+    def from_file_pattern(cls, top_dir, js_pattern='**/pipeline_data.json', recursive=True,
+                          file_filter=None,
+                          max_files=None,
+                          **opts):
+        files = glob.glob(os.path.join(top_dir, js_pattern), recursive=recursive)
+        if file_filter is not None:
+            files = file_filter(files)
+        if max_files is not None:
+            files = files[:max_files]
         return cls.from_file_list(
-            glob.glob(os.path.join(top_dir, js_pattern), recursive=recursive),
+            files,
             **opts
         )
 
