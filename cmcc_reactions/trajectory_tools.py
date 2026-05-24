@@ -351,14 +351,17 @@ def get_critical_points(trajectory, energies=None, initial=None, gradients=None,
 def refine_trajectory(product_data: ReoptimizedTrajectoryData | TrajectoryData,
                       trajectory_data: ReoptimizedTrajectoryData | TrajectoryData = None,
                       energy_evaluator=None,
-                      profile_generator='pys-dimer',
+                      profile_generator='neb',
                       output_dir=None,
                       info_file='refined.json',
                       method_options=None,
                       climb=True,
-                      ts_opt_generator=None,  # 'pys-dimer',
+                      ts_opt_generator='pys-ts',  # 'pys-dimer',
                       ts_opt_settings=None,
                       ts_opt_optimizer=None,
+                      post_opt_generator='neb',  # 'pys-dimer',
+                      post_opt_settings=None,
+                      post_opt_optimizer=None,
                       # thresh='gau_tight',
                       thresh=None,
                       tol=None,
@@ -367,9 +370,9 @@ def refine_trajectory(product_data: ReoptimizedTrajectoryData | TrajectoryData,
                       refine_ts=True,
                       optimizer_settings=None,
                       which='final',
-                      max_iterations=None,
-                      max_refinement_iterations=None,
-                      fix_ts=False,
+                      max_iterations=50,
+                      max_refinement_iterations=3,
+                      fix_ts=True,
                       logger=None,
                       **calc_options
                       ):
@@ -449,6 +452,9 @@ def refine_trajectory(product_data: ReoptimizedTrajectoryData | TrajectoryData,
                 max_refinement_iterations = max_iterations
         elif max_refinement_iterations is None:
             max_refinement_iterations = max_iterations
+        ts_opt_settings = dict(
+            logger=logger
+        ) | ts_opt_settings
 
         rxn = Reaction([traj[inds.react]], [traj[inds.prod]])
         if method_options is None:
@@ -469,7 +475,8 @@ def refine_trajectory(product_data: ReoptimizedTrajectoryData | TrajectoryData,
         new_grads = [e[1] for e in expansions]
         new_hessians = [e[2] for e in expansions]
 
-        _, subinds = get_critical_points(traj, energies=energies, hessians=new_hessians)
+        _, subinds = get_critical_points(new_images, energies=new_energies, hessians=new_hessians,
+                                         ts_idx=(inds.ts if fix_ts and len(new_images) == len(traj) else None))
         if ts_opt_generator is not None:
             rxn = Reaction([new_images[subinds.react]], [new_images[subinds.prod]])
             prof = rxn.get_profile_generator(ts_opt_generator,
@@ -489,6 +496,41 @@ def refine_trajectory(product_data: ReoptimizedTrajectoryData | TrajectoryData,
                 new_energies[i] = e[0]
                 new_grads[i] = e[1]
                 new_hessians[i] = e[2]
+            new_images = new_images2
+            _, subinds = get_critical_points(new_images, energies=new_energies, hessians=new_hessians,
+                                             ts_idx=(subinds.ts if fix_ts and len(new_images) == len(traj) else None))
+
+            if post_opt_optimizer is not None:
+                if post_opt_settings is None:
+                    post_opt_settings = optimizer_settings
+                post_opt_settings = dict(
+                    logger=logger,
+                    max_iterations=max_refinement_iterations,
+                ) | post_opt_settings
+
+                if fix_ts:
+                    post_opt_settings['fixed_images'] = [inds.ts]
+
+                rxn = Reaction([new_images[subinds.react]], [new_images[subinds.prod]])
+                prof = rxn.get_profile_generator(post_opt_generator,
+                                                 energy_evaluator=energy_evaluator,
+                                                 climb=climb,
+                                                 **method_options)
+                new_images2 = prof.generate(base_images=new_images,
+                                            **post_opt_settings)
+
+                mod_pos = [
+                    (i, m) for i, m in enumerate(new_images2)
+                    if m not in new_images
+                ]
+                new_expansions = [(i, m.calculate_energy(order=2)) for i, m in mod_pos]
+                for i, e in new_expansions:
+                    new_energies[i] = e[0]
+                    new_grads[i] = e[1]
+                    new_hessians[i] = e[2]
+                new_images = new_images2
+                _, subinds = get_critical_points(new_images, energies=new_energies, hessians=new_hessians,
+                                                 ts_idx=(subinds.ts if fix_ts and len(new_images) == len(traj) else None))
 
         new_ts_idx = subinds.ts
     else:
