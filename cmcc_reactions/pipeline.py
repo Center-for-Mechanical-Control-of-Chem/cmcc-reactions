@@ -929,6 +929,7 @@ def generate_from_product_library(
         tol=1e-8,
         sbatch_kwargs=None,
         submit=True,
+        run_from_directory=False,
         **global_options
 ):
     callback = generator_callback(
@@ -946,27 +947,67 @@ def generate_from_product_library(
         verbose=verbose,
         **global_options
     )
-    gen_prods.generate_products_and_optimize(
-        template,
-        fragments,
-        active_sites,
-        chiralities=chiralities,
-        output_dir=output_dir,
-        conf_gen_options=conf_gen_options,
-        take_unique=take_unique,
-        num_structs=num_structs,
-        calc=calc,
-        evaluate_energy=evaluate_energy,
-        energy_evaluator=energy_evaluator,
-        preoptimize=preoptimize,
-        optimizer_settings=optimizer_settings,
-        smiles_hash_generator=smiles_hash_generator,
-        parallelizer=parallelizer,
-        batch_size=batch_size,
-        verbose=verbose,
-        max_products=max_products,
-        callback=callback
-    )
+    if run_from_directory:
+        gen_prods.generate_products_and_optimize(
+            template,
+            fragments,
+            active_sites,
+            chiralities=chiralities,
+            output_dir=output_dir,
+            conf_gen_options=conf_gen_options,
+            take_unique=take_unique,
+            num_structs=num_structs,
+            calc=calc,
+            evaluate_energy=evaluate_energy,
+            energy_evaluator=energy_evaluator,
+            preoptimize=preoptimize,
+            optimizer_settings=optimizer_settings,
+            smiles_hash_generator=smiles_hash_generator,
+            parallelizer=parallelizer,
+            batch_size=batch_size,
+            verbose=verbose,
+            max_products=max_products,
+            callback=None
+        )
+        generate_from_directory(
+            output_dir,
+            energy_evaluator=energy_evaluator,
+            verbose=verbose,
+            input_file=input_file,
+            max_products=max_products,
+            steps=steps,
+            output_file=output_file,
+            trajectory_optimization_settings=trajectory_optimization_settings,
+            optimized_force_settings=optimized_force_settings,
+            force_modification_settings=force_modification_settings,
+            max_iterations=max_iterations,
+            tol=tol,
+            sbatch_kwargs=sbatch_kwargs,
+            submit=submit,
+            callback=callback
+        )
+    else:
+        gen_prods.generate_products_and_optimize(
+            template,
+            fragments,
+            active_sites,
+            chiralities=chiralities,
+            output_dir=output_dir,
+            conf_gen_options=conf_gen_options,
+            take_unique=take_unique,
+            num_structs=num_structs,
+            calc=calc,
+            evaluate_energy=evaluate_energy,
+            energy_evaluator=energy_evaluator,
+            preoptimize=preoptimize,
+            optimizer_settings=optimizer_settings,
+            smiles_hash_generator=smiles_hash_generator,
+            parallelizer=parallelizer,
+            batch_size=batch_size,
+            verbose=verbose,
+            max_products=max_products,
+            callback=callback
+        )
 
 def generate_from_directory(
         output_dir,
@@ -983,23 +1024,25 @@ def generate_from_directory(
         tol=1e-8,
         sbatch_kwargs=None,
         submit=True,
+        callback=None,
         **global_options
 ):
-    callback = generator_callback(
-        input_file=input_file,
-        output_file=output_file,
-        steps=steps,
-        trajectory_optimization_settings=trajectory_optimization_settings,
-        optimized_force_settings=optimized_force_settings,
-        force_modification_settings=force_modification_settings,
-        max_iterations=max_iterations,
-        tol=tol,
-        sbatch_kwargs=sbatch_kwargs,
-        submit=submit,
-        energy_evaluator=energy_evaluator,
-        verbose=verbose,
-        **global_options
-    )
+    if callback is None:
+        callback = generator_callback(
+            input_file=input_file,
+            output_file=output_file,
+            steps=steps,
+            trajectory_optimization_settings=trajectory_optimization_settings,
+            optimized_force_settings=optimized_force_settings,
+            force_modification_settings=force_modification_settings,
+            max_iterations=max_iterations,
+            tol=tol,
+            sbatch_kwargs=sbatch_kwargs,
+            submit=submit,
+            energy_evaluator=energy_evaluator,
+            verbose=verbose,
+            **global_options
+        )
     if output_dir is None:
         output_dir = '.'
     if input_file is None:
