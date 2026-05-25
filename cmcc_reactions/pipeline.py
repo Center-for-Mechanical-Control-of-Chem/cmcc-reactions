@@ -425,7 +425,7 @@ class OptimizedForceResults:
                      bonds=((0, 2), (1, 3)),
                      bar_color='gray',
                      bar_spacing=.2,
-                     which='initial',
+                     which='final',
                      force_modified='both',
                      **opts):
         traj = rda.DielsAlderReactionTrajectory.from_trajectory_data(self.trajectory, which=which)
