@@ -447,7 +447,7 @@ def construct_namedtuple_file_tree(top_dir, patterns="**/*.json", recursive=True
             depth = None
         nt = read_namedtuple(os.path.join(top_dir, f), loader=loader)
         if unwrap:
-            nt = nt._asdict()
+            nt = nt._asdict() | {"_type":type(nt).__name__}
         if split_paths:
             segments = dev.split_path(f)
             subtree = tree
