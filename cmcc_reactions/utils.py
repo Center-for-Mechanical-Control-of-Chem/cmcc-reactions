@@ -400,7 +400,8 @@ def isnamedtupleinstance(obj, nt_types):
             )
     )
 
-def construct_json_file_tree(top_dir, js_patterns="**/*.json", loader=None, split_paths=True, recursive=True):
+def construct_json_file_tree(top_dir, js_patterns="**/*.json", loader=None, split_paths=True, recursive=True,
+                             track_depths=False):
     tree = {}
     if isinstance(js_patterns, str):
         js_patterns = [js_patterns]
@@ -408,6 +409,10 @@ def construct_json_file_tree(top_dir, js_patterns="**/*.json", loader=None, spli
     for pattern in js_patterns:
         files.extend(glob.glob(pattern, root_dir=top_dir, recursive=recursive))
     for f in files:
+        if track_depths:
+            depth = len(dev.split_path(f)) - 1
+        else:
+            depth = None
         data = dev.read_json(os.path.join(top_dir, f), loader=loader)
         if split_paths:
             segments = dev.split_path(f)
@@ -417,12 +422,13 @@ def construct_json_file_tree(top_dir, js_patterns="**/*.json", loader=None, spli
                     subtree[s] = {}
                 subtree = subtree[s]
             name = os.path.splitext(segments[-1])[0]
-            subtree[name] = data
+            subtree[name] = (depth, data) if track_depths else data
         else:
-            tree[f] = dev.read_json(os.path.join(top_dir, f), loader=loader)
+            tree[f] = (depth, data) if track_depths else data
     return tree
 
-def construct_namedtuple_file_tree(top_dir, patterns="**/*.json", recursive=True, split_paths=True, loader=None, unwrap=False):
+def construct_namedtuple_file_tree(top_dir, patterns="**/*.json", recursive=True, split_paths=True, loader=None,
+                                   track_depths=False, unwrap=False):
     tree = {}
     if isinstance(patterns, str):
         patterns = [patterns]
@@ -430,6 +436,10 @@ def construct_namedtuple_file_tree(top_dir, patterns="**/*.json", recursive=True
     for pattern in patterns:
         files.extend(glob.glob(pattern, root_dir=top_dir, recursive=recursive))
     for f in files:
+        if track_depths:
+            depth = len(dev.split_path(f)) - 1
+        else:
+            depth = None
         nt = read_namedtuple(os.path.join(top_dir, f), loader=loader)
         if unwrap:
             nt = nt._asdict()
@@ -441,9 +451,9 @@ def construct_namedtuple_file_tree(top_dir, patterns="**/*.json", recursive=True
                     subtree[s] = {}
                 subtree = subtree[s]
             name = os.path.splitext(segments[-1])[0]
-            subtree[name] = nt
+            subtree[name] = (depth, nt) if track_depths else nt
         else:
-            tree[f] = nt
+            tree[f] = (depth, nt) if track_depths else nt
     return tree
 
 def annotate_json_file_tree(top_dir, js_patterns, get_annotations=None, recursive=True, **opts):
