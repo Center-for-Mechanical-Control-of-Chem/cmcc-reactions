@@ -1191,9 +1191,6 @@ def compress_pipeline_data(
             unwrap=True,
             track_depths=True
         )
-    if precompression_function is None and output_mode == 'npz':
-        precompression_function = utils.prep_compressed_namedtuple_data
-    tree = _prep_pipeline_tree(tree, precompression_function)
     if output_file is not None:
         if output_mode is None:
             if isinstance(output_file, str):
@@ -1203,6 +1200,9 @@ def compress_pipeline_data(
                     output_mode = 'npz'
             else:
                 output_mode = loader
+        if precompression_function is None and output_mode == 'npz':
+            precompression_function = utils.prep_compressed_namedtuple_data
+        tree = _prep_pipeline_tree(tree, precompression_function)
         if output_mode == 'json':
             dev.write_json(output_file, tree)
         else:
