@@ -15,6 +15,7 @@ import McUtils.Devutils as dev
 from McUtils.Data import UnitsData, BondData
 import McUtils.Numputils as nput
 import McUtils.Plots as plt
+import McUtils.Iterators as itut
 from Psience.Molecools import Molecule
 
 __all__ = [
@@ -159,17 +160,17 @@ class ForceModifiedReactionAnalyzer:
         self.transition_state = Molecule(atoms, transition_state_geom)
         self.force_modified_transition_state = Molecule(atoms, force_modified_transition_state_geom)
 
-    def animate_reactant_distortion(self):
+    def animate_reactant_distortion(self, **opts):
         return self.reactant.plot([
             self.reactant.coords,
             self.force_modified_reactant.coords
-        ])
+        ], **opts)
 
-    def animate_ts_distortion(self):
+    def animate_ts_distortion(self, **opts):
         return self.transition_state.plot([
             self.transition_state.coords,
             self.force_modified_transition_state.coords
-        ])
+        ], **opts)
 
 class BarrierHeightDataset:
     def __init__(self,
@@ -213,6 +214,15 @@ class BarrierHeightDataset:
         self.dataset = dataset
         for k, v in meta_fields.items():
             setattr(self, k, v)
+
+    def __repr__(self):
+        return f"{type(self).__name__}<{len(self)}>"
+
+    def __len__(self):
+        return len(self.barriers)
+    def __iter__(self):
+        for i in range(self.__len__()):
+            yield self.load_opt_res(index=i)
 
     def get_tree_data(self, index):
         if self.dataset is None:
@@ -339,13 +349,51 @@ class BarrierHeightDataset:
         return _, filter_data
 
     @classmethod
-    def group_mask(cls, values, keys, filter):
-        ids1 = nput.group_by(np.arange(len(keys)), keys)[0]
-        mask = np.full(len(keys), False)
-        for id, g in zip(*ids1):
-            submask = filter(id, values[g,])
-            mask[g[submask]] = True
+    def aggregate_mask_inds(cls, keys):
+        if nput.is_atomic(keys[0]):
+            keys = [keys]
+        id_groups = [nput.group_indices(k)[0] for k in keys]
+        for id_idx_groups in itertools.product(*[zip(*gg) for gg in id_groups]):
+            ids = tuple(i.tolist() for i, g in id_idx_groups)
+            if len(ids) == 1: ids = ids[0]
+            g = id_idx_groups[0][1]
+            for _, g2 in id_idx_groups[1:]:
+                g = np.intersect1d(g, g2)
+            yield ids, g
+    @classmethod
+    def aggregate_mask_values(cls, values, keys):
+        if isinstance(values, dict):
+            values = {
+                k: np.asanyarray(v) if nput.is_array_like(v) else v
+                for k, v in values.items()
+            }
+        elif nput.is_array_like(values):
+            values = np.asanyarray(values)
+        for ids, g in cls.aggregate_mask_inds(keys):
+            if isinstance(values, dict):
+                subvals = {
+                    k: v[g,] if isinstance(values, np.ndarray) else [v[i] for i in g]
+                    for k, v in values.items()
+                }
+            else:
+                subvals = values[g,] if isinstance(values, np.ndarray) else [values[i] for i in g]
+            yield ids, g, subvals
+
+    @classmethod
+    def aggregate_by_groups(cls, values, keys):
+        res = {}
+        for ids, g, subvals in cls.aggregate_mask_values(values, keys):
+            res[ids] = subvals
+        return res
+
+    @classmethod
+    def group_mask(cls, values, keys, filter, mode='any'):
+        mask = np.full(len(keys), False if mode == 'any' else True)
+        for ids, g, subvals in cls.aggregate_mask_values(values, keys):
+            submask = filter(ids, subvals)
+            mask[g[submask],] = True if mode == 'any' else False
         return mask
+
     @classmethod
     def mask_first(cls, data, n):
         mask = np.full(len(data), False)
@@ -365,6 +413,26 @@ class BarrierHeightDataset:
         return cls.group_mask(np.zeros(len(keys)), keys,
                               lambda d:cls.mask_first(d, n))
 
+    @classmethod
+    def match_sets(cls, value_arrays, matches):
+        value_arrays = [np.asanyarray(v) if nput.is_array_like(v) else v for v in value_arrays]
+        match_arrays = itut.transpose(matches)
+        match_unique = [np.unique(m).tolist() for m in match_arrays]
+        array_matches_unique = [
+            {
+                m: a == m if isinstance(a, np.ndarray) else np.array([aa == m for aa in a])
+                for m in match_list
+            }
+            for a, match_list in zip(value_arrays, match_unique)
+        ]
+        mask = np.full(len(value_arrays[0]), False)
+        for match in matches:
+            submask = array_matches_unique[0][match[0]]
+            for a, m in zip(array_matches_unique[1:], match[1:]):
+                submask = submask & a[m]
+            mask = mask | submask
+        return mask
+
     def filter_by_props(self,
                         filter_map,
                         energy_units="Kilocalories/Mole",
@@ -372,6 +440,19 @@ class BarrierHeightDataset:
                         ):
         mask, _ = self.get_filter_mask(filter_map, energy_units=energy_units, force_units=force_units)
         return self.filter_by_mask(mask)
+
+    def aggregate_by_props(self, value_keys, aggregation_keys,
+                           energy_units="Kilocalories/Mole",
+                           force_units="Picojoules/Meters"
+                           ):
+        filter_data = self.get_filter_data(
+            energy_units=energy_units,
+            force_units=force_units
+        )
+        if isinstance(aggregation_keys, str): aggregation_keys = [aggregation_keys]
+        if isinstance(value_keys, str): value_keys = [value_keys]
+        return self.aggregate_by_groups(tuple(filter_data[v] for v in value_keys),
+                                        tuple(filter_data[k] for k in aggregation_keys))
 
     def plot(self, color=None, force_units="Picojoules/Meters", **etc):
         if color is None and self.force_magnitudes is not None:
