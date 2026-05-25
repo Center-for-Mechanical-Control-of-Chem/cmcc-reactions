@@ -559,23 +559,38 @@ class OptimizedForceResults:
     def transition_state(self):
         return self.refined_trajectory.transition_state
 
-    def animate_reactant_distortion(self, fmrd_index, **opts):
-        return self.reactant.plot([
+    def animate_reactant_distortion(self, fmrd_index, embed=True, embedding_indices=None, **opts):
+        coords = [
             self.reactant.coords,
             self.fmrds[fmrd_index].force_modified_reactant_geom
-        ], **opts)
+        ]
+        if embed:
+            if nput.is_int(embedding_indices):
+                embedding_indices = self.reactant.fragment_indices[embedding_indices]
+            coords = self.reactant.embed_coords(coords, sel=embedding_indices)
+        return self.reactant.plot(coords, **opts)
 
-    def animate_ts_distortion(self, fmrd_index, **opts):
-        return self.transition_state.plot([
+    def animate_ts_distortion(self, fmrd_index, embed=True, embedding_indices=None, **opts):
+        coords = [
             self.transition_state.coords,
             self.fmrds[fmrd_index].force_modified_transition_state_geom
-        ], **opts)
+        ]
+        if embed:
+            if nput.is_int(embedding_indices):
+                embedding_indices = self.transition_state.fragment_indices[embedding_indices]
+            coords = self.transition_state.embed_coords(coords, sel=embedding_indices)
+        return self.transition_state.plot(coords, **opts)
 
-    def animate_ts_refinement(self, **opts):
-        return self.transition_state.plot([
+    def animate_ts_refinement(self, embed=True, embedding_indices=None, **opts):
+        coords = [
             self.initial_trajectory.transition_state.coords,
             self.transition_state.coords
-        ], **opts)
+        ]
+        if embed:
+            if nput.is_int(embedding_indices):
+                embedding_indices = self.transition_state.fragment_indices[embedding_indices]
+            coords = self.transition_state.embed_coords(coords, sel=embedding_indices)
+        return self.transition_state.plot(coords, **opts)
 
 
 
