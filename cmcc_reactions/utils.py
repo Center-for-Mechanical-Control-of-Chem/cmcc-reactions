@@ -230,7 +230,9 @@ def read_json(file, normalize=True, **opts):
     else:
         return data
 
-def write_tree(file, data, compress=None, mode=None, encoder=None, writer=None, precompression_function=None, **opts):
+def write_tree(file, data, compress=None, mode=None, encoder=None, writer=None, precompression_function=None,
+               compress_npz=None,
+               **opts):
     if mode is None:
         if isinstance(file, str) and os.path.splitext(file)[-1] == '.json':
             mode = 'json'
@@ -263,12 +265,15 @@ def write_tree(file, data, compress=None, mode=None, encoder=None, writer=None, 
                 i = index_remapping[k]
                 arrays[f'arr_{i}'] = array_data
                 array_keys.append(i)
+        if compress_npz is None:
+            compress_npz = compress
         return np.savez(
             file,
             shapes=shapes,
             key_names=key_names,
             array_keys=array_keys,
             visited_keys=visited_keys,
+            compress=compress_npz,
             **arrays
         )
 def dumps_tree(data, compress=None, mode='json', **opts):
