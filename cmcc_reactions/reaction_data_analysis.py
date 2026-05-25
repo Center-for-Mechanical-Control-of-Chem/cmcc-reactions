@@ -606,7 +606,7 @@ class BarrierHeightDataset:
                         if needs_copy and k in data:
                             data = data.copy()
                             needs_copy = False
-                        data.pop(k)
+                        data.pop(k, None)
                 dataset[f] = data
                 yield f, dataset[f]
         return cls.from_dataset_loader(loader(), dataset=dataset, **opts)
