@@ -630,6 +630,8 @@ class BarrierHeightDataset:
     def from_tree(cls, tree, depth=None, target_key='smiles', **opts):
         def loader(tree, depth, prefix=None):
             for k, v in tree.items():
+                if hasattr(v, '_asdict'):
+                    v = v._asdict()
                 if depth is None:
                     if not isinstance(v, dict):
                         return # break entire loop

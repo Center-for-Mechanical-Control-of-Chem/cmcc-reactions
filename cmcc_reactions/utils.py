@@ -143,7 +143,7 @@ def decompress_tree(serial_tree, unprep_tree=True):
     tree_stack = collections.deque()
     key_map = serial_tree.pop('key_map')
     block_pointers = {}
-    for k in serial_tree['visited_keys']:
+    for i,k in enumerate(serial_tree['visited_keys']):
         if k >= 0:
             s = key_map[k]
             data = serial_tree.get(k)
@@ -161,7 +161,11 @@ def decompress_tree(serial_tree, unprep_tree=True):
                     shape = ()
                 else:
                     block_size = np.prod(shape, dtype=int)
-                arr = array_data[array_pointer:array_pointer+block_size].reshape(shape)
+                try:
+                    arr = array_data[array_pointer:array_pointer+block_size].reshape(shape)
+                except ValueError:
+                    print(k, s, block_size)
+                    raise
                 block_pointers[k] = (shape_offset+1, array_pointer + block_size)
                 if arr.ndim == 0:
                     if np.issubdtype(arr.dtype, np.dtype(float)) and np.isnan(arr):
@@ -174,6 +178,9 @@ def decompress_tree(serial_tree, unprep_tree=True):
                 tree_stack.append(tree)
                 tree = tree[s]
         else:
+            if len(tree_stack) == 0:
+                prev = serial_tree[max(i-6, 0):i]
+                raise ValueError(f"exhausted tree stack, previous 6 tree entries: {prev}")
             tree = tree_stack.pop()
     if unprep_tree:
         tree = undictify_lists(tree)
