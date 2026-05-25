@@ -8,7 +8,7 @@ with open("README.md") as f:
 
 setuptools.setup(
     name="cmcc-reactions",
-    version="0.0.2.1",
+    version="1.0.0",
     description="Tools for working with mechanochemically activated reactions",
     long_description=long_description,
     long_description_content_type="text/markdown",
