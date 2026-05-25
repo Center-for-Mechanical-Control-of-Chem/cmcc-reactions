@@ -534,7 +534,7 @@ class BarrierHeightDataset:
                     if needs_copy and k in data:
                         data = data.copy()
                         needs_copy = False
-                    data.pop(k)
+                    data.pop(k, None)
 
             nterms = len(fmres)
             for k,f in field_map['vectors'].items():

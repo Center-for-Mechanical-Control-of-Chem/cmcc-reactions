@@ -711,6 +711,20 @@ def run_internal_fmrds(optimizer,
             **opts
         )
 
+def run_pressure_fmrds(optimizer,
+                       pressure_model='xhcff',
+                       magnitude=(500, 1000, 5000, 10000, 15000),
+                       verbose=True,
+                       pool=None,
+                       **opts):
+    return optimizer.reoptimize_with_pressure(
+        magnitude=magnitude,
+        pool=pool,
+        pressure_model=pressure_model,
+        verbose=verbose,
+        **opts
+    )
+
 def run_optimization_pipeline(
         input_data: str | gen_prods.InitialProductData | OptimizedForceResults | OptimizedForcePipelineData,
         output_file=None,
@@ -722,6 +736,7 @@ def run_optimization_pipeline(
         optimized_force_settings=None,
         force_modification_settings=None,
         internal_force_modification_settings=None,
+        pressure_force_modification_settings=None,
         max_iterations=500,
         tol=1e-8,
         energy_evaluator=None,
@@ -861,6 +876,31 @@ def run_optimization_pipeline(
             internal_force_modification_settings = global_options | internal_force_modification_settings
             overwrite = internal_force_modification_settings.pop('overwrite', False)
             fmrds = run_internal_fmrds(optimizer, **internal_force_modification_settings)
+            if input_data.fmrds is None or overwrite:
+                input_data.fmrds = [f[2] for f in fmrds]
+            else:
+                input_data.fmrds = input_data.fmrds + [f[2] for f in fmrds]
+
+            if output_file is not None:
+                print(f"saving to {output_file}...")
+                input_data.save(output_file)
+
+        if 'pressure' in steps:
+            if optimizer is None:
+                opt_force = input_data.optimized_forces
+                if opt_force is None:
+                    raise ValueError("optimized forces needed to get force modified reaction data")
+                optimizer = fopt.ForceOptimizer.from_data(opt_force)
+            if verbose:
+                print('running pressure')
+
+            if pressure_force_modification_settings is None:
+                pressure_force_modification_settings = force_modification_settings
+            if pressure_force_modification_settings is None:
+                pressure_force_modification_settings = {}
+            pressure_force_modification_settings = global_options | pressure_force_modification_settings
+            overwrite = pressure_force_modification_settings.pop('overwrite', False)
+            fmrds = run_pressure_fmrds(optimizer, **pressure_force_modification_settings)
             if input_data.fmrds is None or overwrite:
                 input_data.fmrds = [f[2] for f in fmrds]
             else:
