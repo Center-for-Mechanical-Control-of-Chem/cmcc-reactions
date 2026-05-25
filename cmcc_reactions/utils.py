@@ -365,7 +365,7 @@ def write_namedtuple(file, obj, compress=None, mode=None, **opts):
 def dumps_namedtuple(obj, compress=None, mode='json', **opts):
     d = obj._asdict() | {"_type":type(obj).__name__}
     return dumps_tree(d, compress=compress, mode=mode, precompression_function=prep_compressed_namedtuple_data, **opts)
-def make_namedtuple(obj, nt_type=None, key=None, in_place=False):
+def make_namedtuple(obj, nt_type=None, key=None, raise_on_untyped=True, in_place=False):
     if key is not None:
         if not isinstance(key, str):
             key = [key]
@@ -374,7 +374,11 @@ def make_namedtuple(obj, nt_type=None, key=None, in_place=False):
     if not in_place: obj = obj.copy()
     tn = obj.pop('_type', None)
     if nt_type is None:
-        if tn is None: raise ValueError("can't load `namedtuple` without type name")
+        if tn is None:
+            if raise_on_untyped:
+                raise ValueError("can't load `namedtuple` without type name")
+            else:
+                return None
         nt_type = tn
     if isinstance(nt_type, str):
         nt_type = namedtuple_registry[nt_type]
@@ -392,12 +396,12 @@ def decompress_namedtuple_data(data):
                 for tag, d in v.items()
             }
     return data
-def read_namedtuple(file, nt_type=None, decompress=None, mode=None, key=None, **opts):
+def read_namedtuple(file, nt_type=None, decompress=None, mode=None, key=None, raise_on_untyped=True, **opts):
     obj = read_tree(file, decompress=decompress, mode=mode, decompression_function=decompress_namedtuple_data, **opts)
-    return make_namedtuple(obj, nt_type=nt_type, key=key, in_place=True)
-def loads_namedtuple(buf, nt_type=None, decompress=None, mode='json', key=None, **opts):
+    return make_namedtuple(obj, nt_type=nt_type, key=key, in_place=True, raise_on_untyped=raise_on_untyped)
+def loads_namedtuple(buf, nt_type=None, decompress=None, mode='json', key=None, raise_on_untyped=True, **opts):
     obj = loads_tree(buf, decompress=decompress, decompression_function=decompress_namedtuple_data, mode=mode, **opts)
-    return make_namedtuple(obj, nt_type=nt_type, key=key, in_place=True)
+    return make_namedtuple(obj, nt_type=nt_type, key=key, in_place=True, raise_on_untyped=raise_on_untyped)
 def isnamedtupleinstance(obj, nt_types):
     if not isinstance(nt_types, tuple):
         nt_types = (nt_types,)
@@ -443,7 +447,7 @@ def construct_json_file_tree(top_dir, js_patterns="**/*.json", loader=None, spli
 
 def construct_namedtuple_file_tree(top_dir, patterns="**/*.json", recursive=True, split_paths=True, loader=None,
                                    filter=None,
-                                   track_depths=False, unwrap=False):
+                                   track_depths=False, unwrap=False, ignore_bad=False):
     tree = {}
     if isinstance(patterns, str):
         patterns = [patterns]
@@ -455,7 +459,8 @@ def construct_namedtuple_file_tree(top_dir, patterns="**/*.json", recursive=True
             depth = len(dev.split_path(f)) - 1
         else:
             depth = None
-        nt = read_namedtuple(os.path.join(top_dir, f), loader=loader)
+        nt = read_namedtuple(os.path.join(top_dir, f), loader=loader, raise_on_untyped=not ignore_bad)
+        if nt is None: continue
         if unwrap:
             nt = nt._asdict() | {"_type":type(nt).__name__}
         if filter is not None and not filter(f, nt): continue

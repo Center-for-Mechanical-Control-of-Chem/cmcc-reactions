@@ -1168,6 +1168,7 @@ def compress_pipeline_data(
         js_loader=None,
         precompression_function=None,
         filter=None,
+        ignore_bad=False,
         output_mode=None,
         output_file=None
 ):
@@ -1191,6 +1192,7 @@ def compress_pipeline_data(
             recursive=recursive,
             loader=js_loader,
             filter=filter,
+            ignore_bad=ignore_bad,
             unwrap=True,
             track_depths=True
         )
