@@ -454,23 +454,34 @@ class BarrierHeightDataset:
         return self.aggregate_by_groups(tuple(filter_data[v] for v in value_keys),
                                         tuple(filter_data[k] for k in aggregation_keys))
 
-    def plot(self, color=None, force_units="Picojoules/Meters", **etc):
+    def plot(self, color=None, force_units="Picojoules/Meters", figure=None, plot_baseline=None, baseline=0, baseline_styles=None, **etc):
         if color is None and self.force_magnitudes is not None:
             force_units = force_units.replace("newtons", "Newtons").replace("Newtons", "joules/Meters")
             color = self.force_magnitudes * UnitsData.convert("Hartrees/BohrRadius", force_units)
 
-        fig = plt.ScatterPlot(self.barriers * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
-                              self.deltas * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
-                              **(
-                                      dict(
-                                      color=color,
-                                      axes_labels=[r"$E_a^\text{solv}$ (kcal mol$^{-1}$)",
-                                                   r"$\Delta E_a^\text{mech}$ (kcal mol$^{-1}$)"]
-                                  ) | etc
-                              )
-                              )
-        fig = plt.Plot(fig.plot_range[0], [0, 0], figure=fig, linestyle='dashed')
-        return fig
+        if plot_baseline is None:
+            plot_baseline = figure is None
+        figure = plt.ScatterPlot(self.barriers * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
+                                 self.deltas * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
+                                 **(
+                                         dict(
+                                             figure=figure,
+                                             color=color,
+                                             axes_labels=[r"$E_a^\text{solv}$ (kcal mol$^{-1}$)",
+                                                          r"$\Delta E_a^\text{mech}$ (kcal mol$^{-1}$)"]
+                                         ) | etc
+                                 ))
+        if plot_baseline:
+            if nput.is_numeric(baseline):
+                baseline = [baseline]
+            if baseline_styles is None:
+                baseline_styles = {'color':'gray'}
+            if isinstance(baseline_styles, dict):
+                baseline_styles = [baseline_styles] * len(baseline)
+            for b, s in zip(baseline, baseline_styles):
+                s = dict(figure=figure, linestyle='dashed') | s
+                plt.Plot(figure.plot_range[0], [b, b], **s)
+        return figure
 
     @classmethod
     def from_dataset_loader(cls,

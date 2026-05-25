@@ -114,6 +114,8 @@ class OptimizedForceResults:
     fmrds: list[fopt.ForceModifiedReactionData]|None = None
 
     _optimizer = None
+    _ti = None
+    _tf = None
 
     field_mapping = {
         'product':
@@ -537,6 +539,44 @@ class OptimizedForceResults:
                     fmrd=fmrd
                 )
         return figure
+
+    @property
+    def initial_trajectory(self):
+        if self._ti is None:
+            self._ti = self.trajectory_analyzer(which='initial')
+        return self._ti
+
+    @property
+    def refined_trajectory(self):
+        if self._tf is None:
+            self._tf = self.trajectory_analyzer(which='final')
+        return self._tf
+
+    @property
+    def reactant(self):
+        return self.refined_trajectory.reactant
+    @property
+    def transition_state(self):
+        return self.refined_trajectory.transition_state
+
+    def animate_reactant_distortion(self, fmrd_index, **opts):
+        return self.reactant.plot([
+            self.reactant.coords,
+            self.fmrds[fmrd_index].force_modified_reactant_geom
+        ], **opts)
+
+    def animate_ts_distortion(self, fmrd_index, **opts):
+        return self.transition_state.plot([
+            self.transition_state.coords,
+            self.fmrds[fmrd_index].force_modified_transition_state_geom
+        ], **opts)
+
+    def animate_ts_refinement(self, **opts):
+        return self.transition_state.plot([
+            self.initial_trajectory.transition_state.coords,
+            self.transition_state.coords
+        ], **opts)
+
 
 
     # product: gen_prods.InitialProductData|None = None
