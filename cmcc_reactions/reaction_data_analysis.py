@@ -635,7 +635,7 @@ class BarrierHeightDataset:
                 if depth is None:
                     if not isinstance(v, dict):
                         return # break entire loop
-                    elif target_key in tree:
+                    elif target_key in v:
                         if prefix is None:
                             yield (k,), v
                         else:
