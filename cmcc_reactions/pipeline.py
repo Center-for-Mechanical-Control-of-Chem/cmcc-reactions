@@ -1152,7 +1152,6 @@ def generate_from_directory(
 def _prep_pipeline_tree(tree, precompression_function):
     if isinstance(tree, tuple):
         _, tree = tree
-        tree = tree['pipeline_data']
         if precompression_function is not None:
             tree = precompression_function(tree)
         return tree
