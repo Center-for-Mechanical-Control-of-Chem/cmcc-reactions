@@ -1149,6 +1149,81 @@ def generate_from_directory(
         if max_products is not None and n >= max_products:
             break
 
+def generate_from_product_library_set(
+        template_data:list[dict],
+        output_dir=None,
+        conf_gen_options=None,
+        take_unique=True,
+        num_structs=10,
+        calc=None,
+        evaluate_energy=True,
+        energy_evaluator='aimnet2:aimnet2-nse',
+        preoptimize=True,
+        optimizer_settings=None,
+        smiles_hash_generator='inchi',
+        parallelizer=None,
+        batch_size=50,
+        verbose=True,
+        input_file=None,
+        max_products=None,
+        steps=None,
+        output_file="pipeline_data.json",
+        trajectory_optimization_settings=None,
+        optimized_force_settings=None,
+        force_modification_settings=None,
+        max_iterations=500,
+        tol=1e-8,
+        sbatch_kwargs=None,
+        submit=True,
+        run_from_directory=False,
+        **global_options
+):
+    all_temps = []
+    all_frags = []
+    all_active_sites = []
+    all_chiralities = []
+
+    for d in template_data:
+        all_temps.append(d['template'])
+        all_frags.append(d['fragments'])
+        all_active_sites.append(d['active_sites'])
+        all_chiralities.append(d['chiralities'])
+
+    for t,f,a,c in zip(all_temps, all_frags, all_active_sites, all_chiralities):
+        generate_from_product_library(
+            template=t,
+            fragments=f,
+            active_sites=a,
+            chiralities=c,
+            output_dir=output_dir,
+            conf_gen_options=conf_gen_options,
+            take_unique=take_unique,
+            num_structs=num_structs,
+            calc=calc,
+            evaluate_energy=evaluate_energy,
+            energy_evaluator=energy_evaluator,
+            preoptimize=preoptimize,
+            optimizer_settings=optimizer_settings,
+            smiles_hash_generator=smiles_hash_generator,
+            parallelizer=parallelizer,
+            batch_size=batch_size,
+            verbose=verbose,
+            input_file=input_file,
+            max_products=max_products,
+            steps=steps,
+            output_file=output_file,
+            trajectory_optimization_settings=trajectory_optimization_settings,
+            optimized_force_settings=optimized_force_settings,
+            force_modification_settings=force_modification_settings,
+            max_iterations=max_iterations,
+            tol=tol,
+            sbatch_kwargs=sbatch_kwargs,
+            submit=submit,
+            run_from_directory=run_from_directory,
+            **global_options
+        )
+
+
 def _prep_pipeline_tree(tree, precompression_function):
     if isinstance(tree, tuple):
         _, tree = tree
