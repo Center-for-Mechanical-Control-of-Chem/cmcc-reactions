@@ -288,18 +288,14 @@ def normalize_tree(data):
     else:
         return data
 
-def read_tree(file, decompress=None, mode=None, decompression_function=None, **opts):
+def read_tree(file, decompress=None, mode=None, decompression_function=None, loader=None, **opts):
     if mode is None:
         if isinstance(file, str) and os.path.splitext(file)[-1] == '.json':
             mode = 'json'
         else:
             mode = 'npz'
     if mode == 'json':
-        if not hasattr(file, 'read'):
-            with open(file) as fp:
-                data = json.load(fp, **opts)
-        else:
-            data = json.load(file, **opts)
+        data = dev.read_json(file, loader=loader, **opts)
         return normalize_tree(data)
     else:
         if decompress is None: decompress = True
