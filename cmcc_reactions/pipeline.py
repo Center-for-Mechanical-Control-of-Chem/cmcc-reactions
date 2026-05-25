@@ -1167,6 +1167,7 @@ def compress_pipeline_data(
         recursive=True,
         js_loader=None,
         precompression_function=None,
+        filter=None,
         output_mode=None,
         output_file=None
 ):
@@ -1180,7 +1181,8 @@ def compress_pipeline_data(
             js_patterns=patterns,
             loader=js_loader,
             recursive=recursive,
-            track_depths=True
+            track_depths=True,
+            filter=filter
         )
     else:
         tree = utils.construct_namedtuple_file_tree(
@@ -1188,6 +1190,7 @@ def compress_pipeline_data(
             patterns=patterns,
             recursive=recursive,
             loader=js_loader,
+            filter=filter,
             unwrap=True,
             track_depths=True
         )

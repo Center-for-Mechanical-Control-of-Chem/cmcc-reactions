@@ -413,6 +413,7 @@ def isnamedtupleinstance(obj, nt_types):
     )
 
 def construct_json_file_tree(top_dir, js_patterns="**/*.json", loader=None, split_paths=True, recursive=True,
+                             filter=None,
                              track_depths=False):
     tree = {}
     if isinstance(js_patterns, str):
@@ -426,6 +427,7 @@ def construct_json_file_tree(top_dir, js_patterns="**/*.json", loader=None, spli
         else:
             depth = None
         data = dev.read_json(os.path.join(top_dir, f), loader=loader)
+        if filter is not None and not filter(f, data): continue
         if split_paths:
             segments = dev.split_path(f)
             subtree = tree
@@ -440,6 +442,7 @@ def construct_json_file_tree(top_dir, js_patterns="**/*.json", loader=None, spli
     return tree
 
 def construct_namedtuple_file_tree(top_dir, patterns="**/*.json", recursive=True, split_paths=True, loader=None,
+                                   filter=None,
                                    track_depths=False, unwrap=False):
     tree = {}
     if isinstance(patterns, str):
@@ -455,6 +458,7 @@ def construct_namedtuple_file_tree(top_dir, patterns="**/*.json", recursive=True
         nt = read_namedtuple(os.path.join(top_dir, f), loader=loader)
         if unwrap:
             nt = nt._asdict() | {"_type":type(nt).__name__}
+        if filter is not None and not filter(f, nt): continue
         if split_paths:
             segments = dev.split_path(f)
             subtree = tree
