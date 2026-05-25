@@ -1154,6 +1154,7 @@ def compress_pipeline_data(
         patterns="**/pipeline_data.json",
         loader=None,
         recursive=True,
+        precompression_function=None,
         output_mode=None,
         output_file=None
 ):
@@ -1189,15 +1190,25 @@ def compress_pipeline_data(
         if output_mode == 'json':
             dev.write_json(output_file, tree)
         else:
+            if precompression_function is None and output_mode == 'npz':
+                precompression_function = utils.prep_compressed_namedtuple_data
             utils.write_tree(output_file, tree,
                              mode=output_mode,
-                             precompression_function=(
-                                 utils.prep_compressed_namedtuple_data
-                                    if loader != 'json' else
-                                 None
-                             ))
+                             precompression_function=precompression_function)
 
     return tree
+
+def read_pipeline_data(pipeline_file,  mode=None, decompression_function=None):
+    if mode is None:
+        if isinstance(pipeline_file, str):
+            if os.path.splitext(pipeline_file)[1] == '.json':
+                mode = 'json'
+            else:
+                mode = 'npz'
+    if decompression_function is None and mode == 'npz':
+        decompression_function = utils.decompress_namedtuple_data
+    return utils.read_tree(pipeline_file, mode=mode, decompression_function=decompression_function)
+
 
 def _unwrap_nts(pipeline_data):
     return {

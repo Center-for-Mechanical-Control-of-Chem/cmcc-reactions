@@ -530,7 +530,7 @@ class CMCCTests(unittest.TestCase):
         )
         trajt.compare_profiles(yeesh, marker='o').show()
 
-    # @unittest.skip
+    @unittest.skip
     def test_InternalsForces(self):
         import warnings
         warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -655,6 +655,8 @@ class CMCCTests(unittest.TestCase):
 
         res.compare_profiles().show()
 
+    def test_LoadPipelineNPZ(self):
+        uuh = utils.read_tree('/Users/Mark/Documents/Postdoc/Projects/CMCC/disub_alt.npz')
 
 if __name__ == '__main__':
     os.chdir(root)

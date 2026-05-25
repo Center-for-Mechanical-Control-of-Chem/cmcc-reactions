@@ -303,6 +303,8 @@ def read_tree(file, decompress=None, mode=None, decompression_function=None, **o
         return normalize_tree(data)
     else:
         if decompress is None: decompress = True
+        if not os.path.isfile(file):
+            raise FileNotFoundError(f"npz loading requires a real file, got {file}")
         zdata = np.load(file)
         key_names = zdata['key_names']
         visited_keys = zdata['visited_keys']
@@ -402,7 +404,7 @@ def isnamedtupleinstance(obj, nt_types):
             )
     )
 
-def construct_json_file_tree(top_dir, js_patterns="**/*.json", recursive=True):
+def construct_json_file_tree(top_dir, js_patterns="**/*.json", loader=None, split_paths=True, recursive=True):
     tree = {}
     if isinstance(js_patterns, str):
         js_patterns = [js_patterns]
@@ -410,17 +412,21 @@ def construct_json_file_tree(top_dir, js_patterns="**/*.json", recursive=True):
     for pattern in js_patterns:
         files.extend(glob.glob(pattern, root_dir=top_dir, recursive=recursive))
     for f in files:
-        segments = dev.split_path(f)
-        subtree = tree
-        for s in segments[:-1]:
-            if s not in subtree:
-                subtree[s] = {}
-            subtree = subtree[s]
-        name = os.path.splitext(segments[-1])[0]
-        subtree[name] = dev.read_json(os.path.join(top_dir, f))
+        data = dev.read_json(os.path.join(top_dir, f), loader=loader)
+        if split_paths:
+            segments = dev.split_path(f)
+            subtree = tree
+            for s in segments[:-1]:
+                if s not in subtree:
+                    subtree[s] = {}
+                subtree = subtree[s]
+            name = os.path.splitext(segments[-1])[0]
+            subtree[name] = data
+        else:
+            tree[f] = dev.read_json(os.path.join(top_dir, f), loader=loader)
     return tree
 
-def construct_namedtuple_file_tree(top_dir, patterns="**/*.json", recursive=True, unwrap=False):
+def construct_namedtuple_file_tree(top_dir, patterns="**/*.json", recursive=True, split_paths=True, loader=None, unwrap=False):
     tree = {}
     if isinstance(patterns, str):
         patterns = [patterns]
@@ -428,17 +434,20 @@ def construct_namedtuple_file_tree(top_dir, patterns="**/*.json", recursive=True
     for pattern in patterns:
         files.extend(glob.glob(pattern, root_dir=top_dir, recursive=recursive))
     for f in files:
-        segments = dev.split_path(f)
-        subtree = tree
-        for s in segments[:-1]:
-            if s not in subtree:
-                subtree[s] = {}
-            subtree = subtree[s]
-        name = os.path.splitext(segments[-1])[0]
-        nt = read_namedtuple(os.path.join(top_dir, f))
+        nt = read_namedtuple(os.path.join(top_dir, f), loader=loader)
         if unwrap:
             nt = nt._asdict()
-        subtree[name] = nt
+        if split_paths:
+            segments = dev.split_path(f)
+            subtree = tree
+            for s in segments[:-1]:
+                if s not in subtree:
+                    subtree[s] = {}
+                subtree = subtree[s]
+            name = os.path.splitext(segments[-1])[0]
+            subtree[name] = nt
+        else:
+            tree[f] = nt
     return tree
 
 def annotate_json_file_tree(top_dir, js_patterns, get_annotations=None, recursive=True, **opts):
