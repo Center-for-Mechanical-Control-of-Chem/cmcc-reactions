@@ -1165,6 +1165,7 @@ def compress_pipeline_data(
         patterns="**/pipeline_data.json",
         loader=None,
         recursive=True,
+        js_loader=None,
         precompression_function=None,
         output_mode=None,
         output_file=None
@@ -1177,6 +1178,7 @@ def compress_pipeline_data(
         tree = utils.construct_json_file_tree(
             top_dir,
             js_patterns=patterns,
+            loader=js_loader,
             recursive=recursive,
             track_depths=True
         )
@@ -1185,6 +1187,7 @@ def compress_pipeline_data(
             top_dir,
             patterns=patterns,
             recursive=recursive,
+            loader=js_loader,
             unwrap=True,
             track_depths=True
         )

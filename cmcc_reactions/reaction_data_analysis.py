@@ -627,19 +627,33 @@ class BarrierHeightDataset:
         )
 
     @classmethod
-    def from_tree(cls, tree, depth=1, **opts):
+    def from_tree(cls, tree, depth=None, target_key='smiles', **opts):
         def loader(tree, depth, prefix=None):
             for k, v in tree.items():
-                if depth > 0:
-                    if prefix is None:
-                        yield from loader(v, depth-1, (k,))
+                if depth is None:
+                    if not isinstance(v, dict):
+                        return # break entire loop
+                    elif target_key in tree:
+                        if prefix is None:
+                            yield (k,), v
+                        else:
+                            yield prefix+(k,), v
                     else:
-                        yield from loader(v, depth-1, prefix=prefix+(k,))
+                        if prefix is None:
+                            yield from loader(v, None, (k,))
+                        else:
+                            yield from loader(v, None, prefix=prefix + (k,))
                 else:
-                    if prefix is None:
-                        yield (k,), v
+                    if depth > 0:
+                        if prefix is None:
+                            yield from loader(v, depth-1, (k,))
+                        else:
+                            yield from loader(v, depth-1, prefix=prefix+(k,))
                     else:
-                        yield prefix+(k,), v
+                        if prefix is None:
+                            yield (k,), v
+                        else:
+                            yield prefix+(k,), v
         return cls.from_dataset_loader(
             loader(tree, depth),
             dataset=tree,
