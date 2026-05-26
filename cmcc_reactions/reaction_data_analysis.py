@@ -263,6 +263,8 @@ class BarrierHeightDataset:
 
     def filter_by_mask(self, mask):
         mi = np.where(mask)[0]
+        return self.filter_by_inds(mi)
+    def filter_by_inds(self, mi):
         opts = {
             k: [fms[i] for i in mi] if fms is not None else None
             for k, fms in {
@@ -280,10 +282,10 @@ class BarrierHeightDataset:
             }
 
         return type(self)(
-            self.reactant_energies[mask],
-            self.fm_reactant_energies[mask],
-            self.transition_state_energies[mask],
-            self.fm_transition_state_energies[mask],
+            self.reactant_energies[mi,],
+            self.fm_reactant_energies[mi,],
+            self.transition_state_energies[mi,],
+            self.fm_transition_state_energies[mi,],
             dataset=self.dataset,
             **opts
         )
@@ -440,6 +442,21 @@ class BarrierHeightDataset:
                         ):
         mask, _ = self.get_filter_mask(filter_map, energy_units=energy_units, force_units=force_units)
         return self.filter_by_mask(mask)
+
+    def __getitem__(self, item):
+        if callable(item):
+            item = [item]
+        if nput.is_int(item):
+            return self.load_opt_res(item)
+        elif isinstance(item, slice) or nput.is_int(item[0]) or (item[0] is True or item[0] is False):
+            inds = np.arange(len(self.reactant_energies))
+            if isinstance(item, slice) or item[0] is True or item[0] is False:
+                inds = inds[item]
+            else:
+                inds = inds[item,]
+            return self.filter_by_inds(inds)
+        else:
+            return self.filter_by_mask(item)
 
     def aggregate_by_props(self, value_keys, aggregation_keys,
                            energy_units="Kilocalories/Mole",
