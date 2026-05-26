@@ -456,7 +456,7 @@ class BarrierHeightDataset:
                 inds = inds[item,]
             return self.filter_by_inds(inds)
         else:
-            return self.filter_by_mask(item)
+            return self.filter_by_props(item)
 
     def aggregate_by_props(self, value_keys, aggregation_keys,
                            energy_units="Kilocalories/Mole",
