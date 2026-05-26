@@ -1218,7 +1218,7 @@ class ForceOptimizer:
                 )
                 if dev.str_in(remove_orientation, ['translation', 'translations'], ignore_case=True):
                     dx = dx[..., (0, 1, 2), :]
-                elif dev.str_startswith(remove_orientation, ['rotation', 'rotations'], ignore_case=True):
+                elif dev.str_in(remove_orientation, ['rotation', 'rotations'], ignore_case=True):
                     dx = dx[..., (3, 4, 5), :]
                 proj = nput.frame_displacement_projector(np.moveaxis(dx, -1, -2), self.ts.masses, mass_weighted=False)
                 # rot = rot @ proj
