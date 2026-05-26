@@ -1216,6 +1216,10 @@ class ForceOptimizer:
                     *self.rs.fragment_indices,
                     masses=self.ts.masses
                 )
+                if dev.str_in(remove_orientation, ['translation', 'translations'], ignore_case=True):
+                    dx = dx[..., (0, 1, 2), :]
+                elif dev.str_startswith(remove_orientation, ['rotation', 'rotations'], ignore_case=True):
+                    dx = dx[..., (3, 4, 5), :]
                 proj = nput.frame_displacement_projector(np.moveaxis(dx, -1, -2), self.ts.masses, mass_weighted=False)
                 # rot = rot @ proj
                 rot = rot @ np.moveaxis(proj, -1, -2)
@@ -1573,7 +1577,7 @@ class ForceOptimizer:
         dist_fractions = dists / np.max(dists)
         scaled_normals = dist_fractions[..., np.newaxis] * normals * fmax
         return scaled_normals.reshape((1, -1))
-    def _xhcff_pressure(self, ts: Molecule, coords, *, pressure, surface_points=200, radius_scaling=1.2):
+    def _xhcff_pressure(self, ts: Molecule, coords, *, pressure, surface_points=500, radius_scaling=1.2):
         coords = np.asanyarray(coords).reshape((-1, 3))
         surf = ts.modify(coords=coords).get_surface(samples=surface_points,
                                                     radius_scaling=radius_scaling).get_triangulation()
@@ -1664,7 +1668,7 @@ class ForceOptimizer:
                                  pressure_model='xhcff',
                                  pressure_options=None,
                                  apply_constraints=False,
-                                 remove_orientation=False,
+                                 remove_orientation='rotation',
                                  displacements=None,
                                  **etc
                                  ):
