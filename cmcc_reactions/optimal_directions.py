@@ -679,6 +679,7 @@ class ForceOptimizer:
                  projection_internals=None,
                  reactant_hessian=None,
                  transition_state_hessian=None,
+                 precompute_modes=True,
                  force_coeffs=None,
                  **determination_opts):
         if reactant_hessian is not None:
@@ -686,7 +687,10 @@ class ForceOptimizer:
         if transition_state_hessian is not None:
             ts_mol = ts_mol.modify(potential_derivatives=[0, transition_state_hessian])
         if reembed:
-            reactant_mol.get_normal_modes() # precompute modes
+            if precompute_modes:
+                reactant_mol.get_normal_modes() # precompute modes
+                ts_mol.get_normal_modes() # precompute modes
+            ts_mol = ts_mol.get_embedded_molecule()
             reactant_mol = reactant_mol.get_embedded_molecule(ref=ts_mol)
         self.rs:Molecule = reactant_mol
         self.ts:Molecule = ts_mol
@@ -748,7 +752,7 @@ class ForceOptimizer:
         return info_file
 
     @classmethod
-    def from_data(cls, force_data:ForceOptimizer|OptimizedForceData):
+    def from_data(cls, force_data:ForceOptimizer|OptimizedForceData, reactant=None, ts=None):
         if isinstance(force_data, ForceOptimizer):
             return force_data
         else:
@@ -757,18 +761,26 @@ class ForceOptimizer:
             ee = opts.pop('energy_evaluator', None)
             if energy_evaluator is None:
                 energy_evaluator = ee
-            reactant = Molecule(
-                force_data.atoms,
-                force_data.reactant_geom,
-                potential_derivatives=[0, np.asanyarray(force_data.reactant_hessian)],
-                energy_evaluator=energy_evaluator
-            )
-            ts = Molecule(
-                force_data.atoms,
-                force_data.transition_state_geom,
-                potential_derivatives=[0, np.asanyarray(force_data.transition_state_hessian)],
-                energy_evaluator=energy_evaluator
-            )
+            if reactant is None:
+                reactant = Molecule(
+                    force_data.atoms,
+                    force_data.reactant_geom,
+                    potential_derivatives=[0, np.asanyarray(force_data.reactant_hessian)],
+                    energy_evaluator=energy_evaluator
+                )
+            elif reactant.potential_derivatives is None:
+                reactant.potential_derivatives = [0, np.asanyarray(force_data.reactant_hessian)]
+
+            if ts is None:
+                ts = Molecule(
+                    force_data.atoms,
+                    force_data.transition_state_geom,
+                    potential_derivatives=[0, np.asanyarray(force_data.transition_state_hessian)],
+                    energy_evaluator=energy_evaluator
+                )
+            elif ts.potential_derivatives is None:
+                ts.potential_derivatives = [0, np.asanyarray(force_data.transition_state_hessian)]
+
             if 'internals' in opts:
                 opts['projection_internals'] = opts.pop('internals')
             return cls(
@@ -1571,7 +1583,7 @@ class ForceOptimizer:
         area = surf.surface_area()
         fmax = area * pressure
         centroid = np.average(coords, axis=0)
-        normals = coords - centroid[np.newaxis]
+        normals = centroid[np.newaxis] - coords
         dists = np.linalg.norm(normals, axis=1)
         normals = normals / dists[:, np.newaxis]
         dist_fractions = dists / np.max(dists)
@@ -1584,7 +1596,7 @@ class ForceOptimizer:
         groups, _ = nput.group_by(np.arange(len(surf.tri_map)), surf.tri_map)
         areas = surf.surface_area(return_components=True)
         area_fractions = areas #/ np.sum(areas)
-        normals = surf.normals
+        normals = -surf.normals
         scaled_normals = area_fractions[..., np.newaxis] * normals * pressure
         force = np.zeros_like(coords)
         for atom, inds in zip(*groups):
@@ -1627,7 +1639,7 @@ class ForceOptimizer:
             frac = nt / len(mask_inds)
             axis_term = axis_projection[x_block,][mask_block]
             contrib = axis * atom_areas[atom] * frac * pressure * np.average(axis_term)
-            force[atom] = contrib
+            force[atom] = -contrib
         return force.reshape((1, -1))
     def pressure_model_generator(self, pressure_model, pressure, **opts):
         if dev.str_is(pressure_model, 'hcff'):
@@ -1660,6 +1672,23 @@ class ForceOptimizer:
             return pressure_model(ref, coords, pressure=pressure, **opts)
         return apply_pressure
 
+    def get_pressure_distorted_geometries(self,
+                                          which=0,
+                                          disp_min=0, disp_max=5,
+                                          mass_weight=False,
+                                          pressure_model='xhcff',
+                                          pressure_options=None,
+                                          **etc):
+        if pressure_options is None:
+            pressure_options = {}
+        displacements = self.pressure_model_generator(pressure_model,
+                                                      pressure=1,
+                                                      **pressure_options)
+        return self.get_displaced_geometries(mode=which,
+                                             disp_min=disp_min, disp_max=disp_max,
+                                             mass_weight=mass_weight,
+                                             displacements=displacements, **etc)
+
     def reoptimize_with_pressure(self,
                                  magnitude=200,
                                  pressure_units="Megapascals",
@@ -1668,7 +1697,8 @@ class ForceOptimizer:
                                  pressure_model='xhcff',
                                  pressure_options=None,
                                  apply_constraints=False,
-                                 remove_orientation='rotation',
+                                 remove_orientation=True,
+                                 remove_fragment=True,
                                  displacements=None,
                                  **etc
                                  ):
@@ -1812,45 +1842,80 @@ class ForceOptimizer:
         displacements = self.get_displacement_dirs(mass_weight=mass_weight, use_internals=use_internals,
                                                    displacements=displacements)
 
-        if use_internals:
-            r, t = self.internal_mols
-        else:
-            r, t = self.rs, self.ts
+        if not callable(displacements):
+            if use_internals:
+                r, t = self.internal_mols
+            else:
+                r, t = self.rs, self.ts
 
-        if scan_values is None:
-            scan_coords_r = r.get_scan_coordinates(
-                [[disp_min, disp_max, steps]],
-                which=[mode],
-                coordinate_expansion=[displacements],
-                internals='reembed' if use_internals else False,
-                strip_embedding=True if use_internals else False
-            )
-            scan_coords_t = t.get_scan_coordinates(
-                [[disp_min, disp_max, steps]],
-                which=[mode],
-                coordinate_expansion=[displacements],
-                internals='reembed' if use_internals else False,
-                strip_embedding=True if use_internals else False
-            )
+            if scan_values is None:
+                scan_values = np.linspace(disp_min, disp_max, steps)
+                scan_coords_r = r.get_scan_coordinates(
+                    [[disp_min, disp_max, steps]],
+                    which=[mode],
+                    coordinate_expansion=[displacements],
+                    internals='reembed' if use_internals else False,
+                    strip_embedding=True if use_internals else False
+                )
+                scan_coords_t = t.get_scan_coordinates(
+                    [[disp_min, disp_max, steps]],
+                    which=[mode],
+                    coordinate_expansion=[displacements],
+                    internals='reembed' if use_internals else False,
+                    strip_embedding=True if use_internals else False
+                )
+            else:
+                scan_values = np.asanyarray(scan_values)
+                if scan_values.ndim == 1: scan_values = scan_values[:, np.newaxis]
+                scan_coords_r = r.get_displaced_coordinates(
+                    scan_values,
+                    which=[mode],
+                    coordinate_expansion=[displacements],
+                    use_internals='reembed' if use_internals else False,
+                    strip_embedding=True if use_internals else False
+                )
+                scan_coords_t = t.get_displaced_coordinates(
+                    scan_values,
+                    which=[mode],
+                    coordinate_expansion=[displacements],
+                    use_internals='reembed' if use_internals else False,
+                    strip_embedding=True if use_internals else False
+                )
         else:
-            scan_values = np.asanyarray(scan_values)
-            if scan_values.ndim == 1: scan_values = scan_values[:, np.newaxis]
-            scan_coords_r = r.get_displaced_coordinates(
-                scan_values,
-                which=[mode],
-                coordinate_expansion=[displacements],
-                use_internals='reembed' if use_internals else False,
-                strip_embedding=True if use_internals else False
+            svs = scan_values
+            if scan_values is None:
+                scan_values = [disp_min, disp_max, steps]
+                svs = np.linspace(disp_min, disp_max, steps)
+                absolute_mesh = False
+            else:
+                absolute_mesh = True
+            def displacement_generator(coords, disp):
+                d = displacements(self.rs, coords)
+                d = self.get_displacement_dirs(mass_weight=mass_weight,
+                                               use_internals=use_internals,
+                                               displacements=d)
+                return [d], [mode]
+            _, scan_coords_r, _ = self.rs.relaxed_scan(
+                [scan_values],
+                displacement_generator,
+                max_iterations=0,
+                absolute_mesh=absolute_mesh
             )
-            scan_coords_t = t.get_displaced_coordinates(
-                scan_values,
-                which=[mode],
-                coordinate_expansion=[displacements],
-                use_internals='reembed' if use_internals else False,
-                strip_embedding=True if use_internals else False
+            def displacement_generator(coords, disp):
+                d = displacements(self.ts, coords)
+                d = self.get_displacement_dirs(mass_weight=mass_weight,
+                                               use_internals=use_internals,
+                                               displacements=d)
+                return [d], [mode]
+            _, scan_coords_t, _ = self.rs.relaxed_scan(
+                [scan_values],
+                displacement_generator,
+                max_iterations=0,
+                absolute_mesh=absolute_mesh
             )
+            scan_values = svs
 
-        return np.linspace(disp_min, disp_max, steps), scan_coords_r, scan_coords_t
+        return scan_values, scan_coords_r, scan_coords_t
 
     def get_distortion_energies(self, mode, disp_min=None, disp_max=None, steps=50,
                                 order=None,

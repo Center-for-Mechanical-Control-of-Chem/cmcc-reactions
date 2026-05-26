@@ -359,7 +359,11 @@ class OptimizedForceResults:
             return None
         else:
             if self._optimizer is None:
-                self._optimizer = fopt.ForceOptimizer.from_data(self.optimized_forces)
+                self._optimizer = fopt.ForceOptimizer.from_data(
+                    self.optimized_forces,
+                    reactant=self.reactant,
+                    ts=self.transition_state
+                )
             return self._optimizer
 
     def trajectory_analyzer(self, **opts):
@@ -554,10 +558,16 @@ class OptimizedForceResults:
 
     @property
     def reactant(self):
-        return self.refined_trajectory.reactant
+        r = self.refined_trajectory.reactant
+        if r.potential_derivatives is None and self.optimized_forces is not None:
+            r.potential_derivatives = [0, np.asanyarray(self.optimized_forces.reactant_hessian)]
+        return r
     @property
     def transition_state(self):
-        return self.refined_trajectory.transition_state
+        ts = self.refined_trajectory.transition_state
+        if ts.potential_derivatives is None and self.optimized_forces is not None:
+            ts.potential_derivatives = [0, np.asanyarray(self.optimized_forces.transition_state_hessian)]
+        return ts
 
     def animate_reactant_distortion(self, fmrd_index, embed=True, embedding_indices=None, **opts):
         coords = [

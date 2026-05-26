@@ -150,15 +150,105 @@ class ForceModifiedReactionAnalyzer:
                  force_modified_reactant_geom, force_modified_transition_state_geom,
                  reactant_energy, transition_state_energy,
                  force_modified_reactant_energy, force_modified_transition_state_energy,
+                 energy_evaluator=None,
+                 reactant_hessian=None,
+                 transition_state_hessian=None,
+                 force_vector=None,
+                 force_magnitude=None,
+                 force_units=None,
+                 mass_weight=None,
+                 internals=None,
+                 optimizer_settings=None
                  ):
         self.reactant_energy = reactant_energy
         self.transition_state_energy = transition_state_energy
         self.force_modified_reactant_energy = force_modified_reactant_energy
         self.force_modified_transition_state_energy = force_modified_transition_state_energy
-        self.reactant = Molecule(atoms, reactant_geom)
-        self.force_modified_reactant = Molecule(atoms, force_modified_reactant_geom)
-        self.transition_state = Molecule(atoms, transition_state_geom)
-        self.force_modified_transition_state = Molecule(atoms, force_modified_transition_state_geom)
+        self.reactant = Molecule(atoms, reactant_geom,
+                                 energy_evaluator=energy_evaluator,
+                                 potential_derivatives=[0, reactant_hessian] if reactant_hessian is not None else None)
+        self.force_modified_reactant = Molecule(atoms, force_modified_reactant_geom, energy_evaluator=energy_evaluator)
+        self.transition_state = Molecule(atoms, transition_state_geom,
+                                 energy_evaluator=energy_evaluator,
+                                 potential_derivatives=
+                                        [0, np.array(transition_state_hessian)]
+                                            if transition_state_hessian is not None else
+                                        None)
+        self.force_modified_transition_state = Molecule(atoms, force_modified_transition_state_geom,
+                                                        energy_evaluator=energy_evaluator)
+        self.force_vector = force_vector
+        self.force_magnitude = force_magnitude
+        self.force_units = force_units
+        self.mass_weight = mass_weight
+        self.internals = internals
+        self.optimizer_settings = optimizer_settings
+
+    @classmethod
+    def from_data(cls, data):
+        if not isinstance(data, dict):
+            data = data._asdict()
+        return cls(**data)
+
+    def plot_lines(self,
+                   bar_color=('gray', 'blue'),
+                   bar_spacing=.2,
+                   distance_metric=None,
+                   bonds=((0, 2), (1, 3)),
+                   baseline=None,
+                   figure=None,
+                   **etc
+                   ):
+        distance_metric = trajt.resolve_distance_metric(distance_metric)
+        coords1 = distance_metric(
+            [self.reactant.coords, self.transition_state.coords],
+            bonds
+        ) * UnitsData.convert("BohrRadius", "Angstroms")
+        engs1 = [
+            self.reactant_energy,
+            self.transition_state_energy
+        ]
+
+        coords2 = distance_metric(
+            [self.force_modified_reactant.coords, self.force_modified_transition_state.coords],
+            bonds
+        ) * UnitsData.convert("BohrRadius", "Angstroms")
+        engs2 = [
+            self.force_modified_reactant_energy,
+            self.force_modified_transition_state_energy
+        ]
+
+        if baseline is None:
+            baseline = self.reactant_energy
+
+        x, X = np.min([coords1, coords2]), np.max([coords1, coords2])
+        x = x - (X - x) * .1
+        X = X + (X - x) * .1
+        figure = trajt.plot_reaction_lines(
+            coords1,
+            engs1,
+            connect=True,
+            ticks=False,
+            baseline=baseline,
+            color=bar_color[0],
+            bar_spacing=bar_spacing,
+            figure=figure,
+            plot_range=[[x, X], None],
+            **etc
+        )
+
+        trajt.plot_reaction_lines(
+            coords2,
+            engs2,
+            connect=True,
+            ticks=False,
+            baseline=baseline,
+            color=bar_color[1],
+            bar_spacing=bar_spacing,
+            figure=figure,
+            **etc
+        )
+
+        return figure
 
     def animate_reactant_distortion(self, **opts):
         return self.reactant.plot([
