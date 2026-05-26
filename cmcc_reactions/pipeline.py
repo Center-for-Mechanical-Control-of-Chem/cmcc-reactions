@@ -728,7 +728,7 @@ def run_internal_fmrds(optimizer,
 
 def run_pressure_fmrds(optimizer,
                        pressure_model='xhcff',
-                       magnitude=(500, 1000, 5000, 10000, 15000),
+                       magnitude=(200, 500, 1000, 5000, 10000),
                        verbose=True,
                        pool=None,
                        **opts):
