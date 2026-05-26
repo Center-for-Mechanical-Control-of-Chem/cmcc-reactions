@@ -1223,6 +1223,9 @@ def generate_from_product_library_set(
             **global_options
         )
 
+default_pipeline_data = {
+    "template_data":...
+}
 
 def _prep_pipeline_tree(tree, precompression_function):
     if isinstance(tree, tuple):

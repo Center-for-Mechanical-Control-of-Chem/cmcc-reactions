@@ -550,13 +550,14 @@ class BarrierHeightDataset:
 
             # directions swap whenever groups cycle
             d_ids = np.zeros(nterms, dtype=int)
-            _, splits = nput.group_by(np.arange(nterms), mag_ids)[0]
-            old = splits[0][1]
-            i = 0
-            for i,s in enumerate(splits[0][2:]):
-                d_ids[old:s] = i + 1
-                old = s
-            d_ids[old:] = i + 1
+            keys, splits = nput.group_by(np.arange(nterms), mag_ids)[0]
+            if len(splits[0]) > 1:
+                old = splits[0][1]
+                i = 0
+                for i,s in enumerate(splits[0][2:]):
+                    d_ids[old:s] = i + 1
+                    old = s
+                d_ids[old:] = i + 1
             direction_ids.extend(d_ids)
 
             fmrd_ids.extend(np.arange(nterms))
