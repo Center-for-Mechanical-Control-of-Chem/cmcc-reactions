@@ -1243,6 +1243,10 @@ def _prep_pipeline_tree(tree, precompression_function):
         if precompression_function is not None:
             tree = precompression_function(tree)
         return tree
+    elif isinstance(tree, dict) and "_type" in tree:
+        if precompression_function is not None:
+            tree = precompression_function(tree)
+        return tree
     else:
         return {
             k:_prep_pipeline_tree(v, precompression_function)
