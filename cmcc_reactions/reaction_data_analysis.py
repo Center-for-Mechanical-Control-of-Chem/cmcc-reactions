@@ -335,9 +335,13 @@ class BarrierHeightDataset:
         for tt in id:
             t = t[tt]
         return t
-    def get_reduced_dataset(self):
+    def get_reduced_dataset(self, reduce_fmrds=False):
         new_ds = {}
-        for index in range(len(self)):
+        groups, subinds = nput.group_indices(self.meta_fields['data_ids'])[0]
+        if reduce_fmrds:
+            raise NotImplementedError("reducing partial dataset by fmrd is tedious")
+        for s in subinds:
+            index = s[0]
             data = self.get_tree_data(index)
             id = self.meta_fields['data_ids'][index]
             subtree = new_ds
