@@ -750,42 +750,87 @@ H	-3.015828   -1.433443    1.079180''',
             units='Angstroms',
             energy_evaluator='aimnet2'
         )
-        fopt = ForceOptimizer(rs, ts, precompute_modes=False)
-        print(fopt.ts.calculate_energy() - fopt.rs.calculate_energy())
-        _, x_r, x_t = fopt.get_pressure_distorted_geometries(steps=5,
-                                                             pressure_model='xhcff',
-                                                             # pressure_options={
-                                                             #     'axis': '-b',
-                                                             #     'radius': 10 * UnitsData.convert("Angstroms",
-                                                             #                                     "BohrRadius"),
-                                                             #     'bidirectional': True
-                                                             # }
-                                                             )
-        fopt.ts.plot(x_t, principle_axes=True).show()
 
+        # rs.plot(display_atom_numbers=True).show()
+        # ts.plot(highlight_atoms=[0, 3, 15, 16]).show()
+
+        rs = rs.optimize(mode='pysis', method='rfo', max_iterations=200, logger=True)
+        ts = ts.optimize(mode='pysis', method='ts', max_iterations=100, logger=True)
+
+        fopt = ForceOptimizer(rs, ts, precompute_modes=False)
+        # print(fopt.ts.calculate_energy() - fopt.rs.calculate_energy())
+        # _, x_r, x_t = fopt.get_pressure_distorted_geometries(steps=5,
+        #                                                      pressure_model='xhcff',
+        #                                                      # pressure_options={
+        #                                                      #     'axis': '-b',
+        #                                                      #     'radius': 10 * UnitsData.convert("Angstroms",
+        #                                                      #                                     "BohrRadius"),
+        #                                                      #     'bidirectional': True
+        #                                                       # }
+        #                                                      )
+
+        # de_data, (x_r, x_t) = fopt.get_pressure_distortion_energies(
+        #     steps=15,
+        #     return_geometries=True,
+        #     # pressure_model='xhcff',
+        #     pressure_model='cylinder',
+        #     pressure_options={
+        #         'axis': '-b',
+        #         'radius': 10 * UnitsData.convert("Angstroms", "BohrRadius"),
+        #         'bidirectional': True
+        #     }
+        # )
+        # fopt.plot_eng_comp(*de_data).show()
+        # fopt.ts.plot(x_t, principle_axes=True).show()
+
+        import McUtils.Numputils as nput
         fmd_r, fmd_t, data = fopt.reoptimize_with_pressure(
-            pressure=200,
-            pressure_units="Megapascals",
-            pressure_model='xhcff',
-            max_iterations=5
-            # pressure_options={
-            #     'axis': '-b',
-            #     'radius': 10 * UnitsData.convert("Angstroms",
-            #                                     "BohrRadius"),
-            #     'bidirectional': True
-            # }
+            1,
+            pressure_units="Gigapascals",
+            pressure_model='cylinder',
+            # pressure_model='hcff',
+            # optimizer_mode='scipy',
+            # optimizer_method='bfgs',
+            reoptimize_ts=True,
+            max_displacement=.1,
+            # pressure_model='cylinder',
+            pressure_options={
+                'axis': lambda coords, _:nput.vec_normalize(
+                    np.average(coords[(0, 3), :], axis=0)
+                    - np.average(coords[(15, 16), :], axis=0)
+                ),
+                'centroid': lambda coords:np.average(coords[(0, 3, 15, 16), :], axis=0),
+                'radius': 4 * UnitsData.convert("Angstroms", "BohrRadius"),
+                'bidirectional': True
+            },
+            max_iterations=20,
+            logger=True,
         )
 
         fmd_e_t, fmd_e_r = data.force_modified_transition_state_energy, data.force_modified_reactant_energy
         e_t, e_r = data.transition_state_energy, data.reactant_energy
 
-        print((fmd_e_t - fmd_e_r) * UnitsData.convert("Hartrees", "Kilocalories/Mole"))
-        print((e_t - e_r) * UnitsData.convert("Hartrees", "Kilocalories/Mole"))
+
+        print("Baseline: {de} kcal mol^-1".format(
+            de=(e_t - e_r) * UnitsData.convert("Hartrees", "Kilocalories/Mole")
+        ))
+        print("Pressure: {de} kcal mol^-1".format(
+            de=(fmd_e_t - fmd_e_r) * UnitsData.convert("Hartrees", "Kilocalories/Mole")
+        ))
 
         fmra = ForceModifiedReactionAnalyzer.from_data(data)
-        fmra.animate_reactant_distortion().show()
+        fmra.animate_reactant_distortion(atom_radius_scaling=1).show()
+        fmra.animate_ts_distortion(atom_radius_scaling=1).show()
         fmra.plot_lines().show()
 
+        print("Reactants:")
+        print(rs.to_string('xyz', units='Angstroms'))
+        print("Transition States:")
+        print(ts.to_string('xyz', units='Angstroms'))
+        print("Force Modified Reactant:")
+        print(fmd_r.to_string('xyz', units='Angstroms'))
+        print("Force Modified Transition State:")
+        print(fmd_t.to_string('xyz', units='Angstroms'))
 
 
 if __name__ == '__main__':

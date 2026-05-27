@@ -1176,6 +1176,7 @@ class ForceOptimizer:
                             use_internals=False,
                             mass_weight=True,
                             displacements=None,
+                            reembed_displacements=None,
                             remove_transrot=True,
                             remove_orientation=True
                             ):
@@ -1183,11 +1184,19 @@ class ForceOptimizer:
                                                    use_internals=use_internals,
                                                    displacements=displacements)
         if not callable(displacements):
+            if reembed_displacements is None:
+                reembed_displacements = True
             def get_direction(ref, _):
                 return displacements[mode] * magnitude
         else:
+            if reembed_displacements is None:
+                reembed_displacements = False
             def get_direction(ref, coords):
                 d = displacements(ref, coords)
+                # self.rs.plot(
+                #     coords.reshape(-1, 3),
+                #     mode_vectors=nput.vec_normalize(d[mode]) * 15
+                # ).show()
                 return d[mode] * magnitude
 
         def force_modification(coords, base_grad):
@@ -1196,7 +1205,7 @@ class ForceOptimizer:
                 coords = np.asanyarray(coords).reshape((-1, 3))
                 dx = self.internal_mols[0].get_cartesians_by_internals(1, strip_embedding=True, coords=coords)[0]
                 rot = np.dot(d, dx).reshape(base_grad.shape)
-            else:
+            elif reembed_displacements:
                 coords = coords.reshape((-1,) + self.ts.coords.shape)
                 emb = self.ts.get_embedding_data(coords)
                 ## test embedding conventions
@@ -1211,6 +1220,9 @@ class ForceOptimizer:
                         @ emb.reference_data.axes
                 )
                 rot = d.reshape(self.ts.coords.shape)[np.newaxis] @ tf
+            else:
+                rot = d.reshape(self.ts.coords.shape)[np.newaxis]
+
             if remove_transrot:
                 ## try removing tranrot in
                 rot = rot.reshape(rot.shape[:-2] + (1, -1))
@@ -1237,15 +1249,11 @@ class ForceOptimizer:
                 rot = rot @ np.moveaxis(proj, -1, -2)
 
             rot = rot.reshape(base_grad.shape)
-            # self.ts.modify(coords=coords[0]).animate_coordinate(
-            #     0,
-            #     coordinate_expansion=[nput.vec_normalize(rot[np.newaxis])],
-            #     backend='x3d'
-            # ).show()
-            return rot
+            return -rot
         return force_modification, get_direction(self.ts, self.ts.coords)
 
-    def reoptimize_with_force(self, mode,
+    def reoptimize_with_force(self,
+                              mode,
                               magnitude=50,
                               units='PicoJoules/Meters',
                               use_internals=False,
@@ -1264,6 +1272,7 @@ class ForceOptimizer:
                               initial_reactants_step=1,
                               modify_forces=True,
                               apply_constraints=True,
+                              reembed_displacements=None,
                               remove_transrot=True,
                               remove_orientation=None,
                               output_dir=None,
@@ -1271,6 +1280,7 @@ class ForceOptimizer:
                               displacements=None,
                               verbose=False,
                               run_gc=True,
+                              logger=False,
                               # displacement_generator=None,
                               **opts):
         smol_mode = nput.is_int(mode)
@@ -1312,6 +1322,7 @@ class ForceOptimizer:
                                                                                             displacements=displacements,
                                                                                             use_internals=use_internals,
                                                                                             mass_weight=mass_weight,
+                                                                                            reembed_displacements=reembed_displacements,
                                                                                             remove_transrot=remove_transrot,
                                                                                             remove_orientation=remove_orientation)
                 else:
@@ -1323,12 +1334,17 @@ class ForceOptimizer:
                             ts_opt_settings = {}
                         if optimizer_method is not None:
                             ts_opt_settings['method'] = ts_opt_settings.get('method', optimizer_method)
+
                         ts_opt_settings = dict(
+                            max_iterations=max_iterations,
                             max_displacement=max_displacement,
-                            coordinate_constraints=[
-                                (0, 2),
-                                (1, 3)
-                            ]) | ts_opt_settings
+                            logger=logger
+                        ) | (
+                                              dict(coordinate_constraints=[
+                                                      (0, 2),
+                                                      (1, 3)
+                                                  ]) if apply_constraints else {}
+                                          ) | ts_opt_settings
 
                         def pre_displace(coords):
                             dd = self.get_displacement_dirs(
@@ -1359,7 +1375,17 @@ class ForceOptimizer:
 
                         if ts_opt_settings is None:
                             ts_opt_settings = {}
-                        ts_opt_settings = dict(max_iterations=max_iterations, max_displacement=max_displacement) | ts_opt_settings
+
+                        ts_opt_settings = dict(
+                            max_iterations=max_iterations,
+                            max_displacement=max_displacement,
+                            logger=logger
+                        ) | (
+                                              dict(coordinate_constraints=[
+                                                  (0, 2),
+                                                  (1, 3)
+                                              ]) if apply_constraints else {}
+                                          ) | ts_opt_settings
 
                         images = [self.ts.modify(coords=t) for t in disp_t]
                         rxn = Reaction(
@@ -1416,7 +1442,7 @@ class ForceOptimizer:
                         mode=optimizer_mode,
                         initialization_function=pre_displace,
                         max_displacement=max_displacement,
-                        # logger=True,
+                        logger=logger,
                         **opts)
                 else:
                     r = self.rs
@@ -1577,10 +1603,12 @@ class ForceOptimizer:
             **opts
         )
     # def reoptimize
-    def _hcff_pressure(self, ts: Molecule, coords, *, pressure, radius_scaling=1):
+    def _hcff_pressure(self, ts: Molecule, coords, *, pressure, surface_points=500, radius_scaling=1):
         coords = np.asanyarray(coords).reshape((-1, 3))
-        surf = ts.modify(coords=coords).get_surface(radius_scaling=radius_scaling)
-        area = surf.surface_area()
+        surf = ts.modify(coords=coords).get_surface(
+            samples=surface_points,
+            radius_scaling=radius_scaling)
+        area = surf.surface_area(method='sampling')
         fmax = area * pressure
         centroid = np.average(coords, axis=0)
         normals = centroid[np.newaxis] - coords
@@ -1597,6 +1625,7 @@ class ForceOptimizer:
         areas = surf.surface_area(return_components=True)
         area_fractions = areas #/ np.sum(areas)
         normals = -surf.normals
+        # surf.plot(solid=True, normals=True, normal_scaling=.1).show()
         scaled_normals = area_fractions[..., np.newaxis] * normals * pressure
         force = np.zeros_like(coords)
         for atom, inds in zip(*groups):
@@ -1604,15 +1633,21 @@ class ForceOptimizer:
         return force.reshape((1, -1))
     def _cylinder_pressure(self, ts: Molecule, coords, *, pressure,
                            axis, radius=1, centroid=None,
-                           surface_points=200, radius_scaling=1.2, bidirectional=False):
+                           surface_points=200, radius_scaling=1, bidirectional=False):
         coords = np.asanyarray(coords).reshape((-1, 3))
         mol = ts.modify(coords=coords)
         surf = mol.get_surface(samples=surface_points, radius_scaling=radius_scaling)
         atom_areas = 4 * np.pi * surf.radii**2
         if centroid is None:
             centroid = mol.center_of_mass
-        centroid = np.asanyarray(centroid)
-        axis = nput.vec_normalize(axis) #TODO: do outside loop for a quick opt
+        if callable(centroid):
+            centroid = centroid(coords)
+        else:
+            centroid = np.asanyarray(centroid)
+        if callable(axis):
+            axis = axis(coords, centroid)
+        else:
+            axis = nput.vec_normalize(axis) #TODO: do outside loop for a quick opt
 
         atom_points = surf.atom_sampling_points
         # ids = np.concatenate([[i] * len(p) for i,p in enumerate(atom_points)])
@@ -1662,7 +1697,7 @@ class ForceOptimizer:
                 opts['axis'] = axes[:, 1]
             elif dev.str_is(opts['axis'], '-b'):
                 opts['axis'] = -axes[:, 1]
-            else:
+            elif isinstance(opts['axis'], str):
                 raise NotImplementedError(f"can't handle axis '{opts['axis']}'")
             pressure_model = self._cylinder_pressure
         elif not callable(pressure_model):
@@ -1689,19 +1724,42 @@ class ForceOptimizer:
                                              mass_weight=mass_weight,
                                              displacements=displacements, **etc)
 
+    def get_pressure_distortion_energies(self,
+                                         which=0,
+                                         disp_min=0, disp_max=5,
+                                         mass_weight=False,
+                                         pressure_model='xhcff',
+                                         pressure_options=None,
+                                         **etc):
+        if pressure_options is None:
+            pressure_options = {}
+        displacements = self.pressure_model_generator(pressure_model,
+                                                      pressure=1,
+                                                      **pressure_options)
+        return self.get_distortion_energies(mode=which,
+                                            disp_min=disp_min, disp_max=disp_max,
+                                            mass_weight=mass_weight,
+                                            displacements=displacements, **etc)
+
+    default_pressure = 200
     def reoptimize_with_pressure(self,
-                                 magnitude=200,
+                                 magnitude=None,
                                  pressure_units="Megapascals",
                                  *,
+                                 pressure=None,
                                  which=0,
                                  pressure_model='xhcff',
                                  pressure_options=None,
                                  apply_constraints=False,
-                                 remove_orientation=True,
-                                 remove_fragment=True,
+                                 remove_orientation=False,
+                                 remove_transrot=False,
                                  displacements=None,
                                  **etc
                                  ):
+        if pressure is not None:
+            if magnitude is not None:
+                raise ValueError("can't get both `magnitude` and `pressure` keywords (they are synonyms)")
+            magnitude = pressure
         if isinstance(pressure_units, str):
             pressure_units = pressure_units.replace("pascals", "Pascals").replace("Pascals", "Newtons/MetersSquared")
             pressure_units = pressure_units.rsplit("/", 1)
@@ -1710,6 +1768,7 @@ class ForceOptimizer:
         if isinstance(force_units, str):
             force_units = force_units.replace("Newtons", "Joules/Meters")
             force_units = force_units.split("/")
+        # all of this is to make unit debugging a little easier, did it actually? I don't know
         conv = UnitsData.convert(force_units[0], "Hartrees") / (
             UnitsData.convert(force_units[1], "BohrRadius")
         )
@@ -1730,6 +1789,7 @@ class ForceOptimizer:
             displacements=displacements,
             units=force_units,
             remove_orientation=remove_orientation,
+            remove_transrot=remove_transrot,
             apply_constraints=apply_constraints,
             **etc
         )
@@ -1922,6 +1982,7 @@ class ForceOptimizer:
                                 shift=True,
                                 use_internals=False,
                                 displacements=None,
+                                return_geometries=False,
                                 mass_weight=True):
         x, sr, st = self.get_displaced_geometries(mode, disp_min=disp_min, disp_max=disp_max, steps=steps,
                                                   mass_weight=mass_weight, use_internals=use_internals,
@@ -1968,7 +2029,10 @@ class ForceOptimizer:
             eng_r = eng_r[:1] + nput.tensor_reexpand([disps_r], eng_r[1:], axes=[-1, -1])
             eng_ts = eng_ts[:1] + nput.tensor_reexpand([disps_t], eng_ts[1:], axes=[-1, -1])
 
-        return x, eng_r, eng_ts
+        if return_geometries:
+            return (x, eng_r, eng_ts), (st, sr)
+        else:
+            return x, eng_r, eng_ts
 
     @classmethod
     def plot_eng_comp(cls, x, eng_r, eng_ts, **opts):
