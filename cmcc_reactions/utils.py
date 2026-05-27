@@ -359,6 +359,8 @@ def prep_compressed_namedtuple_data(data):
         if k.endswith('_settings') and isinstance(v, dict):
             data[k] = {k + tag:d for tag, d in v.items()}
     return data
+def namedtuple_dict(nt):
+    return nt._asdict() | {"_type": type(nt).__name__}
 def write_namedtuple(file, obj, compress=None, mode=None, **opts):
     d = obj._asdict() | {"_type":type(obj).__name__}
     return write_tree(file, d, compress=compress, mode=mode, precompression_function=prep_compressed_namedtuple_data, **opts)
@@ -462,7 +464,7 @@ def construct_namedtuple_file_tree(top_dir, patterns="**/*.json", recursive=True
         nt = read_namedtuple(os.path.join(top_dir, f), loader=loader, raise_on_untyped=not ignore_bad)
         if nt is None: continue
         if unwrap:
-            nt = nt._asdict() | {"_type":type(nt).__name__}
+            nt = nametuple_dict(nt)
         if filter is not None and not filter(f, nt): continue
         if split_paths:
             segments = dev.split_path(f)

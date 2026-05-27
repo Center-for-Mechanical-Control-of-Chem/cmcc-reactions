@@ -1240,7 +1240,7 @@ default_pipeline_data = {
 def _prep_pipeline_tree(tree, precompression_function):
     if isinstance(tree, tuple):
         if hasattr(tree, '_asdict'):
-            tree = tree._asdict()
+            tree = utils.namedtuple_dict(tree)
             if precompression_function is not None:
                 tree = precompression_function(tree)
             return tree
