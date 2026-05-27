@@ -195,6 +195,8 @@ class ForceModifiedReactionAnalyzer:
                    distance_metric=None,
                    bonds=((0, 2), (1, 3)),
                    baseline=None,
+                   product=None,
+                   product_energy=None,
                    figure=None,
                    **etc
                    ):
@@ -207,6 +209,13 @@ class ForceModifiedReactionAnalyzer:
             self.reactant_energy,
             self.transition_state_energy
         ]
+        if product is not None:
+            pd = distance_metric(
+                [product.coords],
+                bonds
+            ) * UnitsData.convert("BohrRadius", "Angstroms")
+            coords1 = np.concatenate([coords1, pd], axis=0)
+            engs1 = engs1 + [product_energy]
 
         coords2 = distance_metric(
             [self.force_modified_reactant.coords, self.force_modified_transition_state.coords],
@@ -216,6 +225,9 @@ class ForceModifiedReactionAnalyzer:
             self.force_modified_reactant_energy,
             self.force_modified_transition_state_energy
         ]
+        if product is not None:
+            coords2 = np.concatenate([coords2, pd], axis=0)
+            engs2 = engs2 + [product_energy]
 
         if baseline is None:
             baseline = self.reactant_energy
@@ -323,6 +335,18 @@ class BarrierHeightDataset:
         for tt in id:
             t = t[tt]
         return t
+    def get_reduced_dataset(self):
+        new_ds = {}
+        for index in range(len(self)):
+            data = self.get_tree_data(index)
+            id = self.meta_fields['data_ids'][index]
+            subtree = new_ds
+            for i in id[:-1]:
+                if i not in subtree:
+                    subtree[i] = {}
+                subtree = subtree[i]
+            subtree[id[-1]] = data
+        return new_ds
     def load_trajectory(self, index, **etc):
         return trajt.DielsAlderReactionTrajectory.from_trajectory_data(
             self.get_tree_data(index),
@@ -769,3 +793,6 @@ class BarrierHeightDataset:
             dataset=tree,
             **opts
         )
+    def save_dataset(self, file, mode=None, **etc):
+        ds = self.get_reduced_dataset()
+        return pipeline.write_compressed_pipeline_data(file, ds, mode=mode, **etc)

@@ -785,24 +785,23 @@ H	-3.015828   -1.433443    1.079180''',
 
         import McUtils.Numputils as nput
         fmd_r, fmd_t, data = fopt.reoptimize_with_pressure(
-            1,
+            15,
             pressure_units="Gigapascals",
-            pressure_model='cylinder',
-            # pressure_model='hcff',
+            pressure_model='xhcff',
             # optimizer_mode='scipy',
             # optimizer_method='bfgs',
-            reoptimize_ts=True,
-            max_displacement=.1,
             # pressure_model='cylinder',
-            pressure_options={
-                'axis': lambda coords, _:nput.vec_normalize(
-                    np.average(coords[(0, 3), :], axis=0)
-                    - np.average(coords[(15, 16), :], axis=0)
-                ),
-                'centroid': lambda coords:np.average(coords[(0, 3, 15, 16), :], axis=0),
-                'radius': 4 * UnitsData.convert("Angstroms", "BohrRadius"),
-                'bidirectional': True
-            },
+            # pressure_model='cylinder',
+            # pressure_options={
+            #     'axis': lambda coords, _:nput.vec_normalize(
+            #         np.average(coords[(0, 3), :], axis=0)
+            #         - np.average(coords[(15, 16), :], axis=0)
+            #     ),
+            #     'centroid': lambda coords:np.average(coords[(0, 3, 15, 16), :], axis=0),
+            #     'radius': 4 * UnitsData.convert("Angstroms", "BohrRadius"),
+            #     'bidirectional': True
+            # },
+            max_displacement=.1,
             max_iterations=20,
             logger=True,
         )
@@ -821,16 +820,18 @@ H	-3.015828   -1.433443    1.079180''',
         fmra = ForceModifiedReactionAnalyzer.from_data(data)
         fmra.animate_reactant_distortion(atom_radius_scaling=1).show()
         fmra.animate_ts_distortion(atom_radius_scaling=1).show()
-        fmra.plot_lines().show()
 
-        print("Reactants:")
-        print(rs.to_string('xyz', units='Angstroms'))
-        print("Transition States:")
-        print(ts.to_string('xyz', units='Angstroms'))
-        print("Force Modified Reactant:")
-        print(fmd_r.to_string('xyz', units='Angstroms'))
-        print("Force Modified Transition State:")
-        print(fmd_t.to_string('xyz', units='Angstroms'))
+        # print("Reactants:")
+        # print(rs.to_string('xyz', units='Angstroms'))
+        # print("Transition States:")
+        # print(ts.to_string('xyz', units='Angstroms'))
+        # print("Force Modified Reactant:")
+        # print(fmd_r.to_string('xyz', units='Angstroms'))
+        # print("Force Modified Transition State:")
+        # print(fmd_t.to_string('xyz', units='Angstroms'))
+
+        utils.write_namedtuple('/Users/Mark/Desktop/methacrylate_fmrd_hydrostatic.npz', data)
+        fmra.plot_lines().show()
 
 
 if __name__ == '__main__':

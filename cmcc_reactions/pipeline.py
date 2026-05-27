@@ -1248,6 +1248,20 @@ def _prep_pipeline_tree(tree, precompression_function):
             k:_prep_pipeline_tree(v, precompression_function)
             for k, v in tree.items()
         }
+def write_compressed_pipeline_data(output_file, tree, precompression_function=None, mode=None):
+    if mode is None:
+        if isinstance(output_file, str):
+            if os.path.splitext(output_file)[1] == '.json':
+                mode = 'json'
+            else:
+                mode = 'npz'
+    if precompression_function is None and mode == 'npz':
+        precompression_function = utils.prep_compressed_namedtuple_data
+    tree = _prep_pipeline_tree(tree, precompression_function)
+    if mode == 'json':
+        dev.write_json(output_file, tree)
+    else:
+        utils.write_tree(output_file, tree, mode=mode)
 def compress_pipeline_data(
         top_dir,
         patterns="**/pipeline_data.json",
@@ -1287,20 +1301,13 @@ def compress_pipeline_data(
     if output_file is not None:
         if output_mode is None:
             if isinstance(output_file, str):
-                if os.path.splitext(top_dir)[1] == '.json':
+                if os.path.splitext(output_file)[1] == '.json':
                     output_mode = 'json'
                 else:
                     output_mode = 'npz'
             else:
                 output_mode = loader
-        if precompression_function is None and output_mode == 'npz':
-            precompression_function = utils.prep_compressed_namedtuple_data
-        tree = _prep_pipeline_tree(tree, precompression_function)
-        if output_mode == 'json':
-            dev.write_json(output_file, tree)
-        else:
-            utils.write_tree(output_file, tree,
-                             mode=output_mode)
+        write_compressed_pipeline_data(output_file, tree, precompression_function=precompression_function, mode=output_mode)
 
     return tree
 
