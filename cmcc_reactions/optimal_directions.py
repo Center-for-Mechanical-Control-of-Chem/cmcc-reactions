@@ -699,6 +699,8 @@ class ForceOptimizer:
         self.use_mode_space = use_mode_space
         if projection_internals is None:
             projection_internals = internals
+        if dev.str_is(projection_internals, 'auto'):
+            projection_internals = self.prep_projection_internals(internals)
         if projection_internals is not None:
             determination_opts = determination_opts | dict(internals=projection_internals)
         self.opts = self.default_options | determination_opts
@@ -897,6 +899,29 @@ class ForceOptimizer:
                                       dirs_gs_inv=rs_disp_inv,
                                       dirs_ts_inv=ts_disp_inv,
                                       **opts)
+
+    @classmethod
+    def from_guesses(cls,
+                     rs,
+                     ts,
+                     reactant_optimizer='pysis',
+                     reactant_optimizer_method='rfo',
+                     ts_optimizer='pysis',
+                     ts_optimizer_method='ts',
+                     max_iterations=200,
+                     logger=None,
+                     optimizer_settings=None,
+                     precompute_modes=False,
+                     **etc
+                     ):
+        if optimizer_settings is None:
+            optimizer_settings = {}
+        rs = rs.optimize(mode=reactant_optimizer, method=reactant_optimizer_method, max_iterations=max_iterations,
+                         logger=logger, **optimizer_settings)
+        ts = ts.optimize(mode=ts_optimizer, method=ts_optimizer_method, max_iterations=max_iterations,
+                         logger=logger, **optimizer_settings)
+
+        return cls(rs, ts, precompute_modes=precompute_modes, **etc)
 
     @classmethod
     def from_internals(cls, reactant_mol, ts_mol, internal_spec, active_atoms=None, fixed_atoms=None,
@@ -1187,7 +1212,12 @@ class ForceOptimizer:
         if not callable(displacements):
             if reembed_displacements is None:
                 reembed_displacements = True
-            def get_direction(ref, _):
+            def get_direction(ref, coords):
+                if self._debug_show_force_vectors:
+                    self.rs.plot(
+                        coords.reshape(-1, 3),
+                        mode_vectors=nput.vec_normalize(displacements[mode]) * 15
+                    ).show()
                 return displacements[mode] * magnitude
         else:
             if reembed_displacements is None:
@@ -1283,6 +1313,9 @@ class ForceOptimizer:
                               verbose=False,
                               run_gc=True,
                               logger=False,
+                              rigid=False,
+                              rigid_max_recursion=5,
+                              rigid_scan_options=None,
                               # displacement_generator=None,
                               **opts):
         smol_mode = nput.is_int(mode)
@@ -1314,39 +1347,141 @@ class ForceOptimizer:
             for magnitude in mags:
                 magnitude = conv * magnitude
 
-                if modify_forces:
-                    if remove_orientation is None:
-                        remove_orientation = not apply_constraints
-                    if remove_transrot is None:
-                        remove_transrot = not apply_constraints
-                    gradient_modification_function, force_vector = self.mode_force_function(mode,
-                                                                                            magnitude=magnitude,
-                                                                                            displacements=displacements,
-                                                                                            use_internals=use_internals,
-                                                                                            mass_weight=mass_weight,
-                                                                                            reembed_displacements=reembed_displacements,
-                                                                                            remove_transrot=remove_transrot,
-                                                                                            remove_orientation=remove_orientation)
+                if rigid:
+                    _, force_vector = self.mode_force_function(mode,
+                                                               magnitude=magnitude,
+                                                               displacements=displacements,
+                                                               use_internals=use_internals,
+                                                               mass_weight=mass_weight,
+                                                               reembed_displacements=reembed_displacements,
+                                                               remove_transrot=remove_transrot,
+                                                               remove_orientation=remove_orientation)
+                    if rigid_scan_options is None:
+                        rigid_scan_options = {}
+                    _, (dr, dt), _ = self.predicted_delta_from_forces(
+                        mode,
+                        magnitude,
+                        displacements=displacements,
+                        use_internals=use_internals,
+                        mass_weight=mass_weight,
+                        max_recursion=rigid_max_recursion,
+                        return_geometries=True,
+                        **rigid_scan_options
+                    )
+
+                    _, xr = dr[1]
+                    r = self.rs.modify(coords=xr)
+                    _, xt = dt[1]
+                    ts = self.ts.modify(coords=xt)
                 else:
-                    gradient_modification_function, force_vector = None, None
+                    if modify_forces:
+                        if remove_orientation is None:
+                            remove_orientation = not apply_constraints
+                        if remove_transrot is None:
+                            remove_transrot = not apply_constraints
+                        gradient_modification_function, force_vector = self.mode_force_function(mode,
+                                                                                                magnitude=magnitude,
+                                                                                                displacements=displacements,
+                                                                                                use_internals=use_internals,
+                                                                                                mass_weight=mass_weight,
+                                                                                                reembed_displacements=reembed_displacements,
+                                                                                                remove_transrot=remove_transrot,
+                                                                                                remove_orientation=remove_orientation)
+                    else:
+                        gradient_modification_function, force_vector = None, None
 
-                if reoptimize_ts:
-                    if profile_generator == 'relaxed':
-                        if ts_opt_settings is None:
-                            ts_opt_settings = {}
-                        if optimizer_method is not None:
-                            ts_opt_settings['method'] = ts_opt_settings.get('method', optimizer_method)
+                    if reoptimize_ts:
+                        if profile_generator == 'relaxed':
+                            if ts_opt_settings is None:
+                                ts_opt_settings = {}
+                            if optimizer_method is not None:
+                                ts_opt_settings['method'] = ts_opt_settings.get('method', optimizer_method)
 
-                        ts_opt_settings = dict(
-                            max_iterations=max_iterations,
-                            max_displacement=max_displacement,
-                            logger=logger
-                        ) | (
-                                              dict(coordinate_constraints=[
+                            ts_opt_settings = dict(
+                                max_iterations=max_iterations,
+                                max_displacement=max_displacement,
+                                logger=logger
+                            ) | (
+                                                  dict(coordinate_constraints=[
+                                                          (0, 2),
+                                                          (1, 3)
+                                                      ]) if apply_constraints else {}
+                                              ) | ts_opt_settings
+
+                            def pre_displace(coords):
+                                dd = self.get_displacement_dirs(
+                                    mass_weight=mass_weight,
+                                    use_internals=use_internals,
+                                    displacements=displacements
+                                )
+                                d = dd[mode] * initial_reactants_step
+                                if use_internals:
+                                    dx = self.internal_mols[1].get_cartesians_by_internals(1, coords=coords, strip_embedding=True)[0]
+                                    d = np.dot(d, dx)
+                                return coords + d.reshape(-1, 3)
+
+                            ts = self.ts.optimize(gradient_modification_function=gradient_modification_function,
+                                                  max_iterations=max_iterations,
+                                                  mode=optimizer_mode,
+                                                  initialization_function=pre_displace,
+                                                  # logger=True,
+                                                  **ts_opt_settings)
+                        else:
+                            disp_t = self.ts.get_scan_coordinates(
+                                [[-initial_ts_step, initial_ts_step, num_ts_steps]],
+                                which=[0],
+                                coordinate_expansion=[self.ts.get_normal_modes().coords_by_modes],
+                                # internals='reembed' if use_internals else False,
+                                # strip_embedding=True if use_internals else False
+                            )
+
+                            if ts_opt_settings is None:
+                                ts_opt_settings = {}
+
+                            ts_opt_settings = dict(
+                                max_iterations=max_iterations,
+                                max_displacement=max_displacement,
+                                logger=logger
+                            ) | (
+                                                  dict(coordinate_constraints=[
                                                       (0, 2),
                                                       (1, 3)
                                                   ]) if apply_constraints else {}
-                                          ) | ts_opt_settings
+                                              ) | ts_opt_settings
+
+                            images = [self.ts.modify(coords=t) for t in disp_t]
+                            rxn = Reaction(
+                                [images[0]],
+                                [images[-1]],
+                                optimize=False
+                            )
+
+                            if 'dimer' in profile_generator:
+                                ts_opt_settings['image_guess'] = ts_opt_settings.get('image_guess', 0)
+                                images = [images[0], images[-1]]
+                            if profile_generator == 'ase-dimer':
+                                ts_opt_settings['method_options'] = {
+                                                                        'image_guess': ts_opt_settings.pop('image_guess', 0)
+                                                                    } | ts_opt_settings.get('method_options', {})
+                            prof = rxn.get_profile_generator(profile_generator,
+                                                             climb=climb,
+                                                             energy_evaluator=self.ts.energy_evaluator)
+
+                            new_images = prof.generate(base_images=[images[0], images[-1]],
+                                                       gradient_modification_function=gradient_modification_function,
+                                                       **ts_opt_settings)
+                            ts = new_images[0]
+                    else:
+                        ts = self.ts
+
+                    if reoptimize_reactants:
+                        if optimizer_method is not None:
+                            opts['method'] = opts.get('method', optimizer_method)
+                        if apply_constraints:
+                            opts['coordinate_constraints'] = [
+                                (0, 2),
+                                (1, 3)
+                            ]
 
                         def pre_displace(coords):
                             dd = self.get_displacement_dirs(
@@ -1354,100 +1489,25 @@ class ForceOptimizer:
                                 use_internals=use_internals,
                                 displacements=displacements
                             )
-                            d = dd[mode] * initial_reactants_step
+                            if not callable(dd):
+                                d = dd[mode] * initial_reactants_step
+                            else:
+                                d = dd(self.ts, coords)[mode] * initial_reactants_step
                             if use_internals:
-                                dx = self.internal_mols[1].get_cartesians_by_internals(1, coords=coords, strip_embedding=True)[0]
+                                dx = self.internal_mols[0].get_cartesians_by_internals(1, coords=coords, strip_embedding=True)[0]
                                 d = np.dot(d, dx)
                             return coords + d.reshape(-1, 3)
 
-                        ts = self.ts.optimize(gradient_modification_function=gradient_modification_function,
-                                              max_iterations=max_iterations,
-                                              mode=optimizer_mode,
-                                              initialization_function=pre_displace,
-                                              # logger=True,
-                                              **ts_opt_settings)
-                    else:
-                        disp_t = self.ts.get_scan_coordinates(
-                            [[-initial_ts_step, initial_ts_step, num_ts_steps]],
-                            which=[0],
-                            coordinate_expansion=[self.ts.get_normal_modes().coords_by_modes],
-                            # internals='reembed' if use_internals else False,
-                            # strip_embedding=True if use_internals else False
-                        )
-
-                        if ts_opt_settings is None:
-                            ts_opt_settings = {}
-
-                        ts_opt_settings = dict(
+                        r = self.rs.modify(internals=None).optimize(
+                            gradient_modification_function=gradient_modification_function,
                             max_iterations=max_iterations,
+                            mode=optimizer_mode,
+                            initialization_function=pre_displace,
                             max_displacement=max_displacement,
-                            logger=logger
-                        ) | (
-                                              dict(coordinate_constraints=[
-                                                  (0, 2),
-                                                  (1, 3)
-                                              ]) if apply_constraints else {}
-                                          ) | ts_opt_settings
-
-                        images = [self.ts.modify(coords=t) for t in disp_t]
-                        rxn = Reaction(
-                            [images[0]],
-                            [images[-1]],
-                            optimize=False
-                        )
-
-                        if 'dimer' in profile_generator:
-                            ts_opt_settings['image_guess'] = ts_opt_settings.get('image_guess', 0)
-                            images = [images[0], images[-1]]
-                        if profile_generator == 'ase-dimer':
-                            ts_opt_settings['method_options'] = {
-                                                                    'image_guess': ts_opt_settings.pop('image_guess', 0)
-                                                                } | ts_opt_settings.get('method_options', {})
-                        prof = rxn.get_profile_generator(profile_generator,
-                                                         climb=climb,
-                                                         energy_evaluator=self.ts.energy_evaluator)
-
-                        new_images = prof.generate(base_images=[images[0], images[-1]],
-                                                   gradient_modification_function=gradient_modification_function,
-                                                   **ts_opt_settings)
-                        ts = new_images[0]
-                else:
-                    ts = self.ts
-
-                if reoptimize_reactants:
-                    if optimizer_method is not None:
-                        opts['method'] = opts.get('method', optimizer_method)
-                    if apply_constraints:
-                        opts['coordinate_constraints'] = [
-                            (0, 2),
-                            (1, 3)
-                        ]
-
-                    def pre_displace(coords):
-                        dd = self.get_displacement_dirs(
-                            mass_weight=mass_weight,
-                            use_internals=use_internals,
-                            displacements=displacements
-                        )
-                        if not callable(dd):
-                            d = dd[mode] * initial_reactants_step
-                        else:
-                            d = dd(self.ts, coords)[mode] * initial_reactants_step
-                        if use_internals:
-                            dx = self.internal_mols[0].get_cartesians_by_internals(1, coords=coords, strip_embedding=True)[0]
-                            d = np.dot(d, dx)
-                        return coords + d.reshape(-1, 3)
-
-                    r = self.rs.modify(internals=None).optimize(
-                        gradient_modification_function=gradient_modification_function,
-                        max_iterations=max_iterations,
-                        mode=optimizer_mode,
-                        initialization_function=pre_displace,
-                        max_displacement=max_displacement,
-                        logger=logger,
-                        **opts)
-                else:
-                    r = self.rs
+                            logger=logger,
+                            **opts)
+                    else:
+                        r = self.rs
 
                 fmrd = ForceModifiedReactionData(
                     atoms=self.ts.atoms,
@@ -1553,19 +1613,15 @@ class ForceOptimizer:
                                       use_mode_space=self.use_mode_space,
                                       # modes=self.prepped_modes
                                       )
-    def reoptimize_internals_with_force(self,
-                                        which,
-                                        magnitude=50,
-                                        mass_weight=False,
-                                        max_internals=None,
-                                        units='PicoJoules/Meters',
-                                        displacements=None,
-                                        use_internals=True,
-                                        lookup_internals_index=None,
-                                        fragment_indices=None,
-                                        verbose=False,
-                                        **opts
-                                        ):
+    def get_selected_internals(self, which,
+                               max_internals=None,
+                               max_internals_ranks=None,
+                               fragment_indices=None,
+                               lookup_internals_index=None,
+                               use_internals=True,
+                               displacements=None,
+                               mass_weight=False,
+                               return_gammas=False):
         if displacements is None:
             displacements = self.pure_internal_displacement_matrix
         if isinstance(which, str) or callable(which):
@@ -1589,14 +1645,58 @@ class ForceOptimizer:
         elif lookup_internals_index is None:
             lookup_internals_index = True
         if not nput.is_int(which) and lookup_internals_index:
-            which = coordops.zmatrix_indices(self.internals, which)
-        if max_internals is not None and not nput.is_int(which) and len(which) > max_internals:
+            which = coordops.zmatrix_indices(self.internals, which, strip_embedding=True)
+        if max_internals is not None and not nput.is_int(which):
             which = np.asanyarray(which)
-            gammas = self.compute_gammas(which, use_internals=use_internals, displacements=displacements, mass_weight=mass_weight)
-            sel = np.argpartition(gammas, -max_internals)[-max_internals:]
+            gammas = self.compute_gammas(which,
+                                         use_internals=use_internals,
+                                         displacements=displacements,
+                                         mass_weight=mass_weight)
+            if len(gammas) > max_internals:
+                sel = np.argpartition(gammas, -(max_internals+1))[-max_internals:]
+            else:
+                sel = np.argsort(-gammas)
+            gammas = gammas[sel,]
             which = which[sel,]
-        return self.reoptimize_with_force(
+            if max_internals_ranks is not None:
+                gammas = gammas[max_internals_ranks,]
+                which = which[max_internals_ranks,]
+        else:
+            gammas = None
+
+        if return_gammas:
+            return which, gammas
+        else:
+            return which
+
+    def reoptimize_internals_with_force(self,
+                                        which,
+                                        magnitude=50,
+                                        mass_weight=False,
+                                        max_internals=None,
+                                        max_internals_ranks=None,
+                                        units='PicoJoules/Meters',
+                                        displacements=None,
+                                        use_internals=True,
+                                        lookup_internals_index=None,
+                                        fragment_indices=None,
+                                        verbose=False,
+                                        return_selected=False,
+                                        **opts
+                                        ):
+        if displacements is None:
+            displacements = self.pure_internal_displacement_matrix
+        which, gammas = self.get_selected_internals(which,
+                                                    lookup_internals_index=lookup_internals_index,
+                                                    max_internals=max_internals,
+                                                    max_internals_ranks=max_internals_ranks,
+                                                    fragment_indices=fragment_indices,
+                                                    displacements=displacements,
+                                                    use_internals=use_internals,
+                                                    return_gammas=True)
+        fmrds = self.reoptimize_with_force(
             which,
+            mass_weight=mass_weight,
             magnitude=magnitude,
             units=units,
             displacements=displacements,
@@ -1604,6 +1704,10 @@ class ForceOptimizer:
             verbose=verbose,
             **opts
         )
+        if return_selected:
+            return fmrds, (which, gammas)
+        else:
+            return fmrds
     # def reoptimize
     def _hcff_pressure(self, ts: Molecule, coords, *, pressure, surface_points=500, radius_scaling=1):
         coords = np.asanyarray(coords).reshape((-1, 3))
@@ -2048,7 +2152,7 @@ class ForceOptimizer:
             eng_ts = eng_ts[:1] + nput.tensor_reexpand([disps_t], eng_ts[1:], axes=[-1, -1])
 
         if return_geometries:
-            return (x, eng_r, eng_ts), (st, sr)
+            return (x, eng_r, eng_ts), (sr, st)
         else:
             return x, eng_r, eng_ts
 
@@ -2244,39 +2348,51 @@ class ForceOptimizer:
                                     max_recursion=5,
                                     max_disp_mag=5000,
                                     use_internals=False,
-                                    prev_expansion=None):
+                                    prev_expansion=None,
+                                    return_geometries=False):
         if disp_min is None or nput.is_numeric(disp_min):
-            x, exp_r, exp_t = self.get_distortion_energies(mode,
-                                                           disp_min=disp_min, disp_max=disp_max, steps=steps, order=1,
-                                                           mass_weight=mass_weight, use_internals=use_internals,
-                                                           displacements=displacements)
+            (x, exp_r, exp_t), g = self.get_distortion_energies(mode,
+                                                     disp_min=disp_min, disp_max=disp_max, steps=steps, order=1,
+                                                     mass_weight=mass_weight, use_internals=use_internals,
+                                                     displacements=displacements, return_geometries=True)
         else:
             d1, D1 = disp_min
             d2, D2 = disp_max
 
             if d1 is not None:
-                x1, exp_r1, exp_t1 = self.get_distortion_energies(mode,
-                                                                  disp_min=d1, disp_max=D1, steps=steps, order=1,
-                                                                  mass_weight=mass_weight, use_internals=use_internals,
-                                                                  displacements=displacements)
+                (x1, exp_r1, exp_t1), g1 = self.get_distortion_energies(mode,
+                                                                        disp_min=d1, disp_max=D1, steps=steps, order=1,
+                                                                        mass_weight=mass_weight,
+                                                                        use_internals=use_internals,
+                                                                        displacements=displacements,
+                                                                        return_geometries=True)
             else:
                 x1 = None
             if d2 is not None:
-                x2, exp_r2, exp_t2 = self.get_distortion_energies(mode,
-                                                                  disp_min=d2, disp_max=D2, steps=steps, order=1,
-                                                                  mass_weight=mass_weight, use_internals=use_internals,
-                                                                  displacements=displacements)
+                (x2, exp_r2, exp_t2), g2 = self.get_distortion_energies(mode,
+                                                                        disp_min=d2, disp_max=D2, steps=steps, order=1,
+                                                                        mass_weight=mass_weight,
+                                                                        use_internals=use_internals,
+                                                                        displacements=displacements,
+                                                                        return_geometries=True)
             else:
                 x2 = None
 
             x_bits = []
+            g_r_bits = []
+            g_t_bits = []
             e_r_bits = []
             e_t_bits = []
 
             if x1 is not None:
                 if prev_expansion is not None:
                     x1 = x1[:-1]
+                    if return_geometries:
+                        g1 = (g1[0][:-1], g1[1][:-1])
                 x_bits.append(x1)
+                if return_geometries:
+                    g_r_bits.append(g1[0])
+                    g_t_bits.append(g1[1])
                 if prev_expansion is not None: # shift for continuitiy
                     exp_r1 = list(exp_r1)
                     exp_r1[0] +=  prev_expansion[1][0][0] - exp_r1[0][-1]
@@ -2288,13 +2404,23 @@ class ForceOptimizer:
                     exp_t1 = [e[:-1] for e in exp_t1]
                 e_t_bits.append(exp_t1)
             if prev_expansion is not None:
-                x_bits.append(prev_expansion[0])
+                if return_geometries:
+                    x_bits.append(prev_expansion[0][0])
+                    g_r_bits.append(prev_expansion[0][1][0])
+                    g_t_bits.append(prev_expansion[0][1][1])
+                else:
+                    x_bits.append(prev_expansion[0])
                 e_r_bits.append(prev_expansion[1])
                 e_t_bits.append(prev_expansion[2])
             if x2 is not None:
                 if prev_expansion is not None:
                     x2 = x2[1:]
+                    if return_geometries:
+                        g2 = (g2[0][1:], g2[1][1:])
                 x_bits.append(x2)
+                if return_geometries:
+                    g_r_bits.append(g2[0])
+                    g_t_bits.append(g2[1])
                 if prev_expansion is not None: # shift for continuitiy
                     exp_r2 = list(exp_r2)
                     exp_r2[0] +=  prev_expansion[1][0][-1] - exp_r2[0][0]
@@ -2307,6 +2433,13 @@ class ForceOptimizer:
                 e_t_bits.append(exp_t2)
 
             x = np.concatenate(x_bits, axis=0)
+            if return_geometries:
+                g = (
+                    np.concatenate(g_r_bits, axis=0),
+                    np.concatenate(g_t_bits, axis=0)
+                )
+            else:
+                g = None
             exp_r = [
                 np.concatenate(b, axis=0)
                 for b in zip(*e_r_bits)
@@ -2339,7 +2472,10 @@ class ForceOptimizer:
             D2 = np.max([extrap_pos_r, extrap_pos_t])
             D2 = (D2 - d2) * 1.2 + d2
 
-        if d1 is not None or d2 is not None and max_recursion > 0:
+        if return_geometries:
+            x = (x, g)
+
+        if (d1 is not None or d2 is not None) and max_recursion > 0:
             return self.predicted_delta_from_forces(
                 mode,
                 forces,
@@ -2353,8 +2489,35 @@ class ForceOptimizer:
                 max_disp_mag=max_disp_mag,
                 prev_expansion=[x, exp_r, exp_t],
                 use_internals=use_internals,
-                displacements=displacements
+                displacements=displacements,
+                return_geometries=return_geometries
             )
+
+        if return_geometries:
+            (g_idx_r, g_perc_r) = r_data[2]
+            gl_r = g[0]
+            if g_perc_r >= 0:
+                g_r = gl_r[g_idx_r] * (1-g_perc_r) + gl_r[g_idx_r+1] * g_perc_r
+            elif g_idx_r+1 == len(gl_r):
+                g_r = gl_r[g_idx_r] + (gl_r[g_idx_r] - gl_r[g_idx_r-1]) * g_perc_r
+            elif g_idx_r >= len(gl_r):
+                g_r = gl_r[g_idx_r-1] + (gl_r[g_idx_r-1] - gl_r[g_idx_r-2]) * g_perc_r
+            else:
+                g_r = gl_r[g_idx_r] + (gl_r[g_idx_r+1] - gl_r[g_idx_r]) * g_perc_r # negative
+
+            (g_idx_t, g_perc_t) = ts_data[2]
+            gl_t = g[1]
+            if g_perc_t >= 0:
+                g_t = gl_t[g_idx_t] * (1-g_perc_t) + gl_t[g_idx_t+1] * g_perc_t
+            elif g_idx_t+1 == len(gl_t):
+                g_t = gl_t[g_idx_t] + (gl_t[g_idx_t] - gl_t[g_idx_t-1]) * g_perc_t
+            elif g_idx_t >= len(gl_t):
+                g_t = gl_t[g_idx_t-1] + (gl_t[g_idx_t-1] - gl_t[g_idx_t-2]) * g_perc_t
+            else:
+                g_t = gl_t[g_idx_t] + (gl_t[g_idx_t+1] - gl_t[g_idx_t]) * g_perc_t # negative
+
+            r_data = (r_data[0], (r_data[1], g_r), r_data[2])
+            ts_data = (ts_data[0], (ts_data[1], g_t), ts_data[2])
 
         return ((ts_data[0] - r_data[0]), (r_data, ts_data)) + ((x, exp_r, exp_t),)
 
@@ -2375,4 +2538,54 @@ class ForceOptimizer:
             displacements=displacements,
             use_internals=use_internals,
             **opts
+        )
+
+
+    def predicted_pressure_delta(self,
+                                 magnitude,
+                                 pressure_units="Megapascals",
+                                 *,
+                                 pressure=None,
+                                 which=0,
+                                 pressure_model='xhcff',
+                                 pressure_options=None,
+                                 apply_constraints=False,
+                                 remove_orientation=False,
+                                 remove_transrot=False,
+                                 displacements=None,
+                                 **etc
+                                 ):
+        if pressure is not None:
+            if magnitude is not None:
+                raise ValueError("can't get both `magnitude` and `pressure` keywords (they are synonyms)")
+            magnitude = pressure
+        if isinstance(pressure_units, str):
+            pressure_units = pressure_units.replace("pascals", "Pascals").replace("Pascals", "Newtons/MetersSquared")
+            pressure_units = pressure_units.rsplit("/", 1)
+        force_units, area_units = pressure_units
+        area_scaling = UnitsData.convert(area_units, "BohrRadiusSquared")
+        if isinstance(force_units, str):
+            force_units = force_units.replace("Newtons", "Joules/Meters")
+            force_units = force_units.split("/")
+        # all of this is to make unit debugging a little easier, did it actually? I don't know
+        conv = UnitsData.convert(force_units[0], "Hartrees") / (
+            UnitsData.convert(force_units[1], "BohrRadius")
+        )
+        pressure_scaling = conv / area_scaling
+        force_units = "Hartrees/BohrRadius"
+        if displacements is None:
+            if pressure_options is None:
+                pressure_options = {}
+            displacements = self.pressure_model_generator(pressure_model,
+                                                          pressure=pressure_scaling,
+                                                          **pressure_options
+                                                          )
+        else:
+            magnitude = np.asanyarray(magnitude) * pressure_scaling
+        return self.predicted_delta_from_forces(
+            which,
+            magnitude,
+            displacements=displacements,
+            units=force_units,
+            **etc
         )

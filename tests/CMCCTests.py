@@ -682,6 +682,7 @@ class CMCCTests(unittest.TestCase):
         # traj.reactant.plot(x_r).show()
         traj.transition_state.plot(x_t, principle_axes=True).show()
 
+    @unittest.skip
     def test_PressureFromMols(self):
         import warnings
         warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -877,6 +878,165 @@ H	-2.758306   -1.763227    0.087370''',
 
         # utils.write_namedtuple('/Users/Mark/Desktop/methacrylate_fmrd_hydrostatic.npz', data)
         fmra.plot_lines().show()
+
+
+    def test_RigidForceOpts(self):
+
+        import warnings
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+        from cmcc_reactions.optimal_directions import ForceOptimizer
+        from cmcc_reactions.reaction_data_analysis import ForceModifiedReactionAnalyzer
+        from Psience.Molecools import Molecule
+        from McUtils.Data import UnitsData
+
+        ts = Molecule.from_string(
+            '''23
+
+C	-2.25046  -0.72777   0.38674
+C	-2.84525   0.27119  -0.40824
+C	-2.05528   1.43188  -0.34975
+C	-1.00007   1.21623   0.53068
+H	-3.68826   0.12095  -1.07529
+H	-2.18971   2.31405  -0.96724
+C	-1.31163  -0.01193   1.33697
+H	-1.89312   0.2926    2.22416
+H	-0.44662  -0.58299   1.67761
+H	 3.36458   0.84622   1.183
+C	 3.53875   0.60349   0.1304
+H	 4.13059   1.38582  -0.34751
+O	 2.30512   0.55523  -0.59458
+O	 1.64912  -1.11199   0.79362
+C	 1.41406  -0.37994  -0.15824
+C	 0.19176  -0.37027  -0.96198
+C	-0.73573  -1.41088  -0.8544
+H	 4.06087  -0.35627   0.07649
+H	 0.17385   0.31187  -1.80252
+H	-0.25144   1.95016   0.8072
+H	-0.46167  -2.25662  -0.22932
+H	-1.34765  -1.65825  -1.71479
+H	-2.76226  -1.64549   0.66279''',
+            units='Angstroms',
+            energy_evaluator='aimnet2'
+        )
+        rs = Molecule.from_string(
+            '''23
+
+C	-2.596883   -0.465922    0.826097
+C	-3.007938    0.362995   -0.157348
+C	-2.176283    1.573125   -0.150206
+C	-1.262554    1.479210    0.838924
+H	-3.822674    0.183416   -0.851937
+H	-2.294223    2.402121   -0.840972
+C	-1.440859    0.166969    1.555182
+H	-1.657069    0.307193    2.625854
+H	-0.530419   -0.449785    1.507801
+H	 3.184941    0.970467    1.093409
+C	 3.674170    0.595730    0.190227
+H	 4.313221    1.363308   -0.247407
+O	 2.702223    0.281677   -0.817778
+O	 1.754811   -1.178029    0.628884
+C	 1.777653   -0.640983   -0.463418
+C	 0.829399   -0.888538   -1.575622
+C	-0.113274   -1.828218   -1.473814
+H	 4.260314   -0.290616    0.448467
+H	 0.945444   -0.275067   -2.463748
+H	-0.507370    2.212516    1.098686
+H	-0.199381   -2.428540   -0.573233
+H	-0.817422   -2.019587   -2.277227
+H	-3.015828   -1.433443    1.079180''',
+            units='Angstroms',
+            energy_evaluator='aimnet2'
+        )
+
+        prod = Molecule.from_string('''23
+
+    C	-2.130472   -0.872239    0.012830
+    C	-2.837943    0.423768   -0.358236
+    C	-2.036169    1.437416   -0.003026
+    C	-0.785002    0.832289    0.615247
+    H	-3.768536    0.486030   -0.914065
+    H	-2.171380    2.494087   -0.211641
+    C	-1.380485   -0.424799    1.289712
+    H	-2.054779   -0.174685    2.114386
+    H	-0.623578   -1.141357    1.624103
+    H	 3.632781    0.252404    1.177904
+    C	 3.620668    0.446425    0.101839
+    H	 4.203134    1.337891   -0.133497
+    O	 2.285694    0.727776   -0.347439
+    O	 1.678608   -1.328818    0.357919
+    C	 1.385915   -0.265794   -0.151448
+    C	 0.003633    0.166438   -0.596488
+    C	-0.924072   -1.025404   -0.977450
+    H	 4.025934   -0.425731   -0.418228
+    H	 0.120871    0.893828   -1.402633
+    H	-0.171319    1.499026    1.225121
+    H	-0.408315   -1.974347   -0.806154
+    H	-1.237369   -0.984186   -2.024394
+    H	-2.758306   -1.763227    0.087370''',
+                                    units='Angstroms',
+                                    energy_evaluator='aimnet2'
+                                    )
+
+        # prod = prod.optimize(mode='pysis', method='rfo', max_iterations=200, logger=True)
+        # prod_data = gen_prods.InitialProductData(
+        #     atoms=prod.atoms,
+        #     coords=prod.coords,
+        #     smiles=None,
+        #     bonds=None,
+        #     energy=prod.calculate_energy(),
+        #     breakpoints=None,
+        #     evaluator='aimnet2',
+        #     optimization_settings=None
+        # )
+        # utils.write_namedtuple('/Users/Mark/Desktop/methacrylate_prod.npz', prod_data)
+        #
+        # return
+        # rs.plot(display_atom_numbers=True).show()
+        # ts.plot(highlight_atoms=[0, 3, 15, 16]).show()
+
+        rs = rs.optimize(mode='pysis', method='rfo', max_iterations=200, logger=True)
+        ts = ts.optimize(mode='pysis', method='ts', max_iterations=100, logger=True)
+
+        internals = rs.get_bond_zmatrix()
+        fopt = ForceOptimizer(rs, ts,
+                              internals=internals,
+                              fragment_indices=1,#np.setdiff1d(rs.fragment_indices[1], (0, 16, 3, 15)),
+                              precompute_modes=False)
+        # fopt._debug_show_force_vectors = True
+
+        # which = fopt.get_selected_internals('dihedrals', max_internals=5, max_internals_ranks=[-1])
+        # fopt.internal_mols[0].animate_coordinate(which[0], backend='x3d').show()
+        # fopt.internal_mols[1].animate_coordinate(which[0], backend='x3d').show()
+        # return
+
+        fmrd_res = fopt.reoptimize_internals_with_force('dihedrals',
+                                                        magnitude=500,
+                                                        max_internals=1,
+                                                        max_internals_ranks=[-1],
+                                                        rigid=True,
+                                                        return_selected=True)
+        fmrd_res, (which2, gammas) = fmrd_res
+        # fopt.internal_mols[0].animate_coordinate(which2[0], backend='x3d').show()
+        # fopt.internal_mols[1].animate_coordinate(which2[0], backend='x3d').show()
+
+        fmd_r, fmd_t, data = fmrd_res[0]
+
+        fmd_e_t, fmd_e_r = data.force_modified_transition_state_energy, data.force_modified_reactant_energy
+        e_t, e_r = data.transition_state_energy, data.reactant_energy
+
+        print("Baseline: {de} kcal mol^-1".format(
+            de=(e_t - e_r) * UnitsData.convert("Hartrees", "Kilocalories/Mole")
+        ))
+        print("Distortion: {de} kcal mol^-1".format(
+            de=(fmd_e_t - fmd_e_r) * UnitsData.convert("Hartrees", "Kilocalories/Mole")
+        ))
+
+        fmra = ForceModifiedReactionAnalyzer.from_data(data)
+        fmra.animate_reactant_distortion().show()
+        fmra.animate_ts_distortion().show()
+        fmra.plot_lines(bonds=[(0, 16), (3, 15)]).show()
 
 
 if __name__ == '__main__':

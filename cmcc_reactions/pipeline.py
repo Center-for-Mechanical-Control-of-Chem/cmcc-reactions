@@ -753,6 +753,7 @@ def run_pressure_fmrds(optimizer,
 def run_optimization_pipeline(
         input_data: str | gen_prods.InitialProductData | OptimizedForceResults | OptimizedForcePipelineData,
         output_file=None,
+        step_output_files=None,
         steps=None,
         verbose=False,
         trajectory_optimization_settings=None,
@@ -885,6 +886,27 @@ def run_optimization_pipeline(
                 print(f"saving to {output_file}...")
                 input_data.save(output_file)
 
+
+        if 'rigid-fmrds' in steps:
+            if optimizer is None:
+                opt_force = input_data.optimized_forces
+                if opt_force is None:
+                    raise ValueError("optimized forces needed to get force modified reaction data")
+                optimizer = fopt.ForceOptimizer.from_data(opt_force)
+            if verbose:
+                print('running rigid fmrds')
+
+
+            if force_modification_settings is None:
+                force_modification_settings = {}
+            force_modification_settings = global_options | force_modification_settings
+            fmrds = run_fmrds(optimizer, rigid=True, **force_modification_settings)
+            input_data.fmrds = [f[2] for f in fmrds]
+
+            if output_file is not None:
+                print(f"saving to {output_file}...")
+                input_data.save(output_file)
+
         if 'internals' in steps:
             if optimizer is None:
                 opt_force = input_data.optimized_forces
@@ -901,6 +923,33 @@ def run_optimization_pipeline(
             internal_force_modification_settings = global_options | internal_force_modification_settings
             overwrite = internal_force_modification_settings.pop('overwrite', False)
             fmrds = run_internal_fmrds(optimizer, **internal_force_modification_settings)
+            if input_data.fmrds is None or overwrite:
+                input_data.fmrds = [f[2] for f in fmrds]
+            else:
+                input_data.fmrds = input_data.fmrds + [f[2] for f in fmrds]
+
+            if output_file is not None:
+                print(f"saving to {output_file}...")
+                input_data.save(output_file)
+
+        if 'rigid-internals' in steps:
+            if optimizer is None:
+                opt_force = input_data.optimized_forces
+                if opt_force is None:
+                    raise ValueError("optimized forces needed to get force modified reaction data")
+                optimizer = fopt.ForceOptimizer.from_data(opt_force)
+            if verbose:
+                print('running rigid internal forces')
+
+            if internal_force_modification_settings is None:
+                internal_force_modification_settings = force_modification_settings
+            if internal_force_modification_settings is None:
+                internal_force_modification_settings = {}
+            internal_force_modification_settings = global_options | internal_force_modification_settings
+            overwrite = internal_force_modification_settings.pop('overwrite', False)
+            fmrds = run_internal_fmrds(optimizer,
+                                       rigid=True,
+                                       **internal_force_modification_settings)
             if input_data.fmrds is None or overwrite:
                 input_data.fmrds = [f[2] for f in fmrds]
             else:
@@ -934,10 +983,55 @@ def run_optimization_pipeline(
             if output_file is not None:
                 print(f"saving to {output_file}...")
                 input_data.save(output_file)
+
+        if 'rigid-pressure' in steps:
+            if optimizer is None:
+                opt_force = input_data.optimized_forces
+                if opt_force is None:
+                    raise ValueError("optimized forces needed to get force modified reaction data")
+                optimizer = fopt.ForceOptimizer.from_data(opt_force)
+            if verbose:
+                print('running rigid pressure')
+
+            if pressure_force_modification_settings is None:
+                pressure_force_modification_settings = force_modification_settings
+            if pressure_force_modification_settings is None:
+                pressure_force_modification_settings = {}
+            pressure_force_modification_settings = global_options | pressure_force_modification_settings
+            overwrite = pressure_force_modification_settings.pop('overwrite', False)
+            fmrds = run_pressure_fmrds(optimizer, rigid=True, **pressure_force_modification_settings)
+            if input_data.fmrds is None or overwrite:
+                input_data.fmrds = [f[2] for f in fmrds]
+            else:
+                input_data.fmrds = input_data.fmrds + [f[2] for f in fmrds]
+
+            if output_file is not None:
+                print(f"saving to {output_file}...")
+                input_data.save(output_file)
     finally:
         if output_file is not None:
             print(f"saving to {output_file}...")
             input_data.save(output_file)
+
+    if step_output_files is not None:
+        for of, steps in step_output_files.items():
+            run_optimization_pipeline(
+                input_data,
+                output_file=of,
+                steps=steps,
+                verbose=verbose,
+                trajectory_optimization_settings=trajectory_optimization_settings,
+                refined_trajectory_optimization_settings=refined_trajectory_optimization_settings,
+                update_trajectory_settings=update_trajectory_settings,
+                optimized_force_settings=optimized_force_settings,
+                force_modification_settings=force_modification_settings,
+                internal_force_modification_settings=internal_force_modification_settings,
+                pressure_force_modification_settings=pressure_force_modification_settings,
+                max_iterations=max_iterations,
+                tol=tol,
+                energy_evaluator=energy_evaluator,
+                **global_options
+                )
 
     return input_data
 
