@@ -751,6 +751,50 @@ H	-3.015828   -1.433443    1.079180''',
             energy_evaluator='aimnet2'
         )
 
+        prod = Molecule.from_string('''
+23
+
+C	-2.130472   -0.872239    0.012830
+C	-2.837943    0.423768   -0.358236
+C	-2.036169    1.437416   -0.003026
+C	-0.785002    0.832289    0.615247
+H	-3.768536    0.486030   -0.914065
+H	-2.171380    2.494087   -0.211641
+C	-1.380485   -0.424799    1.289712
+H	-2.054779   -0.174685    2.114386
+H	-0.623578   -1.141357    1.624103
+H	 3.632781    0.252404    1.177904
+C	 3.620668    0.446425    0.101839
+H	 4.203134    1.337891   -0.133497
+O	 2.285694    0.727776   -0.347439
+O	 1.678608   -1.328818    0.357919
+C	 1.385915   -0.265794   -0.151448
+C	 0.003633    0.166438   -0.596488
+C	-0.924072   -1.025404   -0.977450
+H	 4.025934   -0.425731   -0.418228
+H	 0.120871    0.893828   -1.402633
+H	-0.171319    1.499026    1.225121
+H	-0.408315   -1.974347   -0.806154
+H	-1.237369   -0.984186   -2.024394
+H	-2.758306   -1.763227    0.087370''',
+            units='Angstroms',
+            energy_evaluator='aimnet2'
+        )
+
+        # prod = prod.optimize(mode='pysis', method='rfo', max_iterations=200, logger=True)
+        # prod_data = gen_prods.InitialProductData(
+        #     atoms=prod.atoms,
+        #     coords=prod.coords,
+        #     smiles=None,
+        #     bonds=None,
+        #     energy=prod.calculate_energy(),
+        #     breakpoints=None,
+        #     evaluator='aimnet2',
+        #     optimization_settings=None
+        # )
+        # utils.write_namedtuple('/Users/Mark/Desktop/methacrylate_prod.npz', prod_data)
+        #
+        # return
         # rs.plot(display_atom_numbers=True).show()
         # ts.plot(highlight_atoms=[0, 3, 15, 16]).show()
 
