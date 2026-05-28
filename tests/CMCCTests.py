@@ -802,6 +802,7 @@ H	-2.758306   -1.763227    0.087370''',
         ts = ts.optimize(mode='pysis', method='ts', max_iterations=100, logger=True)
 
         fopt = ForceOptimizer(rs, ts, precompute_modes=False)
+        # fopt._debug_show_force_vectors = True
         # print(fopt.ts.calculate_energy() - fopt.rs.calculate_energy())
         # _, x_r, x_t = fopt.get_pressure_distorted_geometries(steps=5,
         #                                                      pressure_model='xhcff',
@@ -829,9 +830,9 @@ H	-2.758306   -1.763227    0.087370''',
 
         import McUtils.Numputils as nput
         fmd_r, fmd_t, data = fopt.reoptimize_with_pressure(
-            15,
+            10,
             pressure_units="Gigapascals",
-            pressure_model='xhcff',
+            pressure_model='cavity',
             # optimizer_mode='scipy',
             # optimizer_method='bfgs',
             # pressure_model='cylinder',
@@ -874,7 +875,7 @@ H	-2.758306   -1.763227    0.087370''',
         # print("Force Modified Transition State:")
         # print(fmd_t.to_string('xyz', units='Angstroms'))
 
-        utils.write_namedtuple('/Users/Mark/Desktop/methacrylate_fmrd_hydrostatic.npz', data)
+        # utils.write_namedtuple('/Users/Mark/Desktop/methacrylate_fmrd_hydrostatic.npz', data)
         fmra.plot_lines().show()
 
 

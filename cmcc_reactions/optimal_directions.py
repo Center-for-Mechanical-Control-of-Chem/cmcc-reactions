@@ -1172,6 +1172,7 @@ class ForceOptimizer:
             UnitsData.convert(("NanoJoules", "InverseMeters"), ("Hartrees", "InverseBohrRadius"))
         ) ** 2
 
+    _debug_show_force_vectors = False
     def mode_force_function(self, mode, magnitude=1,
                             use_internals=False,
                             mass_weight=True,
@@ -1193,10 +1194,11 @@ class ForceOptimizer:
                 reembed_displacements = False
             def get_direction(ref, coords):
                 d = displacements(ref, coords)
-                # self.rs.plot(
-                #     coords.reshape(-1, 3),
-                #     mode_vectors=nput.vec_normalize(d[mode]) * 15
-                # ).show()
+                if self._debug_show_force_vectors:
+                    self.rs.plot(
+                        coords.reshape(-1, 3),
+                        mode_vectors=nput.vec_normalize(d[mode]) * 15
+                    ).show()
                 return d[mode] * magnitude
 
         def force_modification(coords, base_grad):
@@ -1676,11 +1678,27 @@ class ForceOptimizer:
             contrib = axis * atom_areas[atom] * frac * pressure * np.average(axis_term)
             force[atom] = -contrib
         return force.reshape((1, -1))
+    def _cavity_pressure(self, ts: Molecule, coords, *, pressure, surface_points=100, radius_scaling=1.6):
+        coords = np.asanyarray(coords).reshape((-1, 3))
+        surf = ts.modify(coords=coords).get_surface(samples=surface_points,
+                                                    radius_scaling=radius_scaling).get_triangulation()
+        groups, _ = nput.group_by(np.arange(len(surf.tri_map)), surf.tri_map)
+        # tri_inds = surf.inds
+        _, derivs = surf.volume_derivatives(return_components=True)
+        # areas = surf.surface_area(return_components=True)
+        # area_fractions = areas #/ np.sum(areas)
+        derivs = derivs.reshape((derivs.shape[0], -1, 3)) * pressure
+        force = np.zeros_like(coords)
+        for atom, inds in zip(*groups):
+            force[atom] += np.sum(np.sum(derivs[inds,], axis=0), axis=0)
+        return force.reshape((1, -1))
     def pressure_model_generator(self, pressure_model, pressure, **opts):
         if dev.str_is(pressure_model, 'hcff'):
             pressure_model = self._hcff_pressure
         elif dev.str_is(pressure_model, 'xhcff'):
             pressure_model = self._xhcff_pressure
+        elif dev.str_is(pressure_model, 'cavity'):
+            pressure_model = self._cavity_pressure
         elif dev.str_is(pressure_model, 'cylinder'):
             if opts.get('axis') is None:
                 opts['axis'] = 'c'
