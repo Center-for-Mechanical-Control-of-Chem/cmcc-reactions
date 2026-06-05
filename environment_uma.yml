@@ -9,8 +9,8 @@ dependencies:
   - pip:
       - mccoygroup-psience
       - rdkit
-      - --extra-index-url https://download.pytorch.org/whl/cu128
+      - --extra-index-url https://download.pytorch.org/whl/cpu
       - torch==2.8.0
-      - --find-links https://data.pyg.org/whl/torch-2.8.0+cu128.html
+      - --find-links https://data.pyg.org/whl/torch-2.8.0+cpu.html
       - fairchem-core
       - git+https://github.com/Center-for-Mechanical-Control-of-Chem/cmcc-reactions.git
