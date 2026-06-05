@@ -12,11 +12,6 @@ COPY environment_mace.yml .
 COPY environment_uma.yml .
 COPY cli.py .
 
-RUN conda env create -f environment.yml && \
-    conda env create -f environment_mace.yml && \
-    conda env create -f environment_uma.yml && \
-    conda clean --all -afy
-
 ENV PATH=/opt/conda/bin:$PATH
 
 RUN printf '%s\n' \
@@ -24,6 +19,13 @@ RUN printf '%s\n' \
     'conda run --no-capture-output -n cmcc-rxn jupyter "$@"' \
     > /usr/bin/jupyter && \
     chmod +x /usr/bin/jupyter
+
+RUN conda env create -f environment.yml && \
+    conda env create -f environment_mace.yml && \
+    conda env create -f environment_uma.yml && \
+    conda clean --all -afy
+
+
 
 
 ENTRYPOINT ["python", "cli.py"]

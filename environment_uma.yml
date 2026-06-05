@@ -1,4 +1,4 @@
-name: cmcc-rxn-mace
+name: cmcc-rxn-uma
 channels:
   - defaults
   - conda-forge
