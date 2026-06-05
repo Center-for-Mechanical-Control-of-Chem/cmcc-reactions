@@ -8,6 +8,8 @@ RUN apt-get update && \
 ARG CACHEBUST
 
 COPY environment.yml .
+COPY environment_mace.yml .
+COPY environment_uma.yml .
 COPY cli.py .
 
 RUN conda env create -f environment.yml && \
