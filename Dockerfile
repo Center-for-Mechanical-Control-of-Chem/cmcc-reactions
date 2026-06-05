@@ -23,6 +23,7 @@ RUN printf '%s\n' \
     '#!/bin/bash' \
     'conda run --no-capture-output -n cmcc-rxn jupyter "$@"' \
     > /usr/bin/jupyter && \
-    chmod +x /usr/bin/jupyter \
+    chmod +x /usr/bin/jupyter
+
 
 ENTRYPOINT ["python", "cli.py"]
