@@ -1012,7 +1012,7 @@ H	-3.015828   -1.433443    1.079180''',
         # return
 
         fmrd_res = fopt.reoptimize_internals_with_force('dihedrals',
-                                                        magnitude=500,
+                                                        magnitude=1000,
                                                         max_internals=1,
                                                         max_internals_ranks=[-1],
                                                         rigid=True,
