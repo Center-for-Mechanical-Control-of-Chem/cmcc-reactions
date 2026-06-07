@@ -13,5 +13,6 @@ dependencies:
       - torch==2.8.0
       - --find-links https://data.pyg.org/whl/torch-2.8.0+cpu.html
       - torch-cluster
+      - torch-scatter
       - fairchem-core
       - git+https://github.com/Center-for-Mechanical-Control-of-Chem/cmcc-reactions.git
