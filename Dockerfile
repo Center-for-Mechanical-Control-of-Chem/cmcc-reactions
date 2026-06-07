@@ -15,8 +15,6 @@ RUN apt-get update && apt-get -y install --no-install-recommends git gcc g++ && 
     mamba env create -f environment_mace.yml && \
     mamba env create -f environment_uma.yml && \
     mamba clean --all -afy && \
-    apt-get -y purge gcc g++ && apt-get -y autoremove && \
-    rm -rf /var/lib/apt/lists/* && \
     find /opt/conda -follow -type f -name '*.a' -delete && \
     find /opt/conda -follow -type f -name '*.pyc' -delete && \
     find /opt/conda -follow -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
