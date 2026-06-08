@@ -22,14 +22,9 @@ setuptools.setup(
     python_requires=">=3.10",
     install_requires=[
         "ase",
-        "numpy<2",
-        "rdkit<2025",
-        "torch",
-        "torch_geometric",
+        "rdkit",
         "matplotlib",
-        # "git+https://github.com/isayevlab/AIMNet2",
         "mccoygroup-mcutils",
         "mccoygroup-psience"
-        # "nglview"
     ]
 )
