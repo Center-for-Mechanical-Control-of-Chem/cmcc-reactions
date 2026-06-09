@@ -19,4 +19,4 @@ RUN apt-get update && apt-get -y install --no-install-recommends git gcc g++ && 
     find /opt/conda -follow -type f -name '*.pyc' -delete && \
     find /opt/conda -follow -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
 
-ENTRYPOINT ["python", "cli.py"]
+ENTRYPOINT ["python", "/cli.py"]

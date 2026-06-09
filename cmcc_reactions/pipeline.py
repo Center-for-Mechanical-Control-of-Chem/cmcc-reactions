@@ -1327,8 +1327,32 @@ def generate_from_product_library_set(
             **global_options
         )
 
-default_pipeline_data = {
-    "template_data":...
+BASE_TEMPLATES = {
+    'cyclopentadiene':'[C:3]1[C:1]([C:7]2)[C:5]=[C:6][C:2]2[C:4]1',
+    'butadiene':'[C:3]1[C:1][C:5]=[C:6][C:2][C:4]1',
+    '1-N-butadiene':'[C:3]1[C:1][C:5]=[C:6][N:2][C:4]1',
+    '2-N-butadiene':'[C:3]1[C:1][C:5]=[N:6][C:2][C:4]1',
+    '2-O-butadiene':'[C:3]1[C:1][C:5]=[C:6][O:2][C:4]1',
+    'butadiene-N':'[C:3]1[C:1][C:5]=[C:6][C:2][N:4]1',
+    'butadiene-O':'[C:3]1[C:1][C:5]=[C:6][C:2][O:4]1',
+    'anthracene':'[C:3]4[C:1]3c1ccccc1[C:2]([C:4]4)c2ccccc23',
+    'anthracene-side':'c12c(cc3ccccc3c1)[C:2]1[C:4][C:3][C:1]2C=C1',
+    'dp-ibf':'[C:1]12(c3ccccc3)[C:3][C:4][C:2](c3ccccc3)(c3c1cccc3)O2',
+    'dmfdc':'[C:1]12[C:3][C:4][C:2](C(C(OC)=O)=C1C(OC)=O)O2',
+    'napthalene':'[C:1]12[C:3][C:4][C:2](C=C1)c1c2cccc1'
+}
+
+BASE_FRAGMENTS = {
+    'sulfonyl':'[S:1](=O)=O',
+    'sulfonyl-phenyl':'[S:1](=O)(c1ccccc1)=O',
+    'sulfonyl-chex':'[S:1](=O)(C1CCCCC1)=O',
+    'pF-phenyl':'[c:1]1ccc(F)cc1',
+    'OMe':'[O:1]C',
+    'CN':'[C:1]N',
+    'acetamide':'[C:1]C(=O)N',
+    'methyl':'[C:1]',
+    'carboxyl':'[C:1]C(=O)O',
+    'tBu':'[C:1]C(C)(C)(C)'
 }
 
 def _prep_pipeline_tree(tree, precompression_function):
