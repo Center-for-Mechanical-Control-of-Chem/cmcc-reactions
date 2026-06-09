@@ -1,5 +1,5 @@
 FROM condaforge/miniforge3:latest
-ENV DEBIAN_FRONTEND=noninteractive PATH=/opt/conda/bin:$PATH
+ENV DEBIAN_FRONTEND=noninteractive PATH=/opt/conda/bin:$PATH PYTHONPATH=/home:$PYTHONPATH
 
 RUN printf '%s\n' \
     '#!/bin/bash' \
