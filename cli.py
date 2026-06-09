@@ -5,7 +5,7 @@ import sys
 
 
 def build_command(args, remaining):
-    if args.no_conda:
+    if args.no_conda or args.env.casefold() == "none":
         prefix = []
     else:
         prefix = ["conda", "run", "--no-capture-output", "-n", args.env]
@@ -15,7 +15,7 @@ def build_command(args, remaining):
     if not remaining or only_kwargs:
         # No args or only keyword/flag args -> Jupyter
         cmd = prefix + ["jupyter", "lab"] + remaining
-    elif remaining[0].endswith(".py") or remaining[0] in ['-c', '-m']:
+    elif remaining[0].endswith(".py") or remaining[0] in ['-c', '-m', '-u']:
         # A python script or command
         cmd = prefix + ["python"] + remaining
     else:
