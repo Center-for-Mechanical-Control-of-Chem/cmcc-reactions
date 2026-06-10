@@ -18,6 +18,9 @@ def build_command(args, remaining):
     elif remaining[0].endswith(".py") or remaining[0] in ['-c', '-m', '-u']:
         # A python script or command
         cmd = prefix + ["python"] + remaining
+    elif remaining[0] == 'configure':
+        from cmcc_reactions.helpers import configure_cli
+        configure_cli(remaining)
     else:
         # Forward everything as-is
         cmd = prefix + remaining
