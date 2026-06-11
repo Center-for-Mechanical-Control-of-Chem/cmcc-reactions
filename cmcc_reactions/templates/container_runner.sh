@@ -90,7 +90,6 @@ chmod +x "${ALIAS_SCRIPT}"
 # 4. Run the long-running singularity process with the socket + shim bound in.
 #    PATH is prepended with the shim dir so `sbatch` resolves to our fake one.
 # ---------------------------------------------------------------------------
-ex
 singularity run \
     --bind "${WORKDIR}:${C_WORKDIR}" \
     --bind "${SCRIPT_DIR}:${C_WORKDIR}/scripts:ro" \

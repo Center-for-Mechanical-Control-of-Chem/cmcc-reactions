@@ -7,6 +7,8 @@ RUN printf '%s\n' \
     > /usr/bin/jupyter && \
     chmod +x /usr/bin/jupyter
 
+WORKDIR /home
+
 ARG CACHEBUST
 COPY environment.yml environment_mace.yml environment_uma.yml cli.py ./
 
@@ -19,4 +21,4 @@ RUN apt-get update && apt-get -y install --no-install-recommends git gcc g++ && 
     find /opt/conda -follow -type f -name '*.pyc' -delete && \
     find /opt/conda -follow -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
 
-ENTRYPOINT ["python", "/cli.py"]
+ENTRYPOINT ["python", "/home/cli.py"]
