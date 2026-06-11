@@ -14,7 +14,6 @@ set -euo pipefail
 # Configuration
 # ---------------------------------------------------------------------------
 SIF_IMAGE="`CONTAINER_PATH`"
-shift || true
 
 # Directory holding this script and the python helpers (SLURMServer_launcher.py,
 # sbatch_client.py, NodeCommServer.py).
@@ -55,7 +54,7 @@ mkdir -p "${ALIAS_DIR}"
 # 1. Launch the SLURMClient server on the host, bound to the Unix socket.
 # ---------------------------------------------------------------------------
 echo "[launch] starting SLURMClient server on ${SOCKET_FILE}" >&2
-( cd "${SCRIPT_DIR}" && exec "${PYTHON_BIN}" -m SLURMClient --socket="${SOCKET_FILE}" ) &
+( cd "${SCRIPT_DIR}" && exec "${PYTHON_BIN}" -m SLURMClient --start-server --socket="${SOCKET_FILE}" ) &
 SERVER_PID=$!
 
 # Wait for the socket file to appear (server is ready) before continuing.
@@ -82,7 +81,7 @@ fi
 cat > "${ALIAS_SCRIPT}" <<EOF
 #!/usr/bin/env bash
 # fake sbatch -> routes the call to the host SLURMClient over the bound socket
-exec "${PYTHON_BIN}" -m SLURMClient "\$@"
+exec "${PYTHON_BIN}" -m SLURMClient --socket="${SOCKET_FILE}" sbatch "\$@"
 EOF
 chmod +x "${ALIAS_SCRIPT}"
 
