@@ -874,7 +874,7 @@ def generate_reactants_from_products(
     if reoptimize_product:
         mol = mol.optimize(
             mode=optimizer,
-            optimizer_method=optimizer_method,
+            method=optimizer_method,
             max_iterations=max_iterations
         )
 
