@@ -128,11 +128,6 @@ def get_reactant_and_ts(distortion_data):
         elif reactant is None:
             raise ValueError("couldn't load reactant")
 
-def build_mol(structure_data, **opts):
-    (atoms, coords), meta = structure_data
-    return Molecule(atoms, np.array(coords) * UnitsData.convert("Angstroms", "BohrRadius"),
-                    **dict(meta, **opts))
-
 def load_all_structs(distortion_data:dict):
     mols = {}
     for k in enumerate_distortions(distortion_data):
@@ -166,16 +161,20 @@ class ForceModifiedReactionAnalyzer:
         self.force_modified_transition_state_energy = force_modified_transition_state_energy
         self.reactant = Molecule(atoms, reactant_geom,
                                  energy_evaluator=energy_evaluator,
-                                 potential_derivatives=[0, reactant_hessian] if reactant_hessian is not None else None)
-        self.force_modified_reactant = Molecule(atoms, force_modified_reactant_geom, energy_evaluator=energy_evaluator)
+                                 potential_derivatives=[0, reactant_hessian] if reactant_hessian is not None else None,
+                                 spin=1)
+        self.force_modified_reactant = Molecule(atoms, force_modified_reactant_geom, energy_evaluator=energy_evaluator,
+                                                spin=1)
         self.transition_state = Molecule(atoms, transition_state_geom,
-                                 energy_evaluator=energy_evaluator,
-                                 potential_derivatives=
-                                        [0, np.array(transition_state_hessian)]
-                                            if transition_state_hessian is not None else
-                                        None)
+                                         energy_evaluator=energy_evaluator,
+                                         potential_derivatives=
+                                         [0, np.array(transition_state_hessian)]
+                                         if transition_state_hessian is not None else
+                                         None,
+                                         spin=1)
         self.force_modified_transition_state = Molecule(atoms, force_modified_transition_state_geom,
-                                                        energy_evaluator=energy_evaluator)
+                                                        energy_evaluator=energy_evaluator,
+                                                        spin=1)
         self.force_vector = force_vector
         self.force_magnitude = force_magnitude
         self.force_units = force_units

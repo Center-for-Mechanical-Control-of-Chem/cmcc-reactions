@@ -486,7 +486,8 @@ def _generate_products_and_optimize(smiles_iterator,
         structs:list[Molecule] = Molecule.from_string(smiles, 'smi',
                                                       num_confs=actual_num_confs,
                                                       energy_evaluator=calc,
-                                                      conf_gen_options=conf_gen_options
+                                                      conf_gen_options=conf_gen_options,
+                                                      spin=1
                                                       )
         ref = structs[0].get_embedded_molecule()
         structs = [s.get_embedded_molecule(ref=ref) for s in structs]
@@ -852,7 +853,8 @@ def generate_reactants_from_products(
         product_data.atoms,
         product_data.coords,
         product_data.bonds,
-        energy_evaluator=energy_evaluator
+        energy_evaluator=energy_evaluator,
+        spin=1
     )
     if reoptimize_product:
         mol = mol.optimize(max_iterations=max_iterations)

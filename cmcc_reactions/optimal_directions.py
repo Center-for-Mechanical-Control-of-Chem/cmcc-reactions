@@ -229,7 +229,8 @@ def setup_mol(reactant_data):
             reactant_data['hessian'].reshape(nat * 3, nat * 3) * UnitsData.convert("ElectronVolts", "Hartrees") / (
                     UnitsData.convert("Angstroms", "BohrRadius") ** 2
             )
-        ]
+        ],
+        spin=1
     )
     return reactant
 
@@ -768,7 +769,8 @@ class ForceOptimizer:
                     force_data.atoms,
                     force_data.reactant_geom,
                     potential_derivatives=[0, np.asanyarray(force_data.reactant_hessian)],
-                    energy_evaluator=energy_evaluator
+                    energy_evaluator=energy_evaluator,
+                    spin=1
                 )
             elif reactant.potential_derivatives is None:
                 reactant.potential_derivatives = [0, np.asanyarray(force_data.reactant_hessian)]
@@ -778,7 +780,8 @@ class ForceOptimizer:
                     force_data.atoms,
                     force_data.transition_state_geom,
                     potential_derivatives=[0, np.asanyarray(force_data.transition_state_hessian)],
-                    energy_evaluator=energy_evaluator
+                    energy_evaluator=energy_evaluator,
+                    spin=1
                 )
             elif ts.potential_derivatives is None:
                 ts.potential_derivatives = [0, np.asanyarray(force_data.transition_state_hessian)]

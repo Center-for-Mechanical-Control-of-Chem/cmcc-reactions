@@ -210,7 +210,8 @@ def update_trajectory_data(traj_data:TrajectoryData|ReoptimizedTrajectoryData):
         traj_data:ReoptimizedTrajectoryData
         if traj_data.initial_gradients is None:
             mols = [
-                Molecule(traj_data.atoms, c, energy_evaluator=traj_data.evaluator)
+                Molecule(traj_data.atoms, c, energy_evaluator=traj_data.evaluator,
+                         spin=1)
                 for c in traj_data.initial_trajectory
             ]
             expansions = [m.calculate_energy(order=2) for m in mols]
@@ -222,7 +223,8 @@ def update_trajectory_data(traj_data:TrajectoryData|ReoptimizedTrajectoryData):
             )
         if traj_data.final_gradients is None:
             mols = [
-                Molecule(traj_data.atoms, c, energy_evaluator=traj_data.evaluator)
+                Molecule(traj_data.atoms, c, energy_evaluator=traj_data.evaluator,
+                         spin=1)
                 for c in traj_data.final_trajectory
             ]
             expansions = [m.calculate_energy(order=2) for m in mols]
@@ -245,7 +247,8 @@ def update_trajectory_data(traj_data:TrajectoryData|ReoptimizedTrajectoryData):
         traj_data:TrajectoryData
         if traj_data.gradients is None:
             mols = [
-                Molecule(traj_data.atoms, c, energy_evaluator=traj_data.evaluator)
+                Molecule(traj_data.atoms, c, energy_evaluator=traj_data.evaluator,
+                         spin=1)
                 for c in traj_data.coordinates
             ]
             expansions = [m.calculate_energy(order=2) for m in mols]
@@ -428,7 +431,8 @@ def refine_trajectory(product_data: ReoptimizedTrajectoryData | TrajectoryData,
     traj = [
         Molecule(product_data.atoms,
                  c,
-                 energy_evaluator=energy_evaluator)
+                 energy_evaluator=energy_evaluator,
+                 spin=1)
         for c in trajectory
     ]
 
@@ -779,7 +783,8 @@ class DielsAlderReactionTrajectory:
             self._mols[i] = Molecule(
                 self.atoms,
                 struct,
-                energy_evaluator=self.energy_evaluator
+                energy_evaluator=self.energy_evaluator,
+                spin=1
             )
         return self._mols[i]
 
