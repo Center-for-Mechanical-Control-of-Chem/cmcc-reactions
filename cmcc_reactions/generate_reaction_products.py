@@ -1,6 +1,8 @@
 import itertools
 import multiprocessing
 import functools
+import traceback
+
 import scipy.sparse
 import collections
 import glob
@@ -893,15 +895,20 @@ def generate_reactants_from_products(
     init_traj = create_trajectory_data(base_structs)
 
     if profile_generator is not None:
-        new_traj = refine_trajectory(
-            init_traj,
-            init_traj,
-            energy_evaluator=energy_evaluator,
-            profile_generator=profile_generator,
-            refine_endpoints=refine_endpoints,
-            refine_ts=refine_ts,
-            **optimization_settings
-            )
+        try:
+            new_traj = refine_trajectory(
+                init_traj,
+                init_traj,
+                energy_evaluator=energy_evaluator,
+                profile_generator=profile_generator,
+                refine_endpoints=refine_endpoints,
+                refine_ts=refine_ts,
+                **optimization_settings
+                )
+        except Exception as e:
+            print("FAILURE ON REFINEMENT:")
+            traceback.print_exc()
+            new_traj = init_traj
         # new_traj = reoptimize_trajectory(
         #     mol,
         #     init_traj,
