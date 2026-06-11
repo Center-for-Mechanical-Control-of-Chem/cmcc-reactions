@@ -471,9 +471,19 @@ def _generate_products_and_optimize(smiles_iterator,
                             product_data = utils.read_namedtuple(f)
                             callback(product_data, f)
                     continue
+            else:
+                smiles_label = None
+        else:
+            smiles_label = None
 
         if verbose:
-            print("Processing SMILES: ", smiles)
+            if smiles_label is None:
+                u_smiles = Chem.CanonSmiles(smiles)
+                if smiles_hash_generator is not None:
+                    smiles_label = smiles_hash_generator(u_smiles)
+                else:
+                    smiles_label = str(smiles_index)
+            print("Processing SMILES: ", smiles, f"({smiles_label})")
 
         conf_gen_options = conf_gen_defaults | conf_gen_options
         actual_num_confs = conf_gen_options.pop('numConfs', conf_gen_defaults.pop('num_confs', num_structs))
