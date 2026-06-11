@@ -19,7 +19,7 @@ def build_command(args, remaining):
         # A python script or command
         cmd = prefix + ["python"] + remaining
     elif remaining[0] == 'configure':
-        cmd = prefix + ["python", "-m", "cmcc_reactions.helpers"] + remaining
+        cmd = prefix + ["python", "-m", "cmcc_reactions.helpers"] + remaining[1:]
     else:
         # Forward everything as-is
         cmd = prefix + remaining
