@@ -1035,6 +1035,7 @@ def run_optimization_pipeline(
 
     return input_data
 
+DEBUG_NO_DELETE_SCRIPTS = False
 def generator_callback(
         input_file=None,
         output_file="pipeline_data.json",
@@ -1079,7 +1080,9 @@ def generator_callback(
                     **global_options
                 )
                 if verbose:
-                    print(script.run())
+                    print(script.run(delete=not DEBUG_NO_DELETE_SCRIPTS))
+                else:
+                    script.run(delete=not DEBUG_NO_DELETE_SCRIPTS)
             else:
                 run_optimization_pipeline(
                     product_data,
