@@ -17,3 +17,7 @@ def configure_cli(target_dir='.', templates_dir=None):
             dest.write(src)
 
     return script
+
+if __name__ == "__main__":
+    import sys
+    configure_cli(*sys.argv[1:])

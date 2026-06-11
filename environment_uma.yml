@@ -8,6 +8,7 @@ dependencies:
   - jupyterlab
   - pip:
       - pysisyphus
+      - mccoygroup-mcutils
       - mccoygroup-psience
       - rdkit
       - --extra-index-url https://download.pytorch.org/whl/cpu
