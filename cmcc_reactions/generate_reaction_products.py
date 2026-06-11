@@ -848,12 +848,14 @@ def generate_initial_reaction_sampling(mol,
 
 def generate_reactants_from_products(
         product_data: InitialProductData,
-        max_iterations=500,
+        max_iterations=150,
         nsteps=30,
         max_step=4,
-        profile_generator='pys-dimer',
+        profile_generator='pys-ts',
         energy_evaluator='aimnet2',
         reoptimize_product=True,
+        optimizer='pysis',
+        optimizer_method='rfo',
         refine_endpoints=True,
         refine_ts=True,
         output_dir=None,
@@ -868,7 +870,11 @@ def generate_reactants_from_products(
         spin=1
     )
     if reoptimize_product:
-        mol = mol.optimize(max_iterations=max_iterations)
+        mol = mol.optimize(
+            mode=optimizer,
+            optimizer_method=optimizer_method,
+            max_iterations=max_iterations
+        )
 
     init_traj = generate_initial_reaction_sampling(
         mol,

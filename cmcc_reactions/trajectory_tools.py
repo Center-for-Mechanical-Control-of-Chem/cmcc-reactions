@@ -371,9 +371,11 @@ def refine_trajectory(product_data: ReoptimizedTrajectoryData | TrajectoryData,
                       max_displacement=None,
                       refine_endpoints=True,
                       refine_ts=True,
+                      optimizer='pysis',
+                      optimizer_method='rfo',
                       optimizer_settings=None,
                       which='final',
-                      max_iterations=50,
+                      max_iterations=500,
                       max_refinement_iterations=3,
                       fix_ts=True,
                       logger=None,
@@ -439,10 +441,16 @@ def refine_trajectory(product_data: ReoptimizedTrajectoryData | TrajectoryData,
     _, inds = get_critical_points(traj, energies=energies, hessians=hess, ts_idx=ts_idx)
     if refine_endpoints:
         # uh = traj[0]
-        traj[inds.react] = traj[inds.react].optimize(max_iterations=max_iterations, logger=logger)
+        traj[inds.react] = traj[inds.react].optimize(
+            mode=optimizer,
+            method=optimizer_method,
+            max_iterations=max_iterations, logger=logger)
         # print(traj[0].calculate_energy() - uh.calculate_energy())
         # uh2 = traj[-1]
-        traj[inds.prod] = traj[inds.prod].optimize(max_iterations=max_iterations, logger=logger)
+        traj[inds.prod] = traj[inds.prod].optimize(
+            mode=optimizer,
+            method=optimizer_method,
+            max_iterations=max_iterations, logger=logger)
         # print(traj[-1].calculate_energy() - uh2.calculate_energy())
 
 
