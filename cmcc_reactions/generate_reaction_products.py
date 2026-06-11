@@ -466,6 +466,7 @@ def _generate_products_and_optimize(smiles_iterator,
                 else:
                     smiles_label = str(smiles_index)
                 if os.path.isfile(os.path.join(output_dir, smiles_label, 'conformer_info.json')):
+                    print("Pre-Optimized SMILES: ", smiles, f"({smiles_label})")
                     if callback is not None:
                         for f in glob.glob(os.path.join(output_dir, smiles_label, '*', info_file)):
                             product_data = utils.read_namedtuple(f)
