@@ -230,12 +230,6 @@ def write_json(file, data, **opts):
         json.dump(data, file, cls=BaseEncoder, **opts)
     return file
 
-def read_json(file, normalize=True, **opts):
-    data = dev.read_json(file, **opts)
-    if normalize:
-        return normalize_tree(data)
-    else:
-        return data
 
 def write_tree(file, data, compress=None, mode=None, encoder=None, writer=None, precompression_function=None,
                compress_npz=None,
@@ -418,7 +412,25 @@ def isnamedtupleinstance(obj, nt_types):
             )
     )
 
-def construct_json_file_tree(top_dir, js_patterns="**/*.json", loader=None, split_paths=True, recursive=True,
+try:
+    import orjson
+except ImportError:
+    js_loader=None
+else:
+    def read_js(f, normalize=True, **opts):
+        def subload(f2):
+            try:
+                return orjson.loads(f2.read())
+            except json.JSONDecodeError:
+                print(f"Bad file: {f}")
+                return {}
+        data = dev.read_json(f, loader=subload, mode='rb', **opts)
+        if normalize:
+            return normalize_tree(data)
+        else:
+            return data
+    js_loader=read_js
+def construct_json_file_tree(top_dir, js_patterns="**/*.json", loader=js_loader, split_paths=True, recursive=True,
                              filter=None,
                              track_depths=False):
     tree = {}
@@ -464,7 +476,7 @@ def construct_namedtuple_file_tree(top_dir, patterns="**/*.json", recursive=True
         nt = read_namedtuple(os.path.join(top_dir, f), loader=loader, raise_on_untyped=not ignore_bad)
         if nt is None: continue
         if unwrap:
-            nt = nametuple_dict(nt)
+            nt = namedtuple_dict(nt)
         if filter is not None and not filter(f, nt): continue
         if split_paths:
             segments = dev.split_path(f)

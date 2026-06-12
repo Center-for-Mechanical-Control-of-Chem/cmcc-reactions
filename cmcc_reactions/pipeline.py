@@ -1012,7 +1012,12 @@ def run_optimization_pipeline(
         if output_file is not None:
             print(f"saving to {output_file}...")
             input_data.save(output_file)
-
+    if dev.str_is(step_output_files, 'auto'):
+        step_output_files = {
+            'pipeline_data_rigid.json':['rigid-fmrds'],
+            'pipeline_data_internals.json':['internals'],
+            'pipeline_data_internals_rigid.json':['internals-rigid'],
+        }
     if step_output_files is not None:
         for of, steps in step_output_files.items():
             run_optimization_pipeline(
@@ -1045,6 +1050,7 @@ def generator_callback(
         force_modification_settings=None,
         max_iterations=500,
         tol=1e-8,
+        nice=True,
         sbatch_kwargs=None,
         submit=True,
         energy_evaluator=None,
@@ -1053,6 +1059,8 @@ def generator_callback(
 ):
     if sbatch_kwargs is None:
         sbatch_kwargs = {'mem':'15G', 'time':'8:00:00'}
+    if 'nice' not in sbatch_kwargs:
+        sbatch_kwargs['nice'] = nice
     def callback(product_data, product_file, input_file=input_file):
         targ_dir = os.path.dirname(product_file)
         product_file = os.path.basename(product_file)
@@ -1124,6 +1132,7 @@ def generate_from_product_library(
         max_products=None,
         steps=None,
         output_file="pipeline_data.json",
+        step_output_files='auto',
         trajectory_optimization_settings=None,
         optimized_force_settings=None,
         force_modification_settings=None,
@@ -1146,6 +1155,7 @@ def generate_from_product_library(
         sbatch_kwargs=sbatch_kwargs,
         submit=submit,
         energy_evaluator=energy_evaluator,
+        step_output_files=step_output_files,
         verbose=verbose,
         **global_options
     )
