@@ -755,6 +755,7 @@ def run_optimization_pipeline(
         output_file=None,
         step_output_files=None,
         steps=None,
+        force_steps=False,
         verbose=False,
         trajectory_optimization_settings=None,
         refined_trajectory_optimization_settings=None,
@@ -813,7 +814,10 @@ def run_optimization_pipeline(
         energy_evaluator=energy_evaluator
     )
     try:
-        if 'trajectory' in steps:
+        if (
+                'trajectory' in steps
+                and (force_steps or input_data.trajectory is None)
+        ):
             if trajectory_optimization_settings is None:
                 trajectory_optimization_settings = {}
             trajectory_optimization_settings = global_options | trajectory_optimization_settings
@@ -849,7 +853,10 @@ def run_optimization_pipeline(
 
         trajectory:gen_prods.ReoptimizedTrajectoryData = input_data.trajectory
         optimizer = None
-        if 'optimized_forces' in steps:
+        if (
+                'optimized_forces' in steps
+                and (force_steps or input_data.optimizer is None)
+        ):
             if verbose:
                 print('running optimized forces')
             if trajectory is None:
@@ -866,7 +873,10 @@ def run_optimization_pipeline(
                 print(f"saving to {output_file}...")
                 input_data.save(output_file)
 
-        if 'fmrds' in steps:
+        if (
+                'fmrds' in steps
+                and (force_steps or input_data.fmrds is None)
+        ):
             if optimizer is None:
                 opt_force = input_data.optimized_forces
                 if opt_force is None:
@@ -1020,6 +1030,7 @@ def run_optimization_pipeline(
         }
     if step_output_files is not None:
         for of, steps in step_output_files.items():
+            if not force_steps and os.path.isfile(of): continue
             run_optimization_pipeline(
                 input_data,
                 output_file=of,
