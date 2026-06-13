@@ -1061,7 +1061,7 @@ def generator_callback(
         force_modification_settings=None,
         max_iterations=500,
         tol=1e-8,
-        nice=True,
+        nice=5,
         sbatch_kwargs=None,
         submit=True,
         energy_evaluator=None,

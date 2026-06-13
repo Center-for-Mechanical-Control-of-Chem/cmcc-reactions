@@ -271,9 +271,12 @@ def fragment_to_smiles_iterator(
     for frags in itertools.combinations_with_replacement(fragments, nsites):
         temp = template
         for site,frag in zip(active_sites, frags):
-            temp = join_fragments(temp, frag, [[site, 0]],
-                                  cache=cache,
-                                  add_implicit_hydrogens=add_implicit_hydrogens)
+            try:
+                temp = join_fragments(temp, frag, [[site, 0]],
+                                      cache=cache,
+                                      add_implicit_hydrogens=add_implicit_hydrogens)
+            except Chem.rdchem.AtomValenceException:
+                continue
         if chiralities is not None:
             chiralities = [
                 [c] if isinstance(c, str) else c
