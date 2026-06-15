@@ -822,6 +822,7 @@ def generate_initial_reaction_sampling(mol,
                                        max_step=4,
                                        nsteps=30,
                                        max_iterations=500,
+                                       extra_constraints=None,
                                        driven_bonds=None,
                                        **optimizer_settings):
     if driven_bonds is None:
@@ -843,6 +844,7 @@ def generate_initial_reaction_sampling(mol,
             for b in driven_bonds
         },
         max_iterations=max_iterations,
+        coordinate_constraints=extra_constraints,
         **optimizer_settings
         # coordinate_constraints=[(2, 4, 5, 3)]
         # region_constraints={
@@ -868,6 +870,7 @@ def generate_reactants_from_products(
         refine_ts=True,
         output_dir=None,
         info_file='trajectory.json',
+        extra_constraints=None,
         **optimization_settings
 ) -> ReoptimizedTrajectoryData:
     mol = Molecule(
@@ -890,6 +893,7 @@ def generate_reactants_from_products(
         nsteps=nsteps,
         max_iterations=max_iterations,
         driven_bonds=product_data.breakpoints,
+        extra_constraints=extra_constraints,
         **optimization_settings
     )
 
