@@ -620,6 +620,27 @@ def gamma_to_force_conversions(energy_units="Kilocalories/Mole", force_units="Pi
             / UnitsData.convert("Hartrees/BohrRadius", force_units) ** 2
     )
 
+def anharmonic_response_ratios(b, f, a, d):
+    return [
+        (2*a*b) / (3*f),
+        (2*((5/24)*d - a**2/(8*f))*b**2) / f,
+        (2*(-a**3/(8*f**2) + a*d/(12*f))*b**3) / f,
+        (2*(-a**4/(48*f**3) - a**2*d/(48*f**2) + d**2/(24*f))*b**4) / f,
+        (a*d**2*b**5) / (18*f**3),
+        (2*(a**4*d/(384*f**4) + a**2*d**2/(72*f**3) + d**3/(144*f**2))*b**6) / f,
+        (2*(a**3*d**2/(288*f**4) + a*d**3/(162*f**3))*b**7) / f,
+        (2*(a**2*d**3/(576*f**4) + d**4/(1296*f**3))*b**8) / f,
+        (a*d**4*b**9) / (1296*f**5),
+        (d**5*b**10) / (15552*f**5),
+    ]
+def anharmonic_response_from_force(x, f, a, d, force_units='Picojoules/Meters'):
+    e_units, d_units = force_units.split("/")
+    b = x * (
+        UnitsData.convert(e_units, "Hartrees")
+        / UnitsData.convert(d_units, "BohrRadius")
+    ) / f
+    return b, anharmonic_response_ratios(b, f, -a, d)
+
 OptimizedForceData = collections.namedtuple(
     'OptimizedForceData',
     [

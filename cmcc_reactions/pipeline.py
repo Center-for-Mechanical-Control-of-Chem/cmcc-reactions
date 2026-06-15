@@ -1035,19 +1035,22 @@ def run_optimization_pipeline(
                 input_data,
                 output_file=of,
                 steps=steps,
-                verbose=verbose,
-                trajectory_optimization_settings=trajectory_optimization_settings,
-                refined_trajectory_optimization_settings=refined_trajectory_optimization_settings,
-                update_trajectory_settings=update_trajectory_settings,
-                optimized_force_settings=optimized_force_settings,
-                force_modification_settings=force_modification_settings,
-                internal_force_modification_settings=internal_force_modification_settings,
-                pressure_force_modification_settings=pressure_force_modification_settings,
-                max_iterations=max_iterations,
-                tol=tol,
-                energy_evaluator=energy_evaluator,
-                **global_options
+                **(
+                    global_options | dict(
+                        verbose=verbose,
+                        trajectory_optimization_settings=trajectory_optimization_settings,
+                        refined_trajectory_optimization_settings=refined_trajectory_optimization_settings,
+                        update_trajectory_settings=update_trajectory_settings,
+                        optimized_force_settings=optimized_force_settings,
+                        force_modification_settings=force_modification_settings,
+                        internal_force_modification_settings=internal_force_modification_settings,
+                        pressure_force_modification_settings=pressure_force_modification_settings,
+                        max_iterations=max_iterations,
+                        tol=tol,
+                        energy_evaluator=energy_evaluator
+                    )
                 )
+            )
 
     return input_data
 
