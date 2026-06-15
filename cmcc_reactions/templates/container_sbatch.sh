@@ -7,7 +7,7 @@
 #SBATCH --output=%x-%j.out      #Send stdout/err
 
 if [ -z "$CONTAINER_RUN_SCRIPT" ]; then
-  CONTAINER_RUN_SCRIPT=`./CONTAINER_SCRIPT_NAME`
+  CONTAINER_RUN_SCRIPT="./`CONTAINER_SCRIPT_NAME`"
 fi
 if [ -z "$CONTAINER_PYTHON_PATH" ]; then
   CONTAINER_PYTHON_PATH="/home"
