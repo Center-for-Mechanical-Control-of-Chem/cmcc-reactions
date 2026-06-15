@@ -832,8 +832,10 @@ def generate_initial_reaction_sampling(mol,
     # zm = mol.get_bond_zmatrix(
     #     initial_backbone=sum(driven_bonds, ()),
     #     required_coordinates=driven_bonds)
+    if extra_constraints is not None:
+        extra_constraints = [tuple(b) for b in extra_constraints]
     zm = mol.break_bonds(driven_bonds).get_bond_zmatrix(
-        required_coordinates=driven_bonds
+        required_coordinates=driven_bonds + (extra_constraints if extra_constraints is not None else [])
     )
 
     int_mol = mol.modify(internals=zm)
