@@ -828,9 +828,12 @@ def generate_initial_reaction_sampling(mol,
         driven_bonds = default_driven_bonds
 
     driven_bonds = [tuple(b) for b in driven_bonds]
-    zm = mol.get_bond_zmatrix(
-        initial_backbone=sum(driven_bonds, ()),
-        required_coordinates=driven_bonds)
+    # zm = mol.get_bond_zmatrix(
+    #     initial_backbone=sum(driven_bonds, ()),
+    #     required_coordinates=driven_bonds)
+    zm = mol.break_bonds(driven_bonds).get_bond_zmatrix(
+        required_coordinates=driven_bonds
+    )
 
     int_mol = mol.modify(internals=zm)
     _, geoms, _ = int_mol.relaxed_scan(
