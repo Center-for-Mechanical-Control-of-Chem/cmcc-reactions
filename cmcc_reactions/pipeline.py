@@ -1357,8 +1357,8 @@ def generate_from_product_library_set(
 BASE_TEMPLATES = {
     'cyclopentadiene':'[C:3]1[C:1]([C:7]2)[C:5]=[C:6][C:2]2[C:4]1',
     'butadiene':'[C:3]1[C:1][C:5]=[C:6][C:2][C:4]1',
-    '1-N-butadiene':'[C:3]1[C:1][C:5]=[C:6][N:2][C:4]1',
-    '2-N-butadiene':'[C:3]1[C:1][C:5]=[N:6][C:2][C:4]1',
+    '1-N-butadiene':'[C:3]1[C:1][C:5]=[N:6][C:2][C:4]1',
+    '2-N-butadiene':'[C:3]1[C:1][C:5]=[C:6][N:2][C:4]1',
     '2-O-butadiene':'[C:3]1[C:1][C:5]=[C:6][O:2][C:4]1',
     'butadiene-N':'[C:3]1[C:1][C:5]=[C:6][C:2][N:4]1',
     'butadiene-O':'[C:3]1[C:1][C:5]=[C:6][C:2][O:4]1',
