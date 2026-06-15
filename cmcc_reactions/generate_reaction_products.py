@@ -206,7 +206,7 @@ def set_chiralities(base_smiles, site_chirality_map):
     atom_map_pos.pop(0, None)
 
     for map_num, winding in site_chirality_map.items():
-        atom_idx = atom_map_pos[map_num]
+        atom_idx = atom_map_pos[map_num+1]
         winding_map = {
             "CW": Chem.ChiralType.CHI_TETRAHEDRAL_CW,
             "CCW": Chem.ChiralType.CHI_TETRAHEDRAL_CCW,
