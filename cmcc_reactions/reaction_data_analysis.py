@@ -588,23 +588,54 @@ class BarrierHeightDataset:
         return self.aggregate_by_groups(tuple(filter_data[v] for v in value_keys),
                                         tuple(filter_data[k] for k in aggregation_keys))
 
-    def plot(self, color=None, force_units="Picojoules/Meters", figure=None, plot_baseline=None, baseline=0, baseline_styles=None, **etc):
+    def plot(self, color=None, force_units="Picojoules/Meters", figure=None, plot_baseline=None, baseline=0,
+             baseline_styles=None,
+             direction_markers=None,
+             **etc):
         if color is None and self.force_magnitudes is not None:
             force_units = force_units.replace("newtons", "Newtons").replace("Newtons", "joules/Meters")
             color = self.force_magnitudes * UnitsData.convert("Hartrees/BohrRadius", force_units)
 
         if plot_baseline is None:
             plot_baseline = figure is None
-        figure = plt.ScatterPlot(self.barriers * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
-                                 self.deltas * UnitsData.convert("Hartrees", "Kilocalories/Mole"),
-                                 **(
-                                         dict(
-                                             figure=figure,
-                                             color=color,
-                                             axes_labels=[r"$E_a^\text{solv}$ (kcal mol$^{-1}$)",
-                                                          r"$\Delta E_a^\text{mech}$ (kcal mol$^{-1}$)"]
-                                         ) | etc
-                                 ))
+
+        barr = self.barriers * UnitsData.convert("Hartrees", "Kilocalories/Mole")
+        delt = self.deltas * UnitsData.convert("Hartrees", "Kilocalories/Mole")
+        labs = [r"$E_a^\text{solv}$ (kcal mol$^{-1}$)", r"$\Delta E_a^\text{mech}$ (kcal mol$^{-1}$)"]
+        if direction_markers is None:
+            figure = plt.ScatterPlot(barr, delt,
+                                     **(
+                                             dict(
+                                                 figure=figure,
+                                                 color=color,
+                                                 axes_labels=labs,
+                                             ) | etc
+                                     ))
+        else:
+            vmin_opts = {}
+            mask_negative = self.force_magnitudes < 0
+            if nput.is_numeric(color[0]):
+                vmin_opts['vmin'] = np.min(color)
+                vmin_opts['vmax'] = np.max(color)
+            mask_pos = np.where(mask_negative)
+            figure = plt.ScatterPlot(barr[mask_negative], delt[mask_negative],
+                                     **(
+                                             dict(
+                                                 figure=figure,
+                                                 color=[color[i] for i in mask_pos],
+                                                 axes_labels=labs,
+                                             ) | vmin_opts | etc
+                                     ))
+            mask_positive = self.force_magnitudes >= 0
+            mask_pos = np.where(mask_positive)
+            figure = plt.ScatterPlot(barr[mask_positive], delt[mask_positive],
+                                     **(
+                                             dict(
+                                                 figure=figure,
+                                                 color=[color[i] for i in mask_pos],
+                                                 axes_labels=labs,
+                                             )  | vmin_opts | etc
+                                     ))
         if plot_baseline:
             if nput.is_numeric(baseline):
                 baseline = [baseline]
