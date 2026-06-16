@@ -612,6 +612,7 @@ class BarrierHeightDataset:
                                              ) | etc
                                      ))
         else:
+            neg, pos = direction_markers
             vmin_opts = {}
             mask_negative = self.force_magnitudes < 0
             if nput.is_numeric(color[0]):
@@ -624,6 +625,7 @@ class BarrierHeightDataset:
                                                  figure=figure,
                                                  color=[color[i] for i in mask_pos],
                                                  axes_labels=labs,
+                                                 marker=neg
                                              ) | vmin_opts | etc
                                      ))
             mask_positive = self.force_magnitudes >= 0
@@ -634,6 +636,7 @@ class BarrierHeightDataset:
                                                  figure=figure,
                                                  color=[color[i] for i in mask_pos],
                                                  axes_labels=labs,
+                                                 marker=pos
                                              )  | vmin_opts | etc
                                      ))
         if plot_baseline:
