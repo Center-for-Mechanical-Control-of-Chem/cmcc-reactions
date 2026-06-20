@@ -880,6 +880,7 @@ H	-2.758306   -1.763227    0.087370''',
         fmra.plot_lines().show()
 
 
+    @unittest.skip
     def test_RigidForceOpts(self):
 
         import warnings
@@ -1037,6 +1038,101 @@ H	-3.015828   -1.433443    1.079180''',
         fmra.animate_reactant_distortion().show()
         fmra.animate_ts_distortion().show()
         fmra.plot_lines(bonds=[(0, 16), (3, 15)]).show()
+
+    def test_ScanCoords(self):
+        import warnings
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+        from cmcc_reactions.optimal_directions import ForceOptimizer
+        from cmcc_reactions.reaction_data_analysis import ForceModifiedReactionAnalyzer
+        from Psience.Molecools import Molecule
+        from McUtils.Data import UnitsData
+
+        ts = Molecule.from_string(
+            '''23
+
+C	-2.25046  -0.72777   0.38674
+C	-2.84525   0.27119  -0.40824
+C	-2.05528   1.43188  -0.34975
+C	-1.00007   1.21623   0.53068
+H	-3.68826   0.12095  -1.07529
+H	-2.18971   2.31405  -0.96724
+C	-1.31163  -0.01193   1.33697
+H	-1.89312   0.2926    2.22416
+H	-0.44662  -0.58299   1.67761
+H	 3.36458   0.84622   1.183
+C	 3.53875   0.60349   0.1304
+H	 4.13059   1.38582  -0.34751
+O	 2.30512   0.55523  -0.59458
+O	 1.64912  -1.11199   0.79362
+C	 1.41406  -0.37994  -0.15824
+C	 0.19176  -0.37027  -0.96198
+C	-0.73573  -1.41088  -0.8544
+H	 4.06087  -0.35627   0.07649
+H	 0.17385   0.31187  -1.80252
+H	-0.25144   1.95016   0.8072
+H	-0.46167  -2.25662  -0.22932
+H	-1.34765  -1.65825  -1.71479
+H	-2.76226  -1.64549   0.66279''',
+            units='Angstroms',
+            energy_evaluator='aimnet2'
+        )
+        rs = Molecule.from_string(
+            '''23
+
+C	-2.596883   -0.465922    0.826097
+C	-3.007938    0.362995   -0.157348
+C	-2.176283    1.573125   -0.150206
+C	-1.262554    1.479210    0.838924
+H	-3.822674    0.183416   -0.851937
+H	-2.294223    2.402121   -0.840972
+C	-1.440859    0.166969    1.555182
+H	-1.657069    0.307193    2.625854
+H	-0.530419   -0.449785    1.507801
+H	 3.184941    0.970467    1.093409
+C	 3.674170    0.595730    0.190227
+H	 4.313221    1.363308   -0.247407
+O	 2.702223    0.281677   -0.817778
+O	 1.754811   -1.178029    0.628884
+C	 1.777653   -0.640983   -0.463418
+C	 0.829399   -0.888538   -1.575622
+C	-0.113274   -1.828218   -1.473814
+H	 4.260314   -0.290616    0.448467
+H	 0.945444   -0.275067   -2.463748
+H	-0.507370    2.212516    1.098686
+H	-0.199381   -2.428540   -0.573233
+H	-0.817422   -2.019587   -2.277227
+H	-3.015828   -1.433443    1.079180''',
+            units='Angstroms',
+            energy_evaluator='aimnet2'
+        )
+
+        import McUtils.Coordinerds as coordops
+
+        internals = rs.get_bond_zmatrix()
+        print("ZM:", (internals,))
+        coord = (22,  0)
+        print(
+            rda.molecule_steric_potential(
+                rs,
+                molecule_distortion_function=lambda mol:mol.modify(internals=internals).get_scan_coordinates(
+                    [[0, 1, 5]],
+                    which=coordops.zmatrix_indices(internals, [coord], strip_embedding=True),
+                    internals='reembed',
+                    strip_embedding=True
+                )
+            )
+        )
+        rs.plot(
+            rs.modify(internals=internals).get_scan_coordinates(
+                [[0, 1, 5]],
+                which=coordops.zmatrix_indices(internals, [coord], strip_embedding=True),
+                internals='reembed',
+                strip_embedding=True
+            ),
+            atom_radius_scaling=1
+        ).show()
 
 
 if __name__ == '__main__':

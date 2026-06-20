@@ -5,6 +5,9 @@ import numpy as np
 import glob
 import itertools
 
+import rdkit.Chem.AllChem as Chem
+from McUtils.ExternalPrograms import RDMolecule
+
 from . import reaction_data_schema as schema
 from . import utils
 from . import generate_reaction_products as gen_prods
@@ -833,3 +836,212 @@ class BarrierHeightDataset:
     def save_dataset(self, file, mode=None, **etc):
         ds = self.get_reduced_dataset()
         return pipeline.write_compressed_pipeline_data(file, ds, mode=mode, **etc)
+
+# analyses
+def parse_smiles(smiles, reorder_from_atom_map=True):
+    rdkit_mol = RDMolecule.parse_smiles(smiles)
+    if reorder_from_atom_map:
+        base_map = [a.GetAtomMapNum() for a in rdkit_mol.GetAtoms()]
+        base_map = [len(base_map) + 1 if a == 0 else a for a in base_map]
+        # need to use a stable sort
+        rdkit_mol = Chem.RenumberAtoms(rdkit_mol, np.argsort(base_map, kind='merge').tolist())
+    return rdkit_mol
+
+
+def fragment_mol(mol, inds):
+    submol = Chem.EditableMol(Chem.Mol())
+    submol.BeginBatchEdit()
+    atom_list = list(mol.GetAtoms())
+    for i in inds:
+        submol.AddAtom(atom_list[i])
+    for i, j in itertools.combinations(range(len(inds)), 2):
+        b = mol.GetBondBetweenAtoms(inds[i], inds[j])
+        if b is not None:
+            submol.AddBond(i, j, b.GetBondType())
+    submol.CommitBatchEdit()
+    return submol.GetMol()
+
+
+def break_bonds(mol, bonds):
+    if len(bonds) == 0:
+        return {tuple(i for i, a in enumerate(mol.GetAtoms())): mol}
+
+    bond_indices = []
+    no_map = {a.GetAtomMapNum(): i for i, a in enumerate(mol.GetAtoms())}
+    no_map.pop(0, None)
+    for i, j in bonds:
+        i, j = no_map[i + 1], no_map[j + 1]
+        bond_indices.append(mol.GetBondBetweenAtoms(i, j).GetIdx())
+    broke_mol = Chem.FragmentOnBonds(mol, bond_indices, addDummies=False)
+    for a in broke_mol.GetAtoms(): a.SetAtomMapNum(0)
+    Chem.AddHs(broke_mol, explicitOnly=True)
+    frags = Chem.GetMolFrags(broke_mol)
+    new_mols = {}
+    inv_map = {i: n for n, i in no_map.items()}
+    for f in frags:
+        submol = fragment_mol(broke_mol, f)
+        for a, i in zip(submol.GetAtoms(), f):
+            a.SetAtomMapNum(inv_map.get(i, 0))
+        new_mols[f] = submol
+    return new_mols
+
+
+def resolve_bond_type(t):
+    if abs(t - 1.5) < 1e-2:
+        t = Chem.BondType.names["AROMATIC"]
+    elif abs(t - 2.5) < 1e-2:
+        t = Chem.BondType.names["TWOANDAHALF"]
+    elif abs(t - 3.5) < 1e-2:
+        t = Chem.BondType.names["TWOANDAHALF"]
+    else:
+        t = Chem.BondType.values[int(t)]
+    return t
+
+
+def adjust_bond_types(mol, bond_modifications):
+    rw_mol = Chem.RWMol(mol)
+    no_map = {a.GetAtomMapNum(): i for i, a in enumerate(mol.GetAtoms())}
+    no_map.pop(0, None)
+    for (i, j), t in bond_modifications.items():
+        bond = rw_mol.GetBondBetweenAtoms(no_map[i + 1], no_map[j + 1])
+        bond.SetBondType(resolve_bond_type(t))
+    return rw_mol.GetMol()
+
+
+def reset_implicit_hydrogens(rdkit_mol):
+    for atom in rdkit_mol.GetAtoms():
+        if atom.GetAtomMapNum() != 0:  # only fix mapped atoms
+            atom.SetNoImplicit(False)  # allow implicit Hs again
+            atom.SetNumExplicitHs(0)  # clear any explicit H count
+    return rdkit_mol
+
+
+def split_dieneophile(smiles):
+    broke = break_bonds(parse_smiles(smiles), [(0, 2), (1, 3)])
+    diene, dieneophile = list(broke.values())
+    dieneophile = reset_implicit_hydrogens(adjust_bond_types(dieneophile, {(2, 3): 2}))
+    diene = reset_implicit_hydrogens(adjust_bond_types(diene, {(0, 4): 2, (4, 5): 1, (1, 5): 2}))
+    return diene, dieneophile
+
+
+def split_functional_groups(mol, preserved_sites):
+    no_map = {a.GetAtomMapNum(): a for a in mol.GetAtoms()}
+    no_map.pop(0, None)
+
+    bond_indices = []
+    for site, atom in no_map.items():
+        if site - 1 in preserved_sites: continue
+        for b in atom.GetNeighbors():
+            if b.GetAtomMapNum() - 1 in preserved_sites:
+                bond_indices.append([site - 1, b.GetAtomMapNum() - 1])
+
+    pres_idx = tuple(sorted([no_map[p + 1].GetIdx() for p in preserved_sites]))
+
+    frags = break_bonds(mol, bond_indices)
+    root_frag = frags.pop(pres_idx)
+
+    return root_frag, frags
+
+def get_diene_atoms(diene, start, end):
+    # check for the paths connecting these two atoms
+    no_map = {a.GetAtomMapNum(): a for a in diene.GetAtoms()}
+    vals = list(no_map.items())
+    no_map.pop(0, None)
+
+    start = no_map[start + 1]
+    end = no_map[end + 1].GetIdx()
+
+    ats = []
+    for l in [4, 3]:
+        paths = Chem.FindAllPathsOfLengthN(diene, l, useBonds=False, rootedAtAtom=start.GetIdx())
+        for p in paths:
+            p = list(p)
+            if p[-1] == end:
+                ats.extend(i for i in p if i not in ats)
+
+    return [diene.GetAtomWithIdx(i).GetAtomMapNum() - 1 for i in ats]
+
+def get_functionalization(smiles):
+    diene, dieneophile = split_dieneophile(smiles)
+    dats = get_diene_atoms(diene, 0, 1)
+    diene_core, diene_funcs = split_functional_groups(diene, dats)
+    dioph_core, dioph_funcs = split_functional_groups(dieneophile, [2, 3])
+
+    return (diene_core, dioph_core), (diene_funcs, dioph_funcs)
+
+def get_canonical_smiles(mol):
+    mol = Chem.Mol(mol)
+    for a in mol.GetAtoms():
+        a.SetAtomMapNum(0)
+    return Chem.MolToSmiles(mol, 1)
+
+fd_cache = {}
+def functionalization_data(smiles):
+    if smiles not in fd_cache:
+        (diene_core, dioph_core), (diene_funcs, dioph_funcs) = get_functionalization(smiles)
+        fd_cache[smiles] = (
+            get_canonical_smiles(diene_core),
+            get_canonical_smiles(dioph_core),
+            tuple(
+                get_canonical_smiles(v) for v in diene_funcs.values()
+            ),
+            tuple(
+                get_canonical_smiles(v) for v in dioph_funcs.values()
+            )
+        )
+    return fd_cache[smiles]
+def functionalization_keys(smiles):
+    diene, dioph, func1, func2 = functionalization_data(smiles)
+    return {
+        'diene': diene,
+        'dienophile': dioph,
+        'substitution_count': len(func1) + len(func2),
+        'diene_functionalizations': func1,
+        'dienophile_functionalizations': func2,
+        'functional_group_types': itut.counts(func1 + func2)
+    }
+
+def lj_repulsion(dists, rad, epsilon=1, exponent=12):
+    return epsilon * (rad / dists)**exponent
+def pointwise_steric_potential(centers, radii, points_groups, pairwise_term=lj_repulsion):
+    total_repulsion = 0
+    for i,g in enumerate(points_groups):
+        g = np.asanyarray(g)
+        other_centers = np.concatenate([centers[:i], centers[i+1:]], axis=0)
+        other_radii = np.concatenate([radii[:i], radii[i+1:]], axis=0)
+        pairwise_dists = np.linalg.norm(other_centers[:, np.newaxis, :] - g[np.newaxis, :, :], axis=-1)
+        terms = pairwise_term(pairwise_dists, other_radii[:, np.newaxis])
+        total_repulsion += np.sum(terms)
+    return total_repulsion
+def molecule_steric_potential(mol, density=10,
+                              molecule_distortion_function=None,
+                              point_transformation_function=None,
+                              pairwise_term=lj_repulsion):
+    surf = mol.get_surface()
+    pts = surf.generate_points(density=density, preserve_origins=True)
+    base_val = pointwise_steric_potential(surf.centers, surf.radii, pts, pairwise_term=pairwise_term)
+    if point_transformation_function is None and molecule_distortion_function is not None:
+        def point_transformation_function(mol, pts):
+            new_mol_geoms = molecule_distortion_function(mol)
+            smol = new_mol_geoms.shape == 2
+            if smol: new_mol_geoms = [new_mol_geoms]
+            new_pts = []
+            for nmg in new_mol_geoms:
+                distortion = nmg - mol.coords
+                new_pts.append([
+                    p + d[np.newaxis, :]
+                    for p,d in zip(pts, distortion)
+                ])
+            if smol: new_pts = new_pts[0]
+            return new_pts
+    if point_transformation_function is not None:
+        new_pts = point_transformation_function(mol, pts)
+        if isinstance(new_pts[0], np.ndarray) and new_pts[0].shape == pts[0].shape:
+            return pointwise_steric_potential(surf.centers, surf.radii, new_pts, pairwise_term=pairwise_term) - base_val
+        else:
+            return [
+                pointwise_steric_potential(surf.centers, surf.radii, p, pairwise_term=pairwise_term) - base_val
+                for p in new_pts
+            ]
+    else:
+        return base_val
