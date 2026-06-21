@@ -15,6 +15,7 @@ import McUtils.Coordinerds as coordops
 from Psience.Molecools import Molecule
 from Psience.Modes import MixtureModes
 import McUtils.Plots as plt
+import McUtils.Jupyter as interactive
 from Psience.Reactions import Reaction
 
 from . import utils
@@ -640,6 +641,140 @@ def anharmonic_response_from_force(x, f, a, d, force_units='Picojoules/Meters'):
         / UnitsData.convert(d_units, "BohrRadius")
     ) / f
     return b, anharmonic_response_ratios(b, f, -a, d)
+
+def lj_repulsion(dists, rad, epsilon=1, exponent=12):
+    return epsilon * (rad / dists)**exponent
+def interior_repulsion(dists, rad, epsilon=1, attenuation=.1, exponent=6, clip=True):
+    mask = dists < (rad * (1 + attenuation))
+    pot = epsilon * ((rad * (1 + attenuation)) / dists)**exponent
+    if clip:
+        pot = np.clip(pot, 0, 1)
+    return pot * mask
+def pointwise_steric_potential(centers, radii, points_groups, pairwise_term=lj_repulsion,
+                               atom_groups=None,
+                               center_exponent=6,
+                               pointwise_exponent=None,
+                               point_repulsion_radius=.1,
+                               return_breakdowns=False):
+    total_repulsion = 0 if not return_breakdowns else [np.zeros(len(pg), dtype='float') for pg in points_groups]
+    for i,g in enumerate(points_groups):
+        if atom_groups is None:
+            subgroup = [i]
+        else:
+            subgroup = next((a for a in atom_groups if i in a), [i])
+        g = np.asanyarray(g)
+        rem = np.setdiff1d(np.arange(len(centers)), subgroup)
+        other_centers = np.array([centers[j] for j in rem])
+        other_radii = np.array([radii[j] for j in rem])
+        if center_exponent is not None:
+            pairwise_dists = np.linalg.norm(other_centers[:, np.newaxis, :] - g[np.newaxis, :, :], axis=-1)
+            terms = pairwise_term(pairwise_dists, other_radii[:, np.newaxis], exponent=center_exponent)
+            if return_breakdowns:
+                total_repulsion[i] += np.sum(terms, axis=0)
+            else:
+                total_repulsion += np.sum(terms)
+        if pointwise_exponent is not None:
+            other_points = np.concatenate([points_groups[j] for j in rem], axis=0)
+            pairwise_dists = np.linalg.norm(other_points[:, np.newaxis, :] - g[np.newaxis, :, :], axis=-1)
+            terms = pairwise_term(pairwise_dists, point_repulsion_radius, exponent=pointwise_exponent)
+            if return_breakdowns:
+                total_repulsion[i] += np.sum(terms, axis=0)
+            else:
+                total_repulsion += np.sum(terms)
+    return total_repulsion
+def molecule_steric_potential(mol,
+                              density=10,
+                              molecule_distortion_function=None,
+                              point_transformation_function=None,
+                              prune=True,
+                              separate_fragments=False,
+                              atom_groups=None,
+                              pairwise_term=lj_repulsion,
+                              center_exponent=6,
+                              pointwise_exponent=None,
+                              return_breakdowns=False):
+    surf = mol.get_surface()
+    if separate_fragments:
+        frags = mol.fragments
+        inds = mol.fragment_indices
+        pts = [None] * len(mol.atoms)
+        for m,x in zip(frags, inds):
+            subsurf = m.get_surface()
+            subpts = subsurf.generate_points(density=density, preserve_origins=True, prune=prune)
+            for i,p in zip(x, subpts):
+                pts[i] = p
+    else:
+        pts = surf.generate_points(density=density, preserve_origins=True, prune=prune)
+    base_val = pointwise_steric_potential(surf.centers, surf.radii, pts, pairwise_term=pairwise_term,
+                                          atom_groups=atom_groups,
+                                          center_exponent=center_exponent,
+                                          pointwise_exponent=pointwise_exponent,
+                                          return_breakdowns=return_breakdowns)
+    if point_transformation_function is None and molecule_distortion_function is not None:
+        def point_transformation_function(mol, pts):
+            new_mol_geoms = molecule_distortion_function(mol)
+            smol = new_mol_geoms.shape == 2
+            if smol: new_mol_geoms = [new_mol_geoms]
+            new_pts = []
+            for nmg in new_mol_geoms:
+                distortion = nmg - mol.coords
+                new_pts.append([
+                    p + d[np.newaxis, :]
+                    for p,d in zip(pts, distortion)
+                ])
+            if smol:
+                new_pts = new_pts[0]
+                new_mol_geoms = new_mol_geoms[0]
+            return new_mol_geoms, new_pts
+    if point_transformation_function is not None:
+        new_centers, new_pts = point_transformation_function(mol, pts)
+        if isinstance(new_pts[0], np.ndarray) and new_pts[0].shape == pts[0].shape:
+            if return_breakdowns:
+                subpot = pointwise_steric_potential(new_centers, surf.radii, new_pts, pairwise_term=pairwise_term,
+                                                    atom_groups=atom_groups,
+                                                    center_exponent=center_exponent,
+                                                    pointwise_exponent=pointwise_exponent,
+                                                    return_breakdowns=return_breakdowns)
+                diffs = [
+                    s - b
+                    for s,b in zip(subpot, base_val)
+                ]
+                return [pts, new_pts], [[np.zeros_like(d) for d in diffs], diffs]
+            else:
+                return pointwise_steric_potential(new_centers, surf.radii, new_pts,
+                                                  atom_groups=atom_groups,
+                                                  center_exponent=center_exponent,
+                                                  pointwise_exponent=pointwise_exponent,
+                                                  pairwise_term=pairwise_term) - base_val
+        else:
+            if return_breakdowns:
+                res = []
+                for c,p in zip(new_centers, new_pts):
+                    subpot = pointwise_steric_potential(c, surf.radii, p, pairwise_term=pairwise_term,
+                                                        atom_groups=atom_groups,
+                                                        center_exponent=center_exponent,
+                                                        pointwise_exponent=pointwise_exponent,
+                                                        return_breakdowns=return_breakdowns)
+                    diffs = [
+                        s - b
+                        for s, b in zip(subpot, base_val)
+                    ]
+                    res.append(diffs)
+                return [pts] + list(new_pts), [[np.zeros_like(d) for d in res[0]]] + res
+            else:
+                return [
+                    pointwise_steric_potential(c, surf.radii, p,
+                                               atom_groups=atom_groups,
+                                               center_exponent=center_exponent,
+                                               pointwise_exponent=pointwise_exponent,
+                                               pairwise_term=pairwise_term) - base_val
+                    for c,p in zip(new_centers, new_pts)
+                ]
+    else:
+        if return_breakdowns:
+            return np.concatenate(pts, axis=0), np.concatenate(base_val, axis=0)
+        else:
+            return base_val
 
 OptimizedForceData = collections.namedtuple(
     'OptimizedForceData',
@@ -1693,6 +1828,33 @@ class ForceOptimizer:
         else:
             return which
 
+    def generate_internal_distortions(self,
+                                      which,
+                                      mass_weight=False,
+                                      max_internals=None,
+                                      max_internals_ranks=None,
+                                      displacements=None,
+                                      use_internals=True,
+                                      lookup_internals_index=None,
+                                      fragment_indices=None,
+                                      **etc
+                                      ):
+        if displacements is None:
+            displacements = self.pure_internal_displacement_matrix
+        which = self.get_selected_internals(which,
+                                            lookup_internals_index=lookup_internals_index,
+                                            max_internals=max_internals,
+                                            max_internals_ranks=max_internals_ranks,
+                                            fragment_indices=fragment_indices,
+                                            displacements=displacements,
+                                            use_internals=use_internals,
+                                            return_gammas=False)[0]
+        return self.get_displaced_geometries(mode=which,
+                                             mass_weight=mass_weight,
+                                             displacements=displacements,
+                                             use_internals=use_internals,
+                                             **etc)
+
     def reoptimize_internals_with_force(self,
                                         which,
                                         magnitude=50,
@@ -1940,6 +2102,56 @@ class ForceOptimizer:
             **etc
         )
 
+    def get_distortion_steric_repulsions(self,
+                                         mode=0,
+                                         disp_min=0,
+                                         disp_max=1,
+                                         steps=5,
+                                         mass_weight=False,
+                                         generate_displacement_function=None,
+                                         density=10,
+                                         pairwise_term=lj_repulsion,
+                                         return_breakdowns=False,
+                                         atom_groups=None,
+                                         **opts):
+        if generate_displacement_function is None:
+            generate_displacement_function = self.get_displaced_geometries
+        (v, x_r, x_t) = generate_displacement_function(mode,
+                                             disp_min=disp_min,
+                                             disp_max=disp_max,
+                                             mass_weight=mass_weight,
+                                             steps=steps,
+                                             **opts)
+        rs_sterics = molecule_steric_potential(self.rs,
+                                               molecule_distortion_function=lambda mol:x_r,
+                                               density=density,
+                                               pairwise_term=pairwise_term,
+                                               atom_groups=atom_groups,
+                                               return_breakdowns=return_breakdowns)
+        ts_sterics = molecule_steric_potential(self.ts,
+                                               molecule_distortion_function=lambda mol:x_t,
+                                               density=density,
+                                               pairwise_term=pairwise_term,
+                                               atom_groups=atom_groups,
+                                               return_breakdowns=return_breakdowns)
+        if return_breakdowns:
+            pts_r, pots_r = rs_sterics
+            rs_sterics = (pts_r[1:], pots_r[1:])
+            pts_t, pots_t = ts_sterics
+            ts_sterics = (pts_t[1:], pots_t[1:])
+
+        if disp_min < 0 and disp_max == 0:
+            v = np.flip(v)
+            x_r = np.flip(x_r, axis=0)
+            x_t = np.flip(x_t, axis=0)
+            if return_breakdowns:
+                rs_sterics = tuple(list(reversed(r)) for r in rs_sterics)
+                ts_sterics = tuple(list(reversed(t)) for t in ts_sterics)
+            else:
+                rs_sterics = np.flip(rs_sterics, axis=0)
+                ts_sterics = np.flip(ts_sterics, axis=0)
+
+        return (rs_sterics, ts_sterics), (v, x_r, x_t)
 
     def direction_overlap(self, other, mol='ts'):
         fds = self.force_dirs
@@ -2613,3 +2825,128 @@ class ForceOptimizer:
             units=force_units,
             **etc
         )
+
+    def plot_sterics(self,
+                     sterics_output,
+                     display_cutoff=.5,
+                     colormap='coolwarm',
+                     stress_sphere_radius=None,
+                     stress_sphere_styles=None,
+                     stress_point_size=10,
+                     plot_ts=True,
+                     plot_rs=True,
+                     **plot_opts
+                     ):
+        if stress_sphere_styles is None:
+            stress_sphere_styles = {}
+        (s_r, s_t), (v, x_r, x_t) = sterics_output
+        # (s_r, s_t), (v, x_r, x_t) = fopt.get_distortion_steric_repulsions(
+        #     'dihedrals',
+        #     max_internals=1,
+        #     generate_displacement_function=fopt.generate_internal_distortions,
+        #     disp_min=-1,
+        #     disp_max=0,
+        #     density=2,
+        #     return_breakdowns=True
+        # )
+        pts_r = [np.concatenate(p) for p in s_r[0]]
+        vals_r = [np.concatenate(v) for v in s_r[1]]
+        pts_t = [np.concatenate(p) for p in s_t[0]]
+        vals_t = [np.concatenate(v) for v in s_t[1]]
+
+        min_max = np.min(np.concatenate([
+            np.concatenate(vals_r),
+            np.concatenate(vals_t)
+        ])), np.max(np.concatenate([
+                    np.concatenate(vals_r),
+                    np.concatenate(vals_t)
+                ]))
+
+        keep_pos_r = np.any(
+            np.abs(
+                nput.vec_rescale(
+                    np.moveaxis(np.array(vals_r), 0, -1),
+                    [-1, 1],
+                    min_max
+                )
+            ) > display_cutoff,
+            axis=-1
+        )
+        keep_pos_t = np.any(
+            np.abs(
+                nput.vec_rescale(
+                    np.moveaxis(np.array(vals_t), 0, -1),
+                    [-1, 1],
+                    min_max
+                )
+            ) > display_cutoff,
+            axis=-1
+        )
+        pts_r = [p[keep_pos_r] for p in pts_r]
+        vals_r = [v[keep_pos_r] for v in vals_r]
+        pts_t = [p[keep_pos_t] for p in pts_t]
+        vals_t = [v[keep_pos_t] for v in vals_t]
+
+        # min_max = np.min(np.concatenate([
+        #     np.concatenate(vals_r),
+        #     np.concatenate(vals_t)
+        # ])), np.max(np.concatenate([
+        #             np.concatenate(vals_r),
+        #             np.concatenate(vals_t)
+        #         ]))
+
+
+        colors_r = [
+            plt.prep_color(palette=colormap, blending=nput.vec_rescale(
+                v,
+                [0, 1],
+                min_max
+            ))
+            for v in vals_r
+        ]
+
+        colors_t = [
+            plt.prep_color(palette=colormap, blending=nput.vec_rescale(
+                v,
+                [0, 1],
+                min_max
+            ))
+            for v in vals_t
+        ]
+
+        bits = []
+        if plot_ts:
+            bits.append(
+                self.ts.plot(x_t,
+                             annotation_function=lambda mol, i, geom: [
+                                 plt.Sphere(p * UnitsData.bohr_to_angstroms, stress_sphere_radius, color=c,
+                                            **stress_sphere_styles)
+                                 for p, c in zip(pts_t[i], colors_t[i])
+                             ] if stress_sphere_radius is not None else [
+                                 plt.Point(pts_t[i] * UnitsData.bohr_to_angstroms,
+                                           vertex_colors=colors_t[i],
+                                           point_size=stress_point_size,
+                                           **stress_sphere_styles)
+                             ],
+                             **plot_opts
+                             )
+            )
+        if plot_rs:
+            bits.append(self.rs.plot(x_r,
+                          annotation_function=lambda mol, i, geom: [
+                              plt.Sphere(p * UnitsData.bohr_to_angstroms, stress_sphere_radius, color=c, **stress_sphere_styles)
+                              for p,c in zip(pts_r[i], colors_r[i])
+                          ] if stress_sphere_radius is not None else [
+                              plt.Point(pts_r[i] * UnitsData.bohr_to_angstroms,
+                                         vertex_colors=colors_r[i],
+                                        point_size=stress_point_size,
+                                         **stress_sphere_styles)
+                          ],
+                          **plot_opts
+                          ))
+        if len(bits) == 1:
+            return bits[0]
+        else:
+            return interactive.Grid([
+                [b.to_widget() for b in bits]
+            ], dynamic=False)#.to_widget().display()

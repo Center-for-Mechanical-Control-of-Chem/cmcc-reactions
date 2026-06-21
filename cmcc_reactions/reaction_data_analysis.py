@@ -1001,47 +1001,4 @@ def functionalization_keys(smiles):
         'functional_group_types': itut.counts(func1 + func2)
     }
 
-def lj_repulsion(dists, rad, epsilon=1, exponent=12):
-    return epsilon * (rad / dists)**exponent
-def pointwise_steric_potential(centers, radii, points_groups, pairwise_term=lj_repulsion):
-    total_repulsion = 0
-    for i,g in enumerate(points_groups):
-        g = np.asanyarray(g)
-        other_centers = np.concatenate([centers[:i], centers[i+1:]], axis=0)
-        other_radii = np.concatenate([radii[:i], radii[i+1:]], axis=0)
-        pairwise_dists = np.linalg.norm(other_centers[:, np.newaxis, :] - g[np.newaxis, :, :], axis=-1)
-        terms = pairwise_term(pairwise_dists, other_radii[:, np.newaxis])
-        total_repulsion += np.sum(terms)
-    return total_repulsion
-def molecule_steric_potential(mol, density=10,
-                              molecule_distortion_function=None,
-                              point_transformation_function=None,
-                              pairwise_term=lj_repulsion):
-    surf = mol.get_surface()
-    pts = surf.generate_points(density=density, preserve_origins=True)
-    base_val = pointwise_steric_potential(surf.centers, surf.radii, pts, pairwise_term=pairwise_term)
-    if point_transformation_function is None and molecule_distortion_function is not None:
-        def point_transformation_function(mol, pts):
-            new_mol_geoms = molecule_distortion_function(mol)
-            smol = new_mol_geoms.shape == 2
-            if smol: new_mol_geoms = [new_mol_geoms]
-            new_pts = []
-            for nmg in new_mol_geoms:
-                distortion = nmg - mol.coords
-                new_pts.append([
-                    p + d[np.newaxis, :]
-                    for p,d in zip(pts, distortion)
-                ])
-            if smol: new_pts = new_pts[0]
-            return new_pts
-    if point_transformation_function is not None:
-        new_pts = point_transformation_function(mol, pts)
-        if isinstance(new_pts[0], np.ndarray) and new_pts[0].shape == pts[0].shape:
-            return pointwise_steric_potential(surf.centers, surf.radii, new_pts, pairwise_term=pairwise_term) - base_val
-        else:
-            return [
-                pointwise_steric_potential(surf.centers, surf.radii, p, pairwise_term=pairwise_term) - base_val
-                for p in new_pts
-            ]
-    else:
-        return base_val
+

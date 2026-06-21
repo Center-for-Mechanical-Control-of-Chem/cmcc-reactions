@@ -1039,7 +1039,9 @@ H	-3.015828   -1.433443    1.079180''',
         fmra.animate_ts_distortion().show()
         fmra.plot_lines(bonds=[(0, 16), (3, 15)]).show()
 
-    def test_ScanCoords(self):
+
+    def test_Sterics(self):
+
         import warnings
         warnings.filterwarnings("ignore", category=RuntimeWarning)
         warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -1108,31 +1110,211 @@ H	-3.015828   -1.433443    1.079180''',
             energy_evaluator='aimnet2'
         )
 
-        import McUtils.Coordinerds as coordops
+        prod = Molecule.from_string('''23
+
+            C	-2.130472   -0.872239    0.012830
+            C	-2.837943    0.423768   -0.358236
+            C	-2.036169    1.437416   -0.003026
+            C	-0.785002    0.832289    0.615247
+            H	-3.768536    0.486030   -0.914065
+            H	-2.171380    2.494087   -0.211641
+            C	-1.380485   -0.424799    1.289712
+            H	-2.054779   -0.174685    2.114386
+            H	-0.623578   -1.141357    1.624103
+            H	 3.632781    0.252404    1.177904
+            C	 3.620668    0.446425    0.101839
+            H	 4.203134    1.337891   -0.133497
+            O	 2.285694    0.727776   -0.347439
+            O	 1.678608   -1.328818    0.357919
+            C	 1.385915   -0.265794   -0.151448
+            C	 0.003633    0.166438   -0.596488
+            C	-0.924072   -1.025404   -0.977450
+            H	 4.025934   -0.425731   -0.418228
+            H	 0.120871    0.893828   -1.402633
+            H	-0.171319    1.499026    1.225121
+            H	-0.408315   -1.974347   -0.806154
+            H	-1.237369   -0.984186   -2.024394
+            H	-2.758306   -1.763227    0.087370''',
+                                    units='Angstroms',
+                                    energy_evaluator='aimnet2'
+                                    )
+
+
+        # prod = prod.optimize(mode='pysis', method='rfo', max_iterations=200, logger=True)
+        # prod_data = gen_prods.InitialProductData(
+        #     atoms=prod.atoms,
+        #     coords=prod.coords,
+        #     smiles=None,
+        #     bonds=None,
+        #     energy=prod.calculate_energy(),
+        #     breakpoints=None,
+        #     evaluator='aimnet2',
+        #     optimization_settings=None
+        # )
+        # utils.write_namedtuple('/Users/Mark/Desktop/methacrylate_prod.npz', prod_data)
+        #
+        # return
+        # rs.plot(display_atom_numbers=True).show()
+        # ts.plot(highlight_atoms=[0, 3, 15, 16]).show()
+
+        # rs = rs.optimize(mode='pysis', method='rfo', max_iterations=200)
+        rs.modify(coords=[[-5.17852785, -0.5702728, 1.88441103],
+                          [-5.54956468, 0.71849346, -0.2612763],
+                          [-3.41217425, 2.44967796, -0.65371732],
+                          [-1.75827867, 2.18121372, 1.2402138],
+                          [-7.12634655, 0.52129859, -1.54238332],
+                          [-3.21716378, 3.6987746, -2.2546904],
+                          [-2.76157906, 0.278203, 3.08535031],
+                          [-3.09024025, 1.1128944, 4.94702848],
+                          [-1.44325623, -1.28453075, 3.37485686],
+                          [5.60599726, 1.86448078, 2.28898434],
+                          [6.58723769, 1.38085643, 0.54733104],
+                          [7.66704781, 2.98256345, -0.13327283],
+                          [4.81254645, 0.7980625, -1.40377519],
+                          [3.37442623, -2.38242883, 1.01321266],
+                          [3.27302274, -1.16958319, -0.91036453],
+                          [1.44564317, -1.58108074, -2.99327646],
+                          [-0.43341279, -3.20964043, -2.72572653],
+                          [7.81949631, -0.22504678, 0.89926876],
+                          [1.65122534, -0.4470092, -4.67593706],
+                          [0.06109034, 3.09154467, 1.42019802],
+                          [-0.62957867, -4.28276737, -1.00259567],
+                          [-1.83502836, -3.45704542, -4.18710659],
+                          [-6.38909548, -2.00507506, 2.67724378]])
+        # ts = ts.optimize(mode='pysis', method='ts', max_iterations=100)
+        ts.modify(coords=[[-4.23705432, -1.28118781, 0.7729455],
+                          [-5.15557595, 0.63656345, -0.80710441],
+                          [-3.49571837, 2.69101028, -0.71292047],
+                          [-1.57424739, 2.1469359, 0.9659398],
+                          [-6.70869671, 0.42514645, -2.11988187],
+                          [-3.52244096, 4.28272382, -1.99019307],
+                          [-2.36994421, -0.05734278, 2.53149949],
+                          [-3.39636713, 0.62278688, 4.19032199],
+                          [-0.85797006, -1.29830522, 3.16420706],
+                          [5.88639691, 1.68459917, 2.38192],
+                          [6.33171981, 1.39937868, 0.39375325],
+                          [7.31961015, 3.02852809, -0.36245937],
+                          [4.07897804, 1.16920227, -1.0648456],
+                          [3.10557335, -2.20565703, 1.33176506],
+                          [2.55995036, -0.77733233, -0.37393262],
+                          [0.24684349, -0.84549836, -1.85578447],
+                          [-1.46639409, -2.7800723, -1.47819944],
+                          [7.48730166, -0.29322758, 0.21371082],
+                          [0.17742473, 0.35813596, -3.5035662],
+                          [-0.02313225, 3.37780772, 1.43591499],
+                          [-0.94401441, -4.23142231, -0.14070224],
+                          [-2.67619796, -3.37972009, -3.01072528],
+                          [-5.29351647, -2.94980018, 1.29627762]])
 
         internals = rs.get_bond_zmatrix()
-        print("ZM:", (internals,))
-        coord = (22,  0)
-        print(
-            rda.molecule_steric_potential(
-                rs,
-                molecule_distortion_function=lambda mol:mol.modify(internals=internals).get_scan_coordinates(
-                    [[0, 1, 5]],
-                    which=coordops.zmatrix_indices(internals, [coord], strip_embedding=True),
-                    internals='reembed',
-                    strip_embedding=True
-                )
-            )
+        fopt = ForceOptimizer(rs, ts,
+                              internals=internals,
+                              fragment_indices=1,  # np.setdiff1d(rs.fragment_indices[1], (0, 16, 3, 15)),
+                              precompute_modes=False)
+
+        (s_r, s_t), (v, x_r, x_t) = fopt.get_distortion_steric_repulsions(
+            'dihedrals',
+            max_internals=1,
+            generate_displacement_function=fopt.generate_internal_distortions,
+            disp_min=-1,
+            disp_max=0,
+            density=2,
+            return_breakdowns=True
         )
-        rs.plot(
-            rs.modify(internals=internals).get_scan_coordinates(
-                [[0, 1, 5]],
-                which=coordops.zmatrix_indices(internals, [coord], strip_embedding=True),
-                internals='reembed',
-                strip_embedding=True
-            ),
-            atom_radius_scaling=1
-        ).show()
+        pts_r = [np.concatenate(p) for p in s_r[0]]
+        vals_r = [np.concatenate(v) for v in s_r[1]]
+        pts_t = [np.concatenate(p) for p in s_t[0]]
+        vals_t = [np.concatenate(v) for v in s_t[1]]
+
+
+        # vals_t = np.concatenate(s_t[1])
+        # print(s_r)
+        # print(s_t)
+        # print(np.diff(pts_r, axis=0))
+
+        # fopt.rs.plot(x_r,
+        #              # transparency=.5,
+        #              # bonds=False,
+        #              # atom_radius_scaling=1,
+        #              annotation_function=lambda mol, i, geom: [
+        #                  mplt.Sphere(p * UnitsData.bohr_to_angstroms,
+        #                              .1, color='black')
+        #                  for p in pts_r[i]
+        #              ]
+        #              ).show()
+        import McUtils.Plots as mplt
+        import McUtils.Numputils as nput
+
+        keep_pos_r = np.any(
+            np.abs(
+                nput.vec_rescale(
+                    np.moveaxis(np.array(vals_r), 0, -1),
+                    [-1, 1],
+                    [np.min(vals_r), np.max(vals_r)]
+                )
+            ) > .95,
+            axis=-1
+        )
+        keep_pos_t = np.any(
+            np.abs(
+                nput.vec_rescale(
+                    np.moveaxis(np.array(vals_t), 0, -1),
+                    [-1, 1],
+                    [np.min(vals_t), np.max(vals_t)]
+                )
+            ) > .5,
+            axis=-1
+        )
+        pts_r = [p[keep_pos_r] for p in pts_r]
+        vals_r = [v[keep_pos_r] for v in vals_r]
+        pts_t = [p[keep_pos_t] for p in pts_t]
+        vals_t = [v[keep_pos_t] for v in vals_t]
+
+        min_max = np.min(np.concatenate([
+            np.concatenate(vals_r),
+            np.concatenate(vals_t)
+        ])), np.max(np.concatenate([
+                    np.concatenate(vals_r),
+                    np.concatenate(vals_t)
+                ]))
+
+
+        colors_r = [
+            mplt.prep_color(palette='coolwarm', blending=nput.vec_rescale(
+                v,
+                [0, 1],
+                min_max
+            )**2)
+            for v in vals_r
+        ]
+
+        colors_t = [
+            mplt.prep_color(palette='coolwarm', blending=nput.vec_rescale(
+                v,
+                [0, 1],
+                min_max
+            ) ** 2)
+            for v in vals_t
+        ]
+
+        import McUtils.Jupyter as interactive
+        uuh = interactive.Grid([
+            [fopt.rs.plot(x_r,
+                          annotation_function=lambda mol, i, geom: [
+                              mplt.Sphere(p * UnitsData.bohr_to_angstroms, .2, color=c)
+                              for p,c in zip(pts_r[i], colors_r[i])
+                          ]
+                          ).to_widget(),
+             fopt.ts.plot(x_t,
+                          annotation_function=lambda mol, i, geom: [
+                              mplt.Sphere(p * UnitsData.bohr_to_angstroms, .2, color=c)
+                              for p, c in zip(pts_t[i], colors_t[i])
+                          ]
+                          ).to_widget()
+             ]
+        ], dynamic=False).to_widget().display()
+
+        return
 
 
 if __name__ == '__main__':
