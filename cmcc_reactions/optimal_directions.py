@@ -36,12 +36,16 @@ def clip_f(f):
         f = s * 1e-15
     return f
 
-def gamma(hess_gs, hess_ts, d, d_ts=None):
+def gamma(hess_gs, hess_ts, d, d_ts=None, return_components=False):
     if d_ts is None:
         d_ts = d
     f_g = np.dot(np.dot(hess_gs, d), d)
     f_t = np.dot(np.dot(hess_ts, d_ts), d_ts)
-    return 1 / f_g - 1 / f_t
+    g = 1 / f_g - 1 / f_t
+    if return_components:
+        return g, f_g, f_t
+    else:
+        return g
 
 def df_inv(hess, d):
     d1 = np.dot(hess, d)
@@ -481,7 +485,8 @@ def prep_gamma_hessians(
 def compute_reaction_gamma(reactant, transition_state, direction_gs,
                            direction_ts=None,
                            use_mode_space=True,
-                           modes=None
+                           modes=None,
+                           return_components=False
                            ):
     (direction_gs, direction_ts), (f_gs, f_ts) = prep_gamma_hessians(
         reactant, transition_state,
@@ -490,7 +495,7 @@ def compute_reaction_gamma(reactant, transition_state, direction_gs,
 
     if direction_gs.ndim > 1:
         return np.array([
-            gamma(f_gs, f_ts, d, dt)
+            gamma(f_gs, f_ts, d, dt, return_components=return_components)
             for d,dt in zip(direction_gs, direction_ts)
         ])
     else:
@@ -498,7 +503,8 @@ def compute_reaction_gamma(reactant, transition_state, direction_gs,
             f_gs,
             f_ts,
             direction_gs,
-            direction_ts
+            direction_ts,
+            return_components=return_components
         )
 
 def reorder_force_dirs(rs_solv, ts_solv, dirs, direction_ts=None,
@@ -644,12 +650,15 @@ def anharmonic_response_from_force(x, f, a, d, force_units='Picojoules/Meters'):
 
 def lj_repulsion(dists, rad, epsilon=1, exponent=12):
     return epsilon * (rad / dists)**exponent
-def interior_repulsion(dists, rad, epsilon=1, attenuation=.1, exponent=6, clip=True):
+def clipped_sphere_repulsion(dists, rad, epsilon=1, attenuation=.1, exponent=6, clip=True):
     mask = dists < (rad * (1 + attenuation))
     pot = epsilon * ((rad * (1 + attenuation)) / dists)**exponent
     if clip:
         pot = np.clip(pot, 0, 1)
     return pot * mask
+def interior_repulsion(dists, rad, epsilon=1, attenuation=.1, exponent=6):
+    pot = epsilon / (1 + np.exp(-(rad - dists) / attenuation)**(exponent/6))
+    return pot
 def pointwise_steric_potential(centers, radii, points_groups, pairwise_term=lj_repulsion,
                                atom_groups=None,
                                center_exponent=6,
@@ -689,9 +698,10 @@ def molecule_steric_potential(mol,
                               prune=True,
                               separate_fragments=False,
                               atom_groups=None,
-                              pairwise_term=lj_repulsion,
+                              pairwise_term=interior_repulsion,
                               center_exponent=6,
                               pointwise_exponent=None,
+                              preserve_clipping=False,
                               return_breakdowns=False):
     surf = mol.get_surface()
     if separate_fragments:
@@ -705,6 +715,10 @@ def molecule_steric_potential(mol,
                 pts[i] = p
     else:
         pts = surf.generate_points(density=density, preserve_origins=True, prune=prune)
+    resummation = (not return_breakdowns) and preserve_clipping
+    if preserve_clipping:
+        masks = [surf.get_exterior_points(p, surf.centers, surf.radii) for p in pts]
+        return_breakdowns = True
     base_val = pointwise_steric_potential(surf.centers, surf.radii, pts, pairwise_term=pairwise_term,
                                           atom_groups=atom_groups,
                                           center_exponent=center_exponent,
@@ -739,13 +753,17 @@ def molecule_steric_potential(mol,
                     s - b
                     for s,b in zip(subpot, base_val)
                 ]
-                return [pts, new_pts], [[np.zeros_like(d) for d in diffs], diffs]
+                if not resummation:
+                    pts = [pts, new_pts]
+                    base_val = [[np.zeros_like(d) for d in diffs], diffs]
+                else:
+                    base_val = diffs
             else:
-                return pointwise_steric_potential(new_centers, surf.radii, new_pts,
-                                                  atom_groups=atom_groups,
-                                                  center_exponent=center_exponent,
-                                                  pointwise_exponent=pointwise_exponent,
-                                                  pairwise_term=pairwise_term) - base_val
+                base_val = pointwise_steric_potential(new_centers, surf.radii, new_pts,
+                                                      atom_groups=atom_groups,
+                                                      center_exponent=center_exponent,
+                                                      pointwise_exponent=pointwise_exponent,
+                                                      pairwise_term=pairwise_term) - base_val
         else:
             if return_breakdowns:
                 res = []
@@ -760,9 +778,13 @@ def molecule_steric_potential(mol,
                         for s, b in zip(subpot, base_val)
                     ]
                     res.append(diffs)
-                return [pts] + list(new_pts), [[np.zeros_like(d) for d in res[0]]] + res
+                if not resummation:
+                    base_val = [[np.zeros_like(d) for d in res[0]]] + res
+                    pts = [pts] + list(new_pts)
+                else:
+                    base_val = res
             else:
-                return [
+                base_val = [
                     pointwise_steric_potential(c, surf.radii, p,
                                                atom_groups=atom_groups,
                                                center_exponent=center_exponent,
@@ -770,11 +792,38 @@ def molecule_steric_potential(mol,
                                                pairwise_term=pairwise_term) - base_val
                     for c,p in zip(new_centers, new_pts)
                 ]
+        if preserve_clipping:
+            base_val = [[mask * v for mask,v in zip(masks, bv)] for bv in base_val]
+        if resummation:
+            base_val = [np.sum(np.concatenate(v)) for v in base_val]
+            return_breakdowns = False
+        if return_breakdowns:
+            return pts, base_val
+        else:
+            return base_val
     else:
         if return_breakdowns:
             return np.concatenate(pts, axis=0), np.concatenate(base_val, axis=0)
         else:
             return base_val
+
+def molecule_volume_change(mol,
+                           geoms=None,
+                           molecule_distortion_function=None,
+                           use_mol_ref=True,
+                           **volume_opts):
+    if geoms is None:
+        geoms = molecule_distortion_function(mol)
+
+    vols = np.array([
+        mol.modify(coords=g).get_surface().volume(**volume_opts)
+        for g in geoms
+    ])
+
+    if use_mol_ref:
+        return vols - mol.get_surface().volume(**volume_opts)
+    else:
+        return vols
 
 OptimizedForceData = collections.namedtuple(
     'OptimizedForceData',
@@ -812,9 +861,10 @@ ForceModifiedReactionData = collections.namedtuple(
         'mass_weight',
         'energy_evaluator',
         'internals',
+        'predistorted_data',
         'optimizer_settings'
     ],
-    defaults=[None]
+    defaults=[None, None]
 )
 utils.register_namedtuple(ForceModifiedReactionData)
 
@@ -863,7 +913,7 @@ class ForceOptimizer:
         self.opts = self.default_options | determination_opts
         self.internals = internals
         if optimal_forces is None and force_coeffs is not None:
-            optimal_forces = self.get_forces_from_coeffs(force_coeffs)
+            optimal_forces = {'force_coeffs':force_coeffs}
         self._optimal_forces = optimal_forces
         self._inverse = inverse_forces
         self._internal_mols = None
@@ -911,12 +961,12 @@ class ForceOptimizer:
         return info_file
 
     @classmethod
-    def from_data(cls, force_data:ForceOptimizer|OptimizedForceData, reactant=None, ts=None):
+    def from_data(cls, force_data:ForceOptimizer|OptimizedForceData, reactant=None, ts=None, **opts):
         if isinstance(force_data, ForceOptimizer):
             return force_data
         else:
             energy_evaluator = force_data.energy_evaluator
-            opts = force_data.optimizer_settings.copy()
+            opts = opts | force_data.optimizer_settings
             ee = opts.pop('energy_evaluator', None)
             if energy_evaluator is None:
                 energy_evaluator = ee
@@ -1299,19 +1349,22 @@ class ForceOptimizer:
         return (gammas, dirs), modes, coeffs
 
     @property
-    def gammas(self):
+    def optimal_force_data(self):
         if self._optimal_forces is None:
             self._optimal_forces = self.optimize()
-        return self._optimal_forces[0][0]
+        elif isinstance(self._optimal_forces, dict):
+            self._optimal_forces = self.get_forces_from_coeffs(self._optimal_forces['force_coeffs'])
+        return self._optimal_forces
+    @property
+    def gammas(self):
+        return self.optimal_force_data[0][0]
     @property
     def force_dirs(self):
-        if self._optimal_forces is None:
-            self._optimal_forces = self.optimize()
-        return self._optimal_forces[0][1]
+        return self.optimal_force_data[0][1]
     @property
     def force_dirs_inverse(self):
         if self._inverse is None:
-            fds = self._optimal_forces[0][1]
+            fds = self.optimal_force_data[0][1]
             if isinstance(fds, np.ndarray):
                 self._inverse = mass_weighted_displacement_inverse(self.ts, fds)
             else:
@@ -1323,9 +1376,7 @@ class ForceOptimizer:
 
     @property
     def force_coeffs(self):
-        if self._optimal_forces is None:
-            self._optimal_forces = self.optimize()
-        return self._optimal_forces[2]
+        return self.optimal_force_data[2]
 
     @property
     def mass_weighted_force_dirs(self):
@@ -1456,6 +1507,9 @@ class ForceOptimizer:
                               ts_opt_settings=None,
                               max_iterations=500,
                               max_displacement=.05,
+                              predistort=False,
+                              ts_initial_coords=None,
+                              rs_initial_coords=None,
                               reoptimize_reactants=True,
                               reoptimize_ts=True,
                               initial_ts_step=1,
@@ -1473,10 +1527,18 @@ class ForceOptimizer:
                               run_gc=True,
                               logger=False,
                               rigid=False,
+                              force_scan_steps=None,
+                              split_magnitudes=False,
                               rigid_max_recursion=5,
+                              rigid_scan_steps=10,
                               rigid_scan_options=None,
+                              flatten_res=True,
                               # displacement_generator=None,
                               **opts):
+
+        if logger is not None and logger is not False:
+            logger = Logger.lookup(logger)
+
         smol_mode = nput.is_int(mode)
         smol_force = nput.is_numeric(magnitude)
         if smol_mode:
@@ -1489,238 +1551,533 @@ class ForceOptimizer:
         else:
             mags = magnitude
 
-        if units is not None:
-            if isinstance(units, str):
-                units = units.replace("Newtons", "Joules/Meters")
-                units = units.split("/")
-            conv = UnitsData.convert(units[0], "Hartrees") / (
-                UnitsData.convert(units[1], "BohrRadius")
-            )
-        else:
-            conv = 1
+        if not rigid and split_magnitudes:
+            magnitude = np.asanyarray(magnitude)
+            neg_mag = np.where(magnitude < 0)
+            pos_mag = np.where(magnitude >= 0)
+            neg_ord = np.argsort(-magnitude[neg_mag])
+            pos_ord = np.argsort(magnitude[pos_mag])
 
-        res = []
-        if verbose:
-            print(f"Optimizing forces over modes {modes} and magnitudes {mags}")
-        for mode in modes:
-            for magnitude in mags:
-                magnitude = conv * magnitude
-
-                if rigid:
-                    _, force_vector = self.mode_force_function(mode,
-                                                               magnitude=magnitude,
-                                                               displacements=displacements,
-                                                               use_internals=use_internals,
-                                                               mass_weight=mass_weight,
-                                                               reembed_displacements=reembed_displacements,
-                                                               remove_transrot=remove_transrot,
-                                                               remove_orientation=remove_orientation)
-                    if rigid_scan_options is None:
-                        rigid_scan_options = {}
-                    _, (dr, dt), _ = self.predicted_delta_from_forces(
-                        mode,
-                        magnitude,
-                        displacements=displacements,
-                        use_internals=use_internals,
-                        mass_weight=mass_weight,
-                        max_recursion=rigid_max_recursion,
-                        return_geometries=True,
-                        **rigid_scan_options
-                    )
-
-                    _, xr = dr[1]
-                    r = self.rs.modify(coords=xr)
-                    _, xt = dt[1]
-                    ts = self.ts.modify(coords=xt)
-                else:
-                    if modify_forces:
-                        if remove_orientation is None:
-                            remove_orientation = not apply_constraints
-                        if remove_transrot is None:
-                            remove_transrot = not apply_constraints
-                        gradient_modification_function, force_vector = self.mode_force_function(mode,
-                                                                                                magnitude=magnitude,
-                                                                                                displacements=displacements,
-                                                                                                use_internals=use_internals,
-                                                                                                mass_weight=mass_weight,
-                                                                                                reembed_displacements=reembed_displacements,
-                                                                                                remove_transrot=remove_transrot,
-                                                                                                remove_orientation=remove_orientation)
-                    else:
-                        gradient_modification_function, force_vector = None, None
-
-                    if reoptimize_ts:
-                        if profile_generator == 'relaxed':
-                            if ts_opt_settings is None:
-                                ts_opt_settings = {}
-                            if optimizer_method is not None:
-                                ts_opt_settings['method'] = ts_opt_settings.get('method', optimizer_method)
-
-                            ts_opt_settings = dict(
-                                max_iterations=max_iterations,
-                                max_displacement=max_displacement,
-                                logger=logger
-                            ) | (
-                                                  dict(coordinate_constraints=[
-                                                          (0, 2),
-                                                          (1, 3)
-                                                      ]) if apply_constraints else {}
-                                              ) | ts_opt_settings
-
-                            def pre_displace(coords):
-                                dd = self.get_displacement_dirs(
-                                    mass_weight=mass_weight,
-                                    use_internals=use_internals,
-                                    displacements=displacements
-                                )
-                                d = dd[mode] * initial_reactants_step
-                                if use_internals:
-                                    dx = self.internal_mols[1].get_cartesians_by_internals(1, coords=coords, strip_embedding=True)[0]
-                                    d = np.dot(d, dx)
-                                return coords + d.reshape(-1, 3)
-
-                            ts = self.ts.optimize(gradient_modification_function=gradient_modification_function,
-                                                  max_iterations=max_iterations,
-                                                  mode=optimizer_mode,
-                                                  initialization_function=pre_displace,
-                                                  # logger=True,
-                                                  **ts_opt_settings)
-                        else:
-                            disp_t = self.ts.get_scan_coordinates(
-                                [[-initial_ts_step, initial_ts_step, num_ts_steps]],
-                                which=[0],
-                                coordinate_expansion=[self.ts.get_normal_modes().coords_by_modes],
-                                # internals='reembed' if use_internals else False,
-                                # strip_embedding=True if use_internals else False
-                            )
-
-                            if ts_opt_settings is None:
-                                ts_opt_settings = {}
-
-                            ts_opt_settings = dict(
-                                max_iterations=max_iterations,
-                                max_displacement=max_displacement,
-                                logger=logger
-                            ) | (
-                                                  dict(coordinate_constraints=[
-                                                      (0, 2),
-                                                      (1, 3)
-                                                  ]) if apply_constraints else {}
-                                              ) | ts_opt_settings
-
-                            images = [self.ts.modify(coords=t) for t in disp_t]
-                            rxn = Reaction(
-                                [images[0]],
-                                [images[-1]],
-                                optimize=False
-                            )
-
-                            if 'dimer' in profile_generator:
-                                ts_opt_settings['image_guess'] = ts_opt_settings.get('image_guess', 0)
-                                images = [images[0], images[-1]]
-                            if profile_generator == 'ase-dimer':
-                                ts_opt_settings['method_options'] = {
-                                                                        'image_guess': ts_opt_settings.pop('image_guess', 0)
-                                                                    } | ts_opt_settings.get('method_options', {})
-                            prof = rxn.get_profile_generator(profile_generator,
-                                                             climb=climb,
-                                                             energy_evaluator=self.ts.energy_evaluator)
-
-                            new_images = prof.generate(base_images=[images[0], images[-1]],
-                                                       gradient_modification_function=gradient_modification_function,
-                                                       **ts_opt_settings)
-                            ts = new_images[0]
-                    else:
-                        ts = self.ts
-
-                    if reoptimize_reactants:
-                        if optimizer_method is not None:
-                            opts['method'] = opts.get('method', optimizer_method)
-                        if apply_constraints:
-                            opts['coordinate_constraints'] = [
-                                (0, 2),
-                                (1, 3)
-                            ]
-
-                        def pre_displace(coords):
-                            dd = self.get_displacement_dirs(
-                                mass_weight=mass_weight,
-                                use_internals=use_internals,
-                                displacements=displacements
-                            )
-                            if not callable(dd):
-                                d = dd[mode] * initial_reactants_step
-                            else:
-                                d = dd(self.ts, coords)[mode] * initial_reactants_step
-                            if use_internals:
-                                dx = self.internal_mols[0].get_cartesians_by_internals(1, coords=coords, strip_embedding=True)[0]
-                                d = np.dot(d, dx)
-                            return coords + d.reshape(-1, 3)
-
-                        r = self.rs.modify(internals=None).optimize(
-                            gradient_modification_function=gradient_modification_function,
-                            max_iterations=max_iterations,
-                            mode=optimizer_mode,
-                            initialization_function=pre_displace,
-                            max_displacement=max_displacement,
-                            logger=logger,
-                            **opts)
-                    else:
-                        r = self.rs
-
-                fmrd = ForceModifiedReactionData(
-                    atoms=self.ts.atoms,
-                    reactant_geom=self.rs.coords,
-                    transition_state_geom=self.ts.coords,
-                    reactant_energy=self.rs.calculate_energy(),
-                    transition_state_energy=self.ts.calculate_energy(),
-                    force_modified_reactant_geom=r.coords,
-                    force_modified_transition_state_geom=ts.coords,
-                    force_modified_reactant_energy=r.calculate_energy(),
-                    force_modified_transition_state_energy=ts.calculate_energy(),
-                    force_vector=force_vector,
-                    force_magnitude=magnitude,
-                    force_units=units,
+            if len(neg_ord) > 0:
+                neg_mags = magnitude[neg_mag][neg_ord]
+                neg_res = self.reoptimize_with_force(
+                    modes,
+                    magnitude=0,
+                    force_scan_steps=neg_mags,
+                    units=units,
+                    use_internals=use_internals,
                     mass_weight=mass_weight,
-                    energy_evaluator=self.rs.energy_evaluator,
-                    internals=self.internals,
-                    optimizer_settings=dict(
-                        optimizer_mode=optimizer_mode,
-                        optimizer_method=optimizer_method,
-                        profile_generator=profile_generator,
-                        ts_opt_settings=ts_opt_settings,
-                        max_iterations=max_iterations,
-                        initial_ts_step=initial_ts_step,
-                        num_ts_steps=num_ts_steps,
-                        initial_reactants_step=initial_reactants_step
-                    ) | opts
+                    optimizer_mode=optimizer_mode,
+                    optimizer_method=optimizer_method,
+                    profile_generator=profile_generator,
+                    climb=climb,
+                    ts_opt_settings=ts_opt_settings,
+                    max_iterations=max_iterations,
+                    max_displacement=max_displacement,
+                    predistort=predistort,
+                    reoptimize_reactants=reoptimize_reactants,
+                    reoptimize_ts=reoptimize_ts,
+                    initial_ts_step=initial_ts_step,
+                    num_ts_steps=num_ts_steps,
+                    initial_reactants_step=initial_reactants_step,
+                    modify_forces=modify_forces,
+                    apply_constraints=apply_constraints,
+                    reembed_displacements=reembed_displacements,
+                    remove_transrot=remove_transrot,
+                    remove_orientation=remove_orientation,
+                    output_dir=output_dir,
+                    info_file='force_modified_{mode}_{mag}_neg.json',
+                    displacements=displacements,
+                    verbose=verbose,
+                    run_gc=run_gc,
+                    logger=logger,
+                    rigid_max_recursion=rigid_max_recursion,
+                    rigid_scan_steps=rigid_scan_steps,
+                    rigid_scan_options=rigid_scan_options,
+                    ts_initial_coords=ts_initial_coords,
+                    rs_initial_coords=rs_initial_coords,
+                    flatten_res=False,
+                    # displacement_generator=None,
+                    **opts
                 )
+            else:
+                neg_res = []
 
-                if run_gc:
-                    gc.collect()
+            if len(pos_ord) > 0:
+                pos_mags = magnitude[pos_mag][pos_ord]
+                pos_res = self.reoptimize_with_force(
+                    modes,
+                    magnitude=0,
+                    force_scan_steps=pos_mags,
+                    units=units,
+                    use_internals=use_internals,
+                    mass_weight=mass_weight,
+                    optimizer_mode=optimizer_mode,
+                    optimizer_method=optimizer_method,
+                    profile_generator=profile_generator,
+                    climb=climb,
+                    ts_opt_settings=ts_opt_settings,
+                    max_iterations=max_iterations,
+                    max_displacement=max_displacement,
+                    predistort=predistort,
+                    reoptimize_reactants=reoptimize_reactants,
+                    reoptimize_ts=reoptimize_ts,
+                    initial_ts_step=initial_ts_step,
+                    num_ts_steps=num_ts_steps,
+                    initial_reactants_step=initial_reactants_step,
+                    modify_forces=modify_forces,
+                    apply_constraints=apply_constraints,
+                    reembed_displacements=reembed_displacements,
+                    remove_transrot=remove_transrot,
+                    remove_orientation=remove_orientation,
+                    output_dir=output_dir,
+                    info_file='force_modified_{mode}_{mag}_neg.json',
+                    displacements=displacements,
+                    verbose=verbose,
+                    run_gc=run_gc,
+                    logger=logger,
+                    rigid_max_recursion=rigid_max_recursion,
+                    rigid_scan_steps=rigid_scan_steps,
+                    rigid_scan_options=rigid_scan_options,
+                    ts_initial_coords=ts_initial_coords,
+                    rs_initial_coords=rs_initial_coords,
+                    flatten_res=False,
+                    # displacement_generator=None,
+                    **opts
+                )
+            else:
+                pos_res = []
 
-                if output_dir is not None:
-                    conv2 = UnitsData.convert("Hartrees", "Picojoules") / (
-                        UnitsData.convert("BohrRadius", "Meters")
+            # have to unwrap these results
+            res = [
+                [None] * len(magnitude)
+                for _ in modes
+            ]
+
+            neg_inv = np.argsort(neg_ord)
+            for i,(rs_i, ts_i, res_block) in enumerate(neg_res):
+                res_block: ForceModifiedReactionData
+                subterms = res_block.predistorted_data
+                for j,t in enumerate(subterms):
+                    t: ForceModifiedReactionData
+                    j = neg_mag[0][neg_inv[j]]
+                    res[i][j] = (
+                        rs_i.modify(coords=t.force_modified_reactant_geom),
+                        ts_i.modify(coords=t.force_modified_transition_state_geom),
+                        t
                     )
-                    m = np.round(magnitude * conv2)
-                    if os.path.splitext(output_dir)[-1].startswith('.'):
-                        output_dir, info_file = os.path.split(output_dir)
-                    output_dir = output_dir.format(mode=mode, mag=m)
-                    info_file = info_file.format(mode=mode, mag=m)
-                    if len(output_dir) > 0:
-                        os.makedirs(output_dir, exist_ok=True)
-                        info_file = os.path.join(output_dir, info_file)
-                    utils.write_namedtuple(
-                        info_file,
-                        fmrd
-                    )
-                res.append([r, ts, fmrd])
 
-        if smol_mode and smol_force:
-            return res[0]
+            pos_inv = np.argsort(pos_ord)
+            for i, (rs_i, ts_i, res_block) in enumerate(pos_res):
+                res_block: ForceModifiedReactionData
+                subterms = res_block.predistorted_data
+                for j, t in enumerate(subterms):
+                    t: ForceModifiedReactionData
+                    j = pos_mag[0][pos_inv[j]]
+                    res[i][j] = (
+                        rs_i.modify(coords=t.force_modified_reactant_geom),
+                        ts_i.modify(coords=t.force_modified_transition_state_geom),
+                        t
+                    )
+
         else:
-            return res
+            if units is not None:
+                if isinstance(units, str):
+                    units = units.replace("Newtons", "Joules/Meters")
+                    units = units.split("/")
+                conv = UnitsData.convert(units[0], "Hartrees") / (
+                    UnitsData.convert(units[1], "BohrRadius")
+                )
+            else:
+                conv = 1
+
+            rs_init = self.rs
+            if rs_initial_coords is not None:
+                rs_init = rs_init.modify(coords=rs_initial_coords)
+            ts_init = self.ts
+            if ts_initial_coords is not None:
+                ts_init = ts_init.modify(coords=ts_initial_coords)
+
+            res = []
+            if verbose:
+                print(f"Optimizing forces over modes {modes} and magnitudes {mags}")
+            for mode in modes:
+                subres = []
+                for magnitude in mags:
+                    magnitude = conv * magnitude
+
+                    if (not rigid) and (force_scan_steps is not None):
+                        if nput.is_int(force_scan_steps):
+                            fms = np.linspace(0, magnitude / conv, force_scan_steps)
+                        else:
+                            fms = np.asanyarray(force_scan_steps)
+                        fmrd_steps = []
+                        for f in fms:
+                            rs_init, ts_init, fmrd = self.reoptimize_with_force(
+                                mode,
+                                magnitude=f,
+                                units=units,
+                                use_internals=use_internals,
+                                mass_weight=mass_weight,
+                                optimizer_mode=optimizer_mode,
+                                optimizer_method=optimizer_method,
+                                profile_generator=profile_generator,
+                                climb=climb,
+                                ts_opt_settings=ts_opt_settings,
+                                max_iterations=max_iterations,
+                                max_displacement=max_displacement,
+                                predistort=predistort,
+                                reoptimize_reactants=reoptimize_reactants,
+                                reoptimize_ts=reoptimize_ts,
+                                initial_ts_step=initial_ts_step,
+                                num_ts_steps=num_ts_steps,
+                                initial_reactants_step=initial_reactants_step,
+                                modify_forces=modify_forces,
+                                apply_constraints=apply_constraints,
+                                reembed_displacements=reembed_displacements,
+                                remove_transrot=remove_transrot,
+                                remove_orientation=remove_orientation,
+                                output_dir=output_dir,
+                                info_file='force_modified_{mode}_{mag}_step.json',
+                                displacements=displacements,
+                                verbose=verbose,
+                                run_gc=run_gc,
+                                logger=logger,
+                                rigid_max_recursion=rigid_max_recursion,
+                                rigid_scan_steps=rigid_scan_steps,
+                                rigid_scan_options=rigid_scan_options,
+                                ts_initial_coords=ts_init.coords,
+                                rs_initial_coords=rs_init.coords,
+                                # displacement_generator=None,
+                                **opts
+                            )
+                            fmrd_steps.append(fmrd)
+
+                        fmrd = fmrd_steps[-1]
+                        fmrd = fmrd._replace(predistorted_data=fmrd_steps)
+
+                        r = rs_init.modify(coords=fmrd.force_modified_reactant_geom)
+                        ts = ts_init.modify(coords=fmrd.force_modified_transition_state_geom)
+                    else:
+                        if rigid:
+                            _, force_vector = self.mode_force_function(mode,
+                                                                       magnitude=magnitude,
+                                                                       displacements=displacements,
+                                                                       use_internals=use_internals,
+                                                                       mass_weight=mass_weight,
+                                                                       reembed_displacements=reembed_displacements,
+                                                                       remove_transrot=remove_transrot,
+                                                                       remove_orientation=remove_orientation)
+                            if rigid_scan_options is None:
+                                rigid_scan_options = {}
+                            if rigid_scan_steps is not None:
+                                rigid_scan_options['steps'] = rigid_scan_steps
+                            _, (dr, dt), _ = self.predicted_delta_from_forces(
+                                mode,
+                                magnitude,
+                                displacements=displacements,
+                                use_internals=use_internals,
+                                mass_weight=mass_weight,
+                                max_recursion=rigid_max_recursion,
+                                return_geometries=True,
+                                ts_initial_coords=ts_initial_coords,
+                                rs_initial_coords=rs_initial_coords,
+                                **rigid_scan_options
+                            )
+
+                            _, xr = dr[1]
+                            r = rs_init.modify(coords=xr)
+                            _, xt = dt[1]
+                            ts = ts_init.modify(coords=xt)
+                        else:
+                            if predistort:
+                                predistorted_data:ForceModifiedReactionData = self.reoptimize_with_force(
+                                    mode,
+                                    magnitude=magnitude / conv,
+                                    units=units,
+                                    use_internals=use_internals,
+                                    mass_weight=mass_weight,
+                                    optimizer_mode=optimizer_mode,
+                                    optimizer_method=optimizer_method,
+                                    profile_generator=profile_generator,
+                                    climb=climb,
+                                    ts_opt_settings=ts_opt_settings,
+                                    max_iterations=max_iterations,
+                                    max_displacement=max_displacement,
+                                    predistort=False,
+                                    reoptimize_reactants=reoptimize_reactants,
+                                    reoptimize_ts=reoptimize_ts,
+                                    initial_ts_step=initial_ts_step,
+                                    num_ts_steps=num_ts_steps,
+                                    initial_reactants_step=initial_reactants_step,
+                                    modify_forces=modify_forces,
+                                    apply_constraints=apply_constraints,
+                                    reembed_displacements=reembed_displacements,
+                                    remove_transrot=remove_transrot,
+                                    remove_orientation=remove_orientation,
+                                    output_dir=output_dir,
+                                    info_file='force_modified_{mode}_{mag}_pre.json',
+                                    displacements=displacements,
+                                    verbose=verbose,
+                                    run_gc=run_gc,
+                                    logger=logger,
+                                    rigid=True,
+                                    rigid_max_recursion=rigid_max_recursion,
+                                    rigid_scan_steps=rigid_scan_steps,
+                                    rigid_scan_options=rigid_scan_options,
+                                    ts_initial_coords=ts_initial_coords,
+                                    rs_initial_coords=rs_initial_coords,
+                                    # displacement_generator=None,
+                                    **opts
+                                )[2]
+
+                                fmrd:ForceModifiedReactionData = self.reoptimize_with_force(
+                                    mode,
+                                    magnitude=magnitude,
+                                    units='Hartrees/BohrRadius',
+                                    use_internals=use_internals,
+                                    mass_weight=mass_weight,
+                                    optimizer_mode=optimizer_mode,
+                                    optimizer_method=optimizer_method,
+                                    profile_generator=profile_generator,
+                                    climb=climb,
+                                    ts_opt_settings=ts_opt_settings,
+                                    max_iterations=max_iterations,
+                                    max_displacement=max_displacement,
+                                    predistort=False,
+                                    reoptimize_reactants=reoptimize_reactants,
+                                    reoptimize_ts=reoptimize_ts,
+                                    initial_ts_step=initial_ts_step,
+                                    num_ts_steps=num_ts_steps,
+                                    initial_reactants_step=initial_reactants_step,
+                                    modify_forces=modify_forces,
+                                    apply_constraints=apply_constraints,
+                                    reembed_displacements=reembed_displacements,
+                                    remove_transrot=remove_transrot,
+                                    remove_orientation=remove_orientation,
+                                    output_dir=output_dir,
+                                    info_file='force_modified_{mode}_{mag}_pre.json',
+                                    displacements=displacements,
+                                    verbose=verbose,
+                                    run_gc=run_gc,
+                                    logger=logger,
+                                    rigid=False,
+                                    rigid_max_recursion=rigid_max_recursion,
+                                    rigid_scan_steps=rigid_scan_steps,
+                                    rigid_scan_options=rigid_scan_options,
+                                    ts_initial_coords=predistorted_data.force_modified_transition_state_geom,
+                                    rs_initial_coords=predistorted_data.force_modified_reactant_geom,
+                                    # displacement_generator=None,
+                                    **opts
+                                )[2]
+
+
+
+                                fmrd = fmrd._replace(
+                                    predistorted_data=predistorted_data
+                                )
+
+                                r = rs_init.modify(coords=fmrd.force_modified_reactant_geom)
+                                ts = ts_init.modify(coords=fmrd.force_modified_transition_state_geom)
+                                return [r, ts, fmrd]
+
+                            if modify_forces:
+                                if remove_orientation is None:
+                                    remove_orientation = not apply_constraints
+                                if remove_transrot is None:
+                                    remove_transrot = not apply_constraints
+                                gradient_modification_function, force_vector = self.mode_force_function(mode,
+                                                                                                        magnitude=magnitude,
+                                                                                                        displacements=displacements,
+                                                                                                        use_internals=use_internals,
+                                                                                                        mass_weight=mass_weight,
+                                                                                                        reembed_displacements=reembed_displacements,
+                                                                                                        remove_transrot=remove_transrot,
+                                                                                                        remove_orientation=remove_orientation)
+                            else:
+                                gradient_modification_function, force_vector = None, None
+
+                            if reoptimize_ts:
+                                if profile_generator == 'relaxed':
+                                    if ts_opt_settings is None:
+                                        ts_opt_settings = {}
+                                    if optimizer_method is not None:
+                                        ts_opt_settings['method'] = ts_opt_settings.get('method', optimizer_method)
+
+                                    ts_opt_settings = dict(
+                                        max_iterations=max_iterations,
+                                        max_displacement=max_displacement,
+                                        logger=logger
+                                    ) | (
+                                                          dict(coordinate_constraints=[
+                                                                  (0, 2),
+                                                                  (1, 3)
+                                                              ]) if apply_constraints else {}
+                                                      ) | ts_opt_settings
+
+                                    def pre_displace(coords):
+                                        dd = self.get_displacement_dirs(
+                                            mass_weight=mass_weight,
+                                            use_internals=use_internals,
+                                            displacements=displacements
+                                        )
+                                        d = dd[mode] * initial_reactants_step
+                                        if use_internals:
+                                            dx = self.internal_mols[1].get_cartesians_by_internals(1, coords=coords, strip_embedding=True)[0]
+                                            d = np.dot(d, dx)
+                                        return coords + d.reshape(-1, 3)
+
+                                    ts = ts_init.optimize(gradient_modification_function=gradient_modification_function,
+                                                          max_iterations=max_iterations,
+                                                          mode=optimizer_mode,
+                                                          initialization_function=pre_displace,
+                                                          # logger=True,
+                                                          **ts_opt_settings)
+                                else:
+                                    disp_t = ts_init.get_scan_coordinates(
+                                        [[-initial_ts_step, initial_ts_step, num_ts_steps]],
+                                        which=[0],
+                                        coordinate_expansion=[self.ts.get_normal_modes().coords_by_modes],
+                                        # internals='reembed' if use_internals else False,
+                                        # strip_embedding=True if use_internals else False
+                                    )
+
+                                    if ts_opt_settings is None:
+                                        ts_opt_settings = {}
+
+                                    ts_opt_settings = dict(
+                                        max_iterations=max_iterations,
+                                        max_displacement=max_displacement,
+                                        logger=logger
+                                    ) | (
+                                                          dict(coordinate_constraints=[
+                                                              (0, 2),
+                                                              (1, 3)
+                                                          ]) if apply_constraints else {}
+                                                      ) | ts_opt_settings
+
+                                    images = [ts_init.modify(coords=t) for t in disp_t]
+                                    rxn = Reaction(
+                                        [images[0]],
+                                        [images[-1]],
+                                        optimize=False,
+                                        align=False
+                                    )
+
+                                    if 'dimer' in profile_generator:
+                                        ts_opt_settings['image_guess'] = ts_opt_settings.get('image_guess', 0)
+                                        images = [images[0], images[-1]]
+                                    if profile_generator == 'ase-dimer':
+                                        ts_opt_settings['method_options'] = {
+                                                                                'image_guess': ts_opt_settings.pop('image_guess', 0)
+                                                                            } | ts_opt_settings.get('method_options', {})
+                                    prof = rxn.get_profile_generator(profile_generator,
+                                                                     climb=climb,
+                                                                     energy_evaluator=self.ts.energy_evaluator)
+
+                                    new_images = prof.generate(base_images=[images[0], images[-1]],
+                                                               gradient_modification_function=gradient_modification_function,
+                                                               **ts_opt_settings)
+                                    ts = new_images[0]
+                            else:
+                                ts = ts_init
+
+                            if reoptimize_reactants:
+                                if optimizer_method is not None:
+                                    opts['method'] = opts.get('method', optimizer_method)
+                                if apply_constraints:
+                                    opts['coordinate_constraints'] = [
+                                        (0, 2),
+                                        (1, 3)
+                                    ]
+
+                                def pre_displace(coords):
+                                    dd = self.get_displacement_dirs(
+                                        mass_weight=mass_weight,
+                                        use_internals=use_internals,
+                                        displacements=displacements
+                                    )
+                                    if not callable(dd):
+                                        d = dd[mode] * initial_reactants_step
+                                    else:
+                                        d = dd(self.ts, coords)[mode] * initial_reactants_step
+                                    if use_internals:
+                                        dx = self.internal_mols[0].get_cartesians_by_internals(1, coords=coords, strip_embedding=True)[0]
+                                        d = np.dot(d, dx)
+                                    return coords + d.reshape(-1, 3)
+
+                                r = self.rs.modify(internals=None).optimize(
+                                    gradient_modification_function=gradient_modification_function,
+                                    max_iterations=max_iterations,
+                                    mode=optimizer_mode,
+                                    initialization_function=pre_displace,
+                                    max_displacement=max_displacement,
+                                    logger=logger,
+                                    **opts)
+                            else:
+                                r = self.rs
+
+                        fmrd = ForceModifiedReactionData(
+                            atoms=self.ts.atoms,
+                            reactant_geom=self.rs.coords,
+                            transition_state_geom=self.ts.coords,
+                            reactant_energy=self.rs.calculate_energy(),
+                            transition_state_energy=self.ts.calculate_energy(),
+                            force_modified_reactant_geom=r.coords,
+                            force_modified_transition_state_geom=ts.coords,
+                            force_modified_reactant_energy=r.calculate_energy(),
+                            force_modified_transition_state_energy=ts.calculate_energy(),
+                            force_vector=force_vector,
+                            force_magnitude=magnitude,
+                            force_units=units,
+                            mass_weight=mass_weight,
+                            energy_evaluator=self.rs.energy_evaluator,
+                            internals=self.internals,
+                            optimizer_settings=dict(
+                                optimizer_mode=optimizer_mode,
+                                optimizer_method=optimizer_method,
+                                profile_generator=profile_generator,
+                                ts_opt_settings=ts_opt_settings,
+                                max_iterations=max_iterations,
+                                initial_ts_step=initial_ts_step,
+                                num_ts_steps=num_ts_steps,
+                                initial_reactants_step=initial_reactants_step
+                            ) | opts
+                        )
+
+                        if output_dir is not None:
+                            conv2 = UnitsData.convert("Hartrees", "Picojoules") / (
+                                UnitsData.convert("BohrRadius", "Meters")
+                            )
+                            m = np.round(magnitude * conv2)
+                            if os.path.splitext(output_dir)[-1].startswith('.'):
+                                output_dir, info_file = os.path.split(output_dir)
+                            output_dir = output_dir.format(mode=mode, mag=m)
+                            info_file = info_file.format(mode=mode, mag=m)
+                            if len(output_dir) > 0:
+                                os.makedirs(output_dir, exist_ok=True)
+                                info_file = os.path.join(output_dir, info_file)
+                            utils.write_namedtuple(
+                                info_file,
+                                fmrd
+                            )
+
+                    if run_gc: gc.collect()
+                    subres.append([r, ts, fmrd])
+                res.append(subres)
+
+        if flatten_res:
+            res = sum(res, [])
+            if smol_mode and smol_force:
+                res = res[0]
+        elif smol_mode:
+            res = res[0]
+            if smol_force:
+                res = res[0]
+        elif smol_force:
+            res = [r[0] for r in res]
+
+        return res
 
     @property
     def _internals_selectors(self):
@@ -1747,7 +2104,8 @@ class ForceOptimizer:
     def _select_angles(cls, internals, *, optimizer, fragment_indices=None):
         return cls._select_by_filter(internals, filter=lambda x:len(x)==3, optimizer=optimizer, fragment_indices=fragment_indices)
 
-    def compute_gammas(self, which=None, mass_weight=True, displacements=None, use_internals=False):
+    def compute_gammas(self, which=None, mass_weight=True, displacements=None, use_internals=False,
+                       return_components=False):
         dd = self.get_displacement_dirs(
             mass_weight=mass_weight,
             use_internals=use_internals,
@@ -1770,6 +2128,7 @@ class ForceOptimizer:
                                       dirs,
                                       direction_ts=direction_ts,
                                       use_mode_space=self.use_mode_space,
+                                      return_components=return_components
                                       # modes=self.prepped_modes
                                       )
     def get_selected_internals(self, which,
@@ -2108,11 +2467,14 @@ class ForceOptimizer:
                                          disp_max=1,
                                          steps=5,
                                          mass_weight=False,
+                                         prune=False,
                                          generate_displacement_function=None,
                                          density=10,
-                                         pairwise_term=lj_repulsion,
+                                         pairwise_term=interior_repulsion,
                                          return_breakdowns=False,
+                                         preserve_clipping=False,
                                          atom_groups=None,
+                                         only_endpoints=False,
                                          **opts):
         if generate_displacement_function is None:
             generate_displacement_function = self.get_displaced_geometries
@@ -2122,17 +2484,24 @@ class ForceOptimizer:
                                              mass_weight=mass_weight,
                                              steps=steps,
                                              **opts)
+        if only_endpoints:
+            x_r = x_r[(0, -1),]
+            x_t = x_t[(0, -1),]
         rs_sterics = molecule_steric_potential(self.rs,
                                                molecule_distortion_function=lambda mol:x_r,
                                                density=density,
+                                               prune=prune,
                                                pairwise_term=pairwise_term,
                                                atom_groups=atom_groups,
+                                               preserve_clipping=preserve_clipping,
                                                return_breakdowns=return_breakdowns)
         ts_sterics = molecule_steric_potential(self.ts,
                                                molecule_distortion_function=lambda mol:x_t,
                                                density=density,
+                                               prune=prune,
                                                pairwise_term=pairwise_term,
                                                atom_groups=atom_groups,
+                                               preserve_clipping=preserve_clipping,
                                                return_breakdowns=return_breakdowns)
         if return_breakdowns:
             pts_r, pots_r = rs_sterics
@@ -2152,6 +2521,48 @@ class ForceOptimizer:
                 ts_sterics = np.flip(ts_sterics, axis=0)
 
         return (rs_sterics, ts_sterics), (v, x_r, x_t)
+
+    def get_distortion_volume_changes(self,
+                                      mode=0,
+                                      disp_min=0,
+                                      disp_max=1,
+                                      steps=5,
+                                      mass_weight=False,
+                                      generate_displacement_function=None,
+                                      volume_options=None,
+                                      only_endpoints=False,
+                                      **opts):
+        if generate_displacement_function is None:
+            generate_displacement_function = self.get_displaced_geometries
+        (v, x_r, x_t) = generate_displacement_function(mode,
+                                             disp_min=disp_min,
+                                             disp_max=disp_max,
+                                             mass_weight=mass_weight,
+                                             steps=steps,
+                                             **opts)
+        if volume_options is None:
+            volume_options = {}
+        volume_options['use_mol_ref'] = volume_options.get('use_mol_ref', False)
+
+        if only_endpoints:
+            x_r = x_r[(0, -1),]
+            x_t = x_t[(0, -1),]
+        rs_volumes = molecule_volume_change(self.rs, molecule_distortion_function=lambda mol:x_r, **volume_options)
+        ts_volumes = molecule_volume_change(self.ts, molecule_distortion_function=lambda mol:x_t, **volume_options)
+
+        if disp_min < 0 and disp_max == 0:
+            # v = np.flip(v)
+            x_r = np.flip(x_r, axis=0)
+            x_t = np.flip(x_t, axis=0)
+            rs_volumes = np.flip(rs_volumes, axis=0)
+            ts_volumes = np.flip(ts_volumes, axis=0)
+            rs_volumes = rs_volumes - rs_volumes[0]
+            ts_volumes = ts_volumes - ts_volumes[0]
+        elif disp_min == 0:
+            rs_volumes = rs_volumes - rs_volumes[0]
+            ts_volumes = ts_volumes - ts_volumes[0]
+
+        return (rs_volumes, ts_volumes), (v, x_r, x_t)
 
     def direction_overlap(self, other, mol='ts'):
         fds = self.force_dirs
@@ -2181,25 +2592,40 @@ class ForceOptimizer:
     def overlap_breakdown(self, overlap):
         return np.round(overlap**2 * 100)
 
-    def animate_normed(self, i, expansion=None, modes=None,
+    def animate_normed(self, i, expansion=None,
+                       modes=None,
                        use_internals=False, mag=.5, mol='ts',
                        mass_weight=True,
+                       displacements=None,
                        **opts):
         if expansion is None and not use_internals:
             expansion = self.force_dirs
-        if dev.str_is(mol, 'ts'):
-            mol = self.ts
-            if len(expansion) == 2 and expansion[0].ndim == 2:
-                expansion = expansion[1]
-        elif dev.str_is(mol, 'reactant'):
-            mol = self.rs
-            if len(expansion) == 2 and expansion[0].ndim == 2:
-                expansion = expansion[0]
-        exp = mass_weighted_normalize_displacements(mol, mass_weight=mass_weight, expansion=expansion)
-        return mol.animate_coordinate(i, mag,
-                                      coordinate_expansion=[nput.vec_normalize(exp, axis=1)],
-                                      **opts
-                                      )
+        if expansion is not None:
+            if dev.str_is(mol, 'ts'):
+                mol = self.ts
+                if len(expansion) == 2 and expansion[0].ndim == 2:
+                    expansion = expansion[1]
+            elif dev.str_is(mol, 'reactant'):
+                mol = self.rs
+                if len(expansion) == 2 and expansion[0].ndim == 2:
+                    expansion = expansion[0]
+        if displacements is None:
+            exp = mass_weighted_normalize_displacements(mol, mass_weight=mass_weight,  expansion=expansion)
+            return mol.animate_coordinate(i, mag,
+                                          coordinate_expansion=[nput.vec_normalize(exp, axis=1)],
+                                          **opts
+                                          )
+        else:
+            (x, sr, st) = self.get_displaced_geometries(0,
+                                                        disp_min=-1, disp_max=1,
+                                                        steps=3,
+                                                        mass_weight=mass_weight, use_internals=use_internals,
+                                                        displacements=displacements)
+
+            if mol == 'ts':
+                return self.ts.plot(st, **opts)
+            else:
+                return self.rs.plot(sr, **opts)
 
     def animate_mode(self, i, modes=None, mol='ts', **opts):
         if dev.str_is(mol, 'ts'):
@@ -2250,6 +2676,8 @@ class ForceOptimizer:
                                  scan_values=None,
                                  mass_weight=True,
                                  displacements=None,
+                                 ts_initial_coords=None,
+                                 rs_initial_coords=None,
                                  use_internals=False):
         defaults = self._get_default_displacement_steps(mass_weight=mass_weight)
         if disp_min is None:
@@ -2265,6 +2693,11 @@ class ForceOptimizer:
                 r, t = self.internal_mols
             else:
                 r, t = self.rs, self.ts
+            
+            if ts_initial_coords is not None:
+                t = t.modify(coords=ts_initial_coords)
+            if rs_initial_coords is not None:
+                r = r.modify(coords=rs_initial_coords)
 
             if scan_values is None:
                 scan_values = np.linspace(disp_min, disp_max, steps)
@@ -2340,10 +2773,14 @@ class ForceOptimizer:
                                 shift=True,
                                 use_internals=False,
                                 displacements=None,
+                                ts_initial_coords=None,
+                                rs_initial_coords=None,
                                 return_geometries=False,
                                 mass_weight=True):
         x, sr, st = self.get_displaced_geometries(mode, disp_min=disp_min, disp_max=disp_max, steps=steps,
                                                   mass_weight=mass_weight, use_internals=use_internals,
+                                                  ts_initial_coords=ts_initial_coords,
+                                                  rs_initial_coords=rs_initial_coords,
                                                   displacements=displacements)
         if displacements is not None:
             displacements = self.get_displacement_dirs(mass_weight=mass_weight, use_internals=use_internals,
@@ -2585,12 +3022,18 @@ class ForceOptimizer:
                                     max_disp_mag=5000,
                                     use_internals=False,
                                     prev_expansion=None,
+                                    ts_initial_coords=None,
+                                    rs_initial_coords=None,
                                     return_geometries=False):
         if disp_min is None or nput.is_numeric(disp_min):
             (x, exp_r, exp_t), g = self.get_distortion_energies(mode,
-                                                     disp_min=disp_min, disp_max=disp_max, steps=steps, order=1,
-                                                     mass_weight=mass_weight, use_internals=use_internals,
-                                                     displacements=displacements, return_geometries=True)
+                                                                disp_min=disp_min, disp_max=disp_max, steps=steps,
+                                                                order=1,
+                                                                mass_weight=mass_weight, use_internals=use_internals,
+                                                                displacements=displacements,
+                                                                ts_initial_coords=ts_initial_coords,
+                                                                rs_initial_coords=rs_initial_coords,
+                                                                return_geometries=True)
         else:
             d1, D1 = disp_min
             d2, D2 = disp_max
@@ -2601,6 +3044,8 @@ class ForceOptimizer:
                                                                         mass_weight=mass_weight,
                                                                         use_internals=use_internals,
                                                                         displacements=displacements,
+                                                                        ts_initial_coords=ts_initial_coords,
+                                                                        rs_initial_coords=rs_initial_coords,
                                                                         return_geometries=True)
             else:
                 x1 = None
@@ -2610,6 +3055,8 @@ class ForceOptimizer:
                                                                         mass_weight=mass_weight,
                                                                         use_internals=use_internals,
                                                                         displacements=displacements,
+                                                                        ts_initial_coords=ts_initial_coords,
+                                                                        rs_initial_coords=rs_initial_coords,
                                                                         return_geometries=True)
             else:
                 x2 = None
@@ -2785,9 +3232,9 @@ class ForceOptimizer:
                                  which=0,
                                  pressure_model='xhcff',
                                  pressure_options=None,
-                                 apply_constraints=False,
-                                 remove_orientation=False,
-                                 remove_transrot=False,
+                                 # apply_constraints=False,
+                                 # remove_orientation=False,
+                                 # remove_transrot=False,
                                  displacements=None,
                                  **etc
                                  ):

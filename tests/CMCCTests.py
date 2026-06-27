@@ -879,7 +879,6 @@ H	-2.758306   -1.763227    0.087370''',
         # utils.write_namedtuple('/Users/Mark/Desktop/methacrylate_fmrd_hydrostatic.npz', data)
         fmra.plot_lines().show()
 
-
     @unittest.skip
     def test_RigidForceOpts(self):
 
@@ -1039,7 +1038,7 @@ H	-3.015828   -1.433443    1.079180''',
         fmra.animate_ts_distortion().show()
         fmra.plot_lines(bonds=[(0, 16), (3, 15)]).show()
 
-
+    @unittest.skip
     def test_Sterics(self):
 
         import warnings
@@ -1221,6 +1220,9 @@ H	-3.015828   -1.433443    1.079180''',
             density=2,
             return_breakdowns=True
         )
+
+        return
+        # plotting handled better now
         pts_r = [np.concatenate(p) for p in s_r[0]]
         vals_r = [np.concatenate(v) for v in s_r[1]]
         pts_t = [np.concatenate(p) for p in s_t[0]]
@@ -1316,6 +1318,406 @@ H	-3.015828   -1.433443    1.079180''',
 
         return
 
+    def test_Predistortion(self):
+
+        import warnings
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+        from cmcc_reactions.optimal_directions import ForceOptimizer
+        from cmcc_reactions.reaction_data_analysis import ForceModifiedReactionAnalyzer
+        from Psience.Molecools import Molecule
+        from McUtils.Data import UnitsData
+        np.random.seed(12321)
+
+        ddd = pipeline.read_compressed_pipeline_data('/Users/Mark/Documents/Postdoc/Projects/CMCC/d2_int_partial.npz')
+        bhd = rda.BarrierHeightDataset.from_tree(ddd,
+                                                 annotation_generator=lambda id, data: {
+                                                                                           'smiles': data['smiles']
+                                                                                       } | rda.functionalization_keys(
+                                                     data['smiles'])
+                                                 )
+
+        samp = bhd[lambda d: d['delta'] < -1].sample(5)
+        opt = samp[0]
+        opo = opt.optimizer
+
+        # opo.rs.plot(
+        #     [
+        #         opo.rs.coords,
+        #         opo.ts.coords,
+        #     ],
+        #     annotation_function=lambda mol, i, geom: mol.plot(geom / UnitsData.bohr_to_angstroms,
+        #                                                       bonds=False,
+        #                                                       objects=True,
+        #                                                       return_objects=True,
+        #                                                       atom_radius_scaling=1,
+        #                                                       transparency=.8
+        #                                                       )[1][0]
+        # ).show()
+        # return
+
+        mag_res = opo.reoptimize_with_force(
+            0,
+            [50, 100, 200, 500],
+            displacements=opt.fmrds[0].force_vector[np.newaxis],
+            mass_weight=False,
+            use_internals=True,
+            predistort=True,
+            split_magnitudes=True,
+            # force_scan_steps=8,
+            reoptimize_reactants=True,
+            max_iterations=50
+        )
+
+        gomes_r = [opo.rs.coords] + [x for (_, _, f) in mag_res for x in [
+            f.predistorted_data.force_modified_reactant_geom,
+            f.force_modified_reactant_geom
+        ]]
+        gomes_t = [opo.ts.coords] + [x for (_, _, f) in mag_res for x in [
+            f.predistorted_data.force_modified_transition_state_geom,
+            f.force_modified_transition_state_geom
+        ]]
+
+        opo.rs.plot(gomes_r, atom_radius_scaling=1).show()
+        opo.ts.plot(gomes_t, atom_radius_scaling=1).show()
+
+
+        return
+
+        # utils.write_namedtuple('/Users/Mark/Desktop/samp.npz', wtf2)
+        #
+        # return
+
+        aaa = opo.animate_normed(
+            0,
+            displacements=opt.fmrds[0].force_vector[np.newaxis],
+            mass_weight=False,
+            use_internals=True,
+            backend='x3d',
+            glow='red',
+            atom_radius_scaling=1
+        )
+        bbb = opo.animate_normed(
+            0,
+            displacements=opt.fmrds[0].force_vector[np.newaxis],
+            mass_weight=False,
+            use_internals=True,
+            backend='x3d',
+            glow='blue',
+            mol='rs',
+            atom_radius_scaling=1
+        )
+
+        aaa.show()
+        bbb.show()
+
+        return
+
+        wtf2 = opo.reoptimize_with_force(
+            0,
+            500,
+            displacements=opt.fmrds[0].force_vector[np.newaxis],
+            mass_weight=False,
+            use_internals=True,
+            predistort=True,
+            # force_scan_steps=8,
+            reoptimize_reactants=True,
+            max_iterations=50
+        )[2]
+
+        print(
+            "RX:",
+            (
+                    wtf2.force_modified_reactant_energy
+                    - wtf2.reactant_energy
+            ) * UnitsData.convert("Hartrees", "Kilocalories/Mole")
+        )
+
+        print(
+            "TS:",
+            (
+                    wtf2.force_modified_transition_state_energy
+                    - wtf2.transition_state_energy
+            ) * UnitsData.convert("Hartrees", "Kilocalories/Mole")
+        )
+
+        pd = wtf2.predistorted_data
+        if isinstance(pd, list):
+            pd = pd[-1]
+        # pd0 = wtf2.predistorted_data[0]
+
+        print(
+            "INIT_TS:",
+            (
+                    wtf2.force_modified_transition_state_energy
+                    - pd.force_modified_transition_state_energy
+            ) * UnitsData.convert("Hartrees", "Kilocalories/Mole")
+        )
+
+        print(
+            "INIT_RS:",
+            (
+                    wtf2.force_modified_reactant_energy
+                    - pd.force_modified_reactant_energy
+            ) * UnitsData.convert("Hartrees", "Kilocalories/Mole")
+        )
+
+
+        if isinstance(wtf2.predistorted_data, list):
+            for i,ppd in enumerate(wtf2.predistorted_data):
+                print(
+                    f"TS_{i}:",
+                    (
+                            ppd.force_modified_transition_state_energy
+                            - wtf2.transition_state_energy
+                    ) * UnitsData.convert("Hartrees", "Kilocalories/Mole")
+                )
+
+        print(
+            "TS_Delta:",
+            (
+                    wtf2.force_modified_transition_state_energy
+                    - opt.product.energy
+            ) * UnitsData.convert("Hartrees", "Kilocalories/Mole")
+        )
+
+        print(
+            "TS_RS:",
+            (
+                    wtf2.force_modified_transition_state_energy
+                    - wtf2.force_modified_reactant_energy
+            ) * UnitsData.convert("Hartrees", "Kilocalories/Mole")
+        )
+
+        print(
+            "INIT_TS_RS:",
+            (
+                    wtf2.transition_state_energy
+                    - wtf2.reactant_energy
+            ) * UnitsData.convert("Hartrees", "Kilocalories/Mole")
+        )
+
+        # print(
+        #     (
+        #             wtf2.force_modified_transition_state_energy
+        #             - wtf2.predistorted_data.force_modified_transition_state_energy
+        #     ) * UnitsData.convert("Hartrees", "Kilocalories/Mole")
+        # )
+        opt.reactant.plot([
+            wtf2.force_modified_reactant_geom,
+            wtf2.reactant_geom
+        ],
+            # highlight_atoms=[0, 1, 2, 3],
+            glow='purple'
+        ).show()
+
+        opt.reactant.plot([
+            pd.force_modified_reactant_geom,
+            wtf2.reactant_geom
+        ],
+            # highlight_atoms=[0, 1, 2, 3],
+            glow='blue'
+        ).show()
+
+        opt.reactant.plot([
+            pd.force_modified_transition_state_geom,
+            wtf2.force_modified_transition_state_geom,
+        ],
+            # highlight_atoms=[0, 1, 2, 3],
+            glow='red'
+        ).show()
+
+        opt.reactant.plot([
+            pd.transition_state_geom,
+            pd.force_modified_transition_state_geom,
+        ],
+            glow='green'
+            # highlight_atoms=[0, 1, 2, 3]
+        ).show()
+
+        opt.reactant.plot([
+            wtf2.transition_state_geom,
+            wtf2.force_modified_transition_state_geom,
+        ],
+            # highlight_atoms=[0, 1, 2, 3],
+            # glow='red'
+        ).show()
+
+        return
+
+
+
+
+        ts = Molecule.from_string(
+            '''23
+
+C	-2.25046  -0.72777   0.38674
+C	-2.84525   0.27119  -0.40824
+C	-2.05528   1.43188  -0.34975
+C	-1.00007   1.21623   0.53068
+H	-3.68826   0.12095  -1.07529
+H	-2.18971   2.31405  -0.96724
+C	-1.31163  -0.01193   1.33697
+H	-1.89312   0.2926    2.22416
+H	-0.44662  -0.58299   1.67761
+H	 3.36458   0.84622   1.183
+C	 3.53875   0.60349   0.1304
+H	 4.13059   1.38582  -0.34751
+O	 2.30512   0.55523  -0.59458
+O	 1.64912  -1.11199   0.79362
+C	 1.41406  -0.37994  -0.15824
+C	 0.19176  -0.37027  -0.96198
+C	-0.73573  -1.41088  -0.8544
+H	 4.06087  -0.35627   0.07649
+H	 0.17385   0.31187  -1.80252
+H	-0.25144   1.95016   0.8072
+H	-0.46167  -2.25662  -0.22932
+H	-1.34765  -1.65825  -1.71479
+H	-2.76226  -1.64549   0.66279''',
+            units='Angstroms',
+            energy_evaluator='aimnet2'
+        )
+        rs = Molecule.from_string(
+            '''23
+
+C	-2.596883   -0.465922    0.826097
+C	-3.007938    0.362995   -0.157348
+C	-2.176283    1.573125   -0.150206
+C	-1.262554    1.479210    0.838924
+H	-3.822674    0.183416   -0.851937
+H	-2.294223    2.402121   -0.840972
+C	-1.440859    0.166969    1.555182
+H	-1.657069    0.307193    2.625854
+H	-0.530419   -0.449785    1.507801
+H	 3.184941    0.970467    1.093409
+C	 3.674170    0.595730    0.190227
+H	 4.313221    1.363308   -0.247407
+O	 2.702223    0.281677   -0.817778
+O	 1.754811   -1.178029    0.628884
+C	 1.777653   -0.640983   -0.463418
+C	 0.829399   -0.888538   -1.575622
+C	-0.113274   -1.828218   -1.473814
+H	 4.260314   -0.290616    0.448467
+H	 0.945444   -0.275067   -2.463748
+H	-0.507370    2.212516    1.098686
+H	-0.199381   -2.428540   -0.573233
+H	-0.817422   -2.019587   -2.277227
+H	-3.015828   -1.433443    1.079180''',
+            units='Angstroms',
+            energy_evaluator='aimnet2'
+        )
+
+        prod = Molecule.from_string('''23
+
+                    C	-2.130472   -0.872239    0.012830
+                    C	-2.837943    0.423768   -0.358236
+                    C	-2.036169    1.437416   -0.003026
+                    C	-0.785002    0.832289    0.615247
+                    H	-3.768536    0.486030   -0.914065
+                    H	-2.171380    2.494087   -0.211641
+                    C	-1.380485   -0.424799    1.289712
+                    H	-2.054779   -0.174685    2.114386
+                    H	-0.623578   -1.141357    1.624103
+                    H	 3.632781    0.252404    1.177904
+                    C	 3.620668    0.446425    0.101839
+                    H	 4.203134    1.337891   -0.133497
+                    O	 2.285694    0.727776   -0.347439
+                    O	 1.678608   -1.328818    0.357919
+                    C	 1.385915   -0.265794   -0.151448
+                    C	 0.003633    0.166438   -0.596488
+                    C	-0.924072   -1.025404   -0.977450
+                    H	 4.025934   -0.425731   -0.418228
+                    H	 0.120871    0.893828   -1.402633
+                    H	-0.171319    1.499026    1.225121
+                    H	-0.408315   -1.974347   -0.806154
+                    H	-1.237369   -0.984186   -2.024394
+                    H	-2.758306   -1.763227    0.087370''',
+                                    units='Angstroms',
+                                    energy_evaluator='aimnet2'
+                                    )
+
+        # prod = prod.optimize(mode='pysis', method='rfo', max_iterations=200, logger=True)
+        # prod_data = gen_prods.InitialProductData(
+        #     atoms=prod.atoms,
+        #     coords=prod.coords,
+        #     smiles=None,
+        #     bonds=None,
+        #     energy=prod.calculate_energy(),
+        #     breakpoints=None,
+        #     evaluator='aimnet2',
+        #     optimization_settings=None
+        # )
+        # utils.write_namedtuple('/Users/Mark/Desktop/methacrylate_prod.npz', prod_data)
+        #
+        # return
+        # rs.plot(display_atom_numbers=True).show()
+        # ts.plot(highlight_atoms=[0, 3, 15, 16]).show()
+
+        # rs = rs.optimize(mode='pysis', method='rfo', max_iterations=200)
+        rs.modify(coords=[[-5.17852785, -0.5702728, 1.88441103],
+                          [-5.54956468, 0.71849346, -0.2612763],
+                          [-3.41217425, 2.44967796, -0.65371732],
+                          [-1.75827867, 2.18121372, 1.2402138],
+                          [-7.12634655, 0.52129859, -1.54238332],
+                          [-3.21716378, 3.6987746, -2.2546904],
+                          [-2.76157906, 0.278203, 3.08535031],
+                          [-3.09024025, 1.1128944, 4.94702848],
+                          [-1.44325623, -1.28453075, 3.37485686],
+                          [5.60599726, 1.86448078, 2.28898434],
+                          [6.58723769, 1.38085643, 0.54733104],
+                          [7.66704781, 2.98256345, -0.13327283],
+                          [4.81254645, 0.7980625, -1.40377519],
+                          [3.37442623, -2.38242883, 1.01321266],
+                          [3.27302274, -1.16958319, -0.91036453],
+                          [1.44564317, -1.58108074, -2.99327646],
+                          [-0.43341279, -3.20964043, -2.72572653],
+                          [7.81949631, -0.22504678, 0.89926876],
+                          [1.65122534, -0.4470092, -4.67593706],
+                          [0.06109034, 3.09154467, 1.42019802],
+                          [-0.62957867, -4.28276737, -1.00259567],
+                          [-1.83502836, -3.45704542, -4.18710659],
+                          [-6.38909548, -2.00507506, 2.67724378]])
+        # ts = ts.optimize(mode='pysis', method='ts', max_iterations=100)
+        ts.modify(coords=[[-4.23705432, -1.28118781, 0.7729455],
+                          [-5.15557595, 0.63656345, -0.80710441],
+                          [-3.49571837, 2.69101028, -0.71292047],
+                          [-1.57424739, 2.1469359, 0.9659398],
+                          [-6.70869671, 0.42514645, -2.11988187],
+                          [-3.52244096, 4.28272382, -1.99019307],
+                          [-2.36994421, -0.05734278, 2.53149949],
+                          [-3.39636713, 0.62278688, 4.19032199],
+                          [-0.85797006, -1.29830522, 3.16420706],
+                          [5.88639691, 1.68459917, 2.38192],
+                          [6.33171981, 1.39937868, 0.39375325],
+                          [7.31961015, 3.02852809, -0.36245937],
+                          [4.07897804, 1.16920227, -1.0648456],
+                          [3.10557335, -2.20565703, 1.33176506],
+                          [2.55995036, -0.77733233, -0.37393262],
+                          [0.24684349, -0.84549836, -1.85578447],
+                          [-1.46639409, -2.7800723, -1.47819944],
+                          [7.48730166, -0.29322758, 0.21371082],
+                          [0.17742473, 0.35813596, -3.5035662],
+                          [-0.02313225, 3.37780772, 1.43591499],
+                          [-0.94401441, -4.23142231, -0.14070224],
+                          [-2.67619796, -3.37972009, -3.01072528],
+                          [-5.29351647, -2.94980018, 1.29627762]])
+
+        internals = rs.get_bond_zmatrix()
+        fopt = ForceOptimizer(rs, ts,
+                              internals=internals,
+                              fragment_indices=1,  # np.setdiff1d(rs.fragment_indices[1], (0, 16, 3, 15)),
+                              precompute_modes=False)
+
+        aaa = fopt.reoptimize_with_force(
+            mode=0,
+            predistort=True
+        )
+
+        print(
+            aaa.force_modified_transition_state_energy
+            - aaa.predistorted_data.force_modified_transition_state_energy
+        )
 
 if __name__ == '__main__':
     os.chdir(root)

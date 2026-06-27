@@ -29,6 +29,8 @@ def dictify_lists(tree:dict):
     for k,subtree in tree.items():
         if isinstance(subtree, dict):
             tree[k] = dictify_lists(subtree)
+        elif hasattr(subtree, '_asdict'):
+            tree[k] = dictify_lists(subtree.asdict())
         elif isinstance(subtree, (list, tuple)):
             if all(isinstance(d, dict) for d in subtree):
                 tree[k] = {

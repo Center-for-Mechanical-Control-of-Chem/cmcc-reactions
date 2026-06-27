@@ -508,6 +508,29 @@ class BarrierHeightDataset:
             res[ids] = subvals
         return res
 
+    def add_aggregation_fields(self, field_generator=None, input='optimizer', **opts):
+        if field_generator is not None:
+            subfields = [
+                field_generator(self.load_opt_res(i) if dev.str_is(input, 'optimizer') else self.get_tree_data(i))
+                for i in range(len(self))
+            ]
+            new_agg = {
+                f:[v]
+                for f,v in subfields[0].items()
+            }
+            for s in subfields[1:]:
+                for f,v in s.items():
+                    new_agg[f].append(v)
+            opts = opts | new_agg
+        return type(self)(
+            self.reactant_energies,
+            self.fm_reactant_energies,
+            self.transition_state_energies,
+            self.fm_transition_state_energies,
+            dataset=self.dataset,
+            **(self.meta_fields | opts)
+        )
+
     @classmethod
     def group_mask(cls, values, keys, filter, mode='any'):
         mask = np.full(len(keys), False if mode == 'any' else True)
@@ -578,10 +601,16 @@ class BarrierHeightDataset:
         else:
             return self.filter_by_props(item)
 
+    def sample(self, n):
+        if len(self) < n:
+            return self
+        else:
+            choice = np.random.choice(len(self), size=n, replace=False)
+            return self.filter_by_inds(choice)
+
     def aggregate_by_props(self, value_keys, aggregation_keys,
                            energy_units="Kilocalories/Mole",
-                           force_units="Picojoules/Meters"
-                           ):
+                           force_units="Picojoules/Meters"):
         filter_data = self.get_filter_data(
             energy_units=energy_units,
             force_units=force_units
@@ -874,7 +903,6 @@ def break_bonds(mol, bonds):
         bond_indices.append(mol.GetBondBetweenAtoms(i, j).GetIdx())
     broke_mol = Chem.FragmentOnBonds(mol, bond_indices, addDummies=False)
     for a in broke_mol.GetAtoms(): a.SetAtomMapNum(0)
-    Chem.AddHs(broke_mol, explicitOnly=True)
     frags = Chem.GetMolFrags(broke_mol)
     new_mols = {}
     inv_map = {i: n for n, i in no_map.items()}

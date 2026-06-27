@@ -92,8 +92,10 @@ OptimizedForcePipelineData = collections.namedtuple(
         'force_magnitudes',
         'force_units',
         'mass_weight',
-        'force_optimizer_settings'
-    ]
+        'force_optimizer_settings',
+        'predistortion_datasets'
+    ],
+    defaults=[None]
 )
 utils.register_namedtuple(OptimizedForcePipelineData,
                           defaults={
@@ -168,7 +170,8 @@ class OptimizedForceResults:
                 'force_modified_transition_state_geometries': 'force_modified_transition_state_geom',
                 'force_modified_transition_state_energies': 'force_modified_transition_state_energy',
                 'force_vectors': 'force_vector',
-                'force_magnitudes': 'force_magnitude'
+                'force_magnitudes': 'force_magnitude',
+                'predistortion_datasets': 'predistortion_data'
             }
         }
     }
@@ -362,7 +365,8 @@ class OptimizedForceResults:
                 self._optimizer = fopt.ForceOptimizer.from_data(
                     self.optimized_forces,
                     reactant=self.reactant,
-                    ts=self.transition_state
+                    ts=self.transition_state,
+                    reembed=False,
                 )
             return self._optimizer
 
