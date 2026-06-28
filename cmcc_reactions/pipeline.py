@@ -694,23 +694,26 @@ def run_force_optimization(trajectory,
 def run_fmrds(optimizer,
               nmodes=15,
               magnitude=(-200, -100, -50, 50, 100, 200),
+              split_magnitudes=True,
               pool=None,
               **opts):
     nmodes = min(optimizer.force_coeffs.shape[0], nmodes)
     return optimizer.reoptimize_with_force(
         list(range(nmodes)),
         magnitude=magnitude,
+        split_magnitudes=split_magnitudes,
         pool=pool,
         **opts
     )
 
 def run_internal_fmrds(optimizer,
                        internal_selector='dihedrals',
-                       magnitude=(-200, 200),
+                       magnitude=(-200, -100, -50, 50, 100, 200),
                        max_internals=10,
                        verbose=True,
                        pool=None,
                        memprof=None,
+                       split_magnitudes=True,
                        **opts):
     if memprof is not None:
         print(f"Writing memory profile to {memprof}")
@@ -728,6 +731,7 @@ def run_internal_fmrds(optimizer,
                 verbose=verbose,
                 pool=pool,
                 memprof=None,
+                split_magnitudes=split_magnitudes,
                 **opts
             )
     else:
@@ -737,6 +741,7 @@ def run_internal_fmrds(optimizer,
             pool=pool,
             max_internals=max_internals,
             verbose=verbose,
+            split_magnitudes=split_magnitudes,
             **opts
         )
 
@@ -745,12 +750,14 @@ def run_pressure_fmrds(optimizer,
                        magnitude=(200, 500, 1000, 5000, 10000),
                        verbose=True,
                        pool=None,
+                       split_magnitudes=True,
                        **opts):
     return optimizer.reoptimize_with_pressure(
         magnitude=magnitude,
         pool=pool,
         pressure_model=pressure_model,
         verbose=verbose,
+        split_magnitudes=split_magnitudes,
         **opts
     )
 
