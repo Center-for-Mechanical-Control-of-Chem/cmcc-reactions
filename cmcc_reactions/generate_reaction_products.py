@@ -264,11 +264,14 @@ def fragment_to_smiles_iterator(
         fragments,
         active_sites,
         chiralities=None,
+        filter=None,
         add_implicit_hydrogens='full'
 ):
     cache = {}
     nsites = len(active_sites)
     for frags in itertools.combinations_with_replacement(fragments, nsites):
+        if filter is not None and not filter(template, active_sites, frags):
+            continue
         temp = template
         for site,frag in zip(active_sites, frags):
             try:
@@ -451,6 +454,7 @@ def _generate_products_and_optimize(smiles_iterator,
                                     info_file='product.json',
                                     rmsd_cutoff=.025,
                                     preopt_iterations=50,
+                                    filter=None,
                                     verbose=False,
                                     callback=None
                                     ):
@@ -461,6 +465,7 @@ def _generate_products_and_optimize(smiles_iterator,
     if conf_gen_options is None:
         conf_gen_options = {}
     for smiles_index,smiles in smiles_iterator:
+        u_smiles = None
         if take_unique:
             u_smiles = Chem.CanonSmiles(smiles)
             if u_smiles in smiles_cache: continue
@@ -481,6 +486,17 @@ def _generate_products_and_optimize(smiles_iterator,
                 smiles_label = None
         else:
             smiles_label = None
+
+        if filter is not None:
+            if u_smiles is None:
+                u_smiles = Chem.CanonSmiles(smiles)
+            if smiles_label is None:
+                if smiles_hash_generator is not None:
+                    smiles_label = smiles_hash_generator(u_smiles)
+                else:
+                    smiles_label = str(smiles_index)
+            if not filter(u_smiles, smiles_label, smiles_index):
+                continue
 
         if verbose:
             if smiles_label is None:
@@ -609,6 +625,7 @@ def generate_products_and_optimize_from_iterator(
         parallelizer=None,
         batch_size=50,
         verbose=False,
+        filter=None,
         callback=None
 ):
     base_iterator = enumerate(base_iterator)
@@ -629,6 +646,7 @@ def generate_products_and_optimize_from_iterator(
             output_dir=output_dir,
             info_file=info_file,
             verbose=verbose,
+            filter=filter,
             callback=callback
         )
     else:
@@ -657,6 +675,7 @@ def generate_products_and_optimize_from_iterator(
                     output_dir=output_dir,
                     info_file=info_file,
                     verbose=verbose,
+                    filter=filter,
                     callback=callback
                 ),
                 batches
@@ -701,11 +720,14 @@ def generate_products_and_optimize(
         chiralities=None,
         output_dir=None,
         max_products=None,
+        substitution_filter=None,
+        filter=None,
         **opt_args
 ):
     base_iterator = fragment_to_smiles_iterator(
         template, fragments, active_sites,
-        chiralities=chiralities
+        chiralities=chiralities,
+        filter=substitution_filter
     )
     if output_dir is not None:
         os.makedirs(output_dir, exist_ok=True)
@@ -723,6 +745,7 @@ def generate_products_and_optimize(
     return generate_products_and_optimize_from_iterator(
         base_iterator,
         output_dir=output_dir,
+        filter=filter,
         **opt_args
     )
 
