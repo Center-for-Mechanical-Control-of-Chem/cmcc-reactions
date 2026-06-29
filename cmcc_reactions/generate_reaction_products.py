@@ -452,6 +452,7 @@ def _generate_products_and_optimize(smiles_iterator,
                                     optimizer_settings,
                                     smiles_hash_generator,
                                     output_dir,
+                                    sentinel_file='conformer_info.json',
                                     info_file='product.json',
                                     rmsd_cutoff=.025,
                                     preopt_iterations=50,
@@ -486,13 +487,13 @@ def _generate_products_and_optimize(smiles_iterator,
 
                 target_dir = None
                 if update_dir is not None:
-                    if os.path.isfile(os.path.join(update_dir, smiles_label, 'conformer_info.json')):
+                    if os.path.isfile(os.path.join(update_dir, smiles_label, sentinel_file)):
                         target_dir = update_dir
-                    elif os.path.isfile(os.path.join(output_dir, smiles_label, 'conformer_info.json')):
+                    elif os.path.isfile(os.path.join(output_dir, smiles_label, sentinel_file)):
                         os.makedirs(os.path.join(update_dir, smiles_label), exist_ok=True)
                         shutil.copy(
-                            os.path.join(output_dir, smiles_label, 'conformer_info.json'),
-                            os.path.join(update_dir, smiles_label, 'conformer_info.json')
+                            os.path.join(output_dir, smiles_label, sentinel_file),
+                            os.path.join(update_dir, smiles_label, sentinel_file)
                         )
                         for f in glob.glob(os.path.join(output_dir, smiles_label, '*', info_file)):
                             root = os.path.dirname(f)
@@ -501,7 +502,7 @@ def _generate_products_and_optimize(smiles_iterator,
                                 root,
                                 os.path.join(update_dir, smiles_label, id)
                             )
-                elif os.path.isfile(os.path.join(output_dir, smiles_label, 'conformer_info.json')):
+                elif os.path.isfile(os.path.join(output_dir, smiles_label, sentinel_file)):
                     target_dir = output_dir
 
                 if target_dir is not None:
@@ -597,7 +598,7 @@ def _generate_products_and_optimize(smiles_iterator,
                 if update_dir is not None:
                     src_file = os.path.join(output_dir, smiles_label, str(i), info_file)
                     target_file = os.path.join(update_dir, smiles_label, str(i), info_file)
-                    os.makedirs(os.path.dirname(os.path.join(update_dir, smiles_label, str(i))), exist_ok=True)
+                    os.makedirs(os.path.join(update_dir, smiles_label, str(i)), exist_ok=True)
                     shutil.copyfile(src_file, target_file)
                 else:
                     target_file = os.path.join(output_dir, smiles_label, str(i), info_file)
@@ -626,13 +627,22 @@ def _generate_products_and_optimize(smiles_iterator,
             if hasattr(top_indices, 'tolist'):
                 top_indices = top_indices.tolist()
             dev.write_json(
-                os.path.join(output_dir, smiles_label, 'conformer_info.json'),
+                os.path.join(output_dir, smiles_label, sentinel_file),
                 {
                     'smiles': smiles,
                     'conf_ids': top_indices,
                     'energies': engs
                 }
             )
+            if update_dir is not None:
+                dev.write_json(
+                    os.path.join(update_dir, smiles_label, sentinel_file),
+                    {
+                        'smiles': smiles,
+                        'conf_ids': top_indices,
+                        'energies': engs
+                    }
+                )
 
     return final_structures, products
 
