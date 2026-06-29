@@ -6,6 +6,7 @@ import traceback
 import scipy.sparse
 import collections
 import glob
+import shutil
 
 from McUtils.ExternalPrograms import RDMolecule
 import McUtils.Devutils as dev
@@ -454,10 +455,17 @@ def _generate_products_and_optimize(smiles_iterator,
                                     info_file='product.json',
                                     rmsd_cutoff=.025,
                                     preopt_iterations=50,
+                                    update_dir=None,
                                     filter=None,
                                     verbose=False,
                                     callback=None
                                     ):
+    if update_dir is not None:
+        if output_dir is None:
+            output_dir = update_dir
+            update_dir = None
+        elif update_dir == output_dir:
+            update_dir = None
     final_structures = []
     products = []
 
@@ -475,10 +483,24 @@ def _generate_products_and_optimize(smiles_iterator,
                     smiles_label = smiles_hash_generator(u_smiles)
                 else:
                     smiles_label = str(smiles_index)
-                if os.path.isfile(os.path.join(output_dir, smiles_label, 'conformer_info.json')):
+
+                target_dir = None
+                if update_dir is not None:
+                    if os.path.isfile(os.path.join(update_dir, smiles_label, 'conformer_info.json')):
+                        target_dir = update_dir
+                    elif os.path.isfile(os.path.join(output_dir, smiles_label, 'conformer_info.json')):
+                        os.makedirs(os.path.join(update_dir, smiles_label), exist_ok=True)
+                        shutil.copy(
+                            os.path.join(output_dir, smiles_label, 'conformer_info.json'),
+                            os.path.join(update_dir, smiles_label, 'conformer_info.json')
+                        )
+                elif os.path.isfile(os.path.join(output_dir, smiles_label, 'conformer_info.json')):
+                    target_dir = output_dir
+
+                if target_dir is not None:
                     print("Pre-Optimized SMILES: ", smiles, f"({smiles_label})")
                     if callback is not None:
-                        for f in glob.glob(os.path.join(output_dir, smiles_label, '*', info_file)):
+                        for f in glob.glob(os.path.join(target_dir, smiles_label, '*', info_file)):
                             product_data = utils.read_namedtuple(f)
                             callback(product_data, f)
                     continue
@@ -565,8 +587,15 @@ def _generate_products_and_optimize(smiles_iterator,
                     energy_evaluator=energy_evaluator,
                     info_file=info_file
                 )
+                if update_dir is not None:
+                    src_file = os.path.join(output_dir, smiles_label, str(i), info_file)
+                    target_file = os.path.join(update_dir, smiles_label, str(i), info_file)
+                    os.makedirs(os.path.dirname(os.path.join(update_dir, smiles_label, str(i))), exist_ok=True)
+                    shutil.copyfile(src_file, target_file)
+                else:
+                    target_file = os.path.join(output_dir, smiles_label, str(i), info_file)
                 if callback is not None:
-                    callback(product_data, os.path.join(output_dir, smiles_label, str(i), info_file))
+                    callback(product_data, target_file)
             else:
                 product_data = create_product_data(
                     struct, diene_inds,
@@ -622,6 +651,7 @@ def generate_products_and_optimize_from_iterator(
         smiles_hash_generator='inchi',
         info_file='product.json',
         output_dir=None,
+        update_dir=None,
         parallelizer=None,
         batch_size=50,
         verbose=False,
@@ -644,6 +674,7 @@ def generate_products_and_optimize_from_iterator(
             optimizer_settings=optimizer_settings,
             smiles_hash_generator=smiles_hash_generator,
             output_dir=output_dir,
+            update_dir=update_dir,
             info_file=info_file,
             verbose=verbose,
             filter=filter,
@@ -673,6 +704,7 @@ def generate_products_and_optimize_from_iterator(
                     optimizer_settings=optimizer_settings,
                     smiles_hash_generator=smiles_hash_generator,
                     output_dir=output_dir,
+                    update_dir=update_dir,
                     info_file=info_file,
                     verbose=verbose,
                     filter=filter,
@@ -719,6 +751,7 @@ def generate_products_and_optimize(
         active_sites,
         chiralities=None,
         output_dir=None,
+        update_dir=None,
         max_products=None,
         substitution_filter=None,
         filter=None,
@@ -745,6 +778,7 @@ def generate_products_and_optimize(
     return generate_products_and_optimize_from_iterator(
         base_iterator,
         output_dir=output_dir,
+        update_dir=update_dir,
         filter=filter,
         **opt_args
     )

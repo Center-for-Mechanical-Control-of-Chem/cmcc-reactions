@@ -761,6 +761,26 @@ def run_pressure_fmrds(optimizer,
         **opts
     )
 
+default_step_ordering = {
+    'products': 0,
+    'trajectory': 1,
+    'update_trajectory':1,
+    'refine':1,
+    'optimized_forces': 2,
+    'fmrds': 3,
+    'rigid-fmrds':3,
+    'internals':3,
+    'rigid-internals':3,
+    'pressure':3,
+    'rigid-pressure':3
+}
+def _check_step(force_steps, key, current):
+    if dev.is_dict_like(force_steps):
+        return force_steps.get(key, False)
+    elif force_steps:
+        return True
+    elif current is None:
+        return True
 def run_optimization_pipeline(
         input_data: str | gen_prods.InitialProductData | OptimizedForceResults | OptimizedForcePipelineData,
         output_file=None,
@@ -812,6 +832,15 @@ def run_optimization_pipeline(
                     if input_data.product is None:
                         raise ValueError("product structure needed at minimum to run pipeline")
         steps = tuple(reversed(steps))
+    elif isinstance(steps, str):
+        steps = [steps]
+
+    # steps = sorted(steps, key=lambda s: default_step_ordering[s])
+    # if 'auto' in steps:
+    #     i = steps.index('auto')
+    #     prev = steps[:i]
+    #     max_key = default_step_ordering[prev[0]]
+
 
     product:gen_prods.InitialProductData = input_data.product
     if product is None:
@@ -827,7 +856,7 @@ def run_optimization_pipeline(
     try:
         if (
                 'trajectory' in steps
-                and (force_steps or input_data.trajectory is None)
+                and _check_step(force_steps, 'trajectory', input_data.trajectory)
         ):
             if trajectory_optimization_settings is None:
                 trajectory_optimization_settings = {}
@@ -839,7 +868,7 @@ def run_optimization_pipeline(
             if output_file is not None:
                 input_data.save(output_file)
 
-        if 'update_trajectory' in steps:
+        if 'update_trajectory' in steps and _check_step(force_steps, 'update_trajectory', None):
             if update_trajectory_settings is None:
                 update_trajectory_settings = {}
             # update_trajectory_settings = global_options | update_trajectory_settings
@@ -850,7 +879,7 @@ def run_optimization_pipeline(
             if output_file is not None:
                 input_data.save(output_file)
 
-        if 'refine' in steps:
+        if 'refine' in steps and _check_step(force_steps, 'refine', None):
             if refined_trajectory_optimization_settings is None:
                 refined_trajectory_optimization_settings = {}
             refined_trajectory_optimization_settings = global_options | refined_trajectory_optimization_settings
@@ -866,7 +895,7 @@ def run_optimization_pipeline(
         optimizer = None
         if (
                 'optimized_forces' in steps
-                and (force_steps or input_data.optimizer is None)
+                and _check_step(force_steps, 'optimized_forces', input_data.optimizer)
         ):
             if verbose:
                 print('running optimized forces')
@@ -886,7 +915,7 @@ def run_optimization_pipeline(
 
         if (
                 'fmrds' in steps
-                and (force_steps or input_data.fmrds is None)
+                and _check_step(force_steps, 'fmrds', input_data.fmrds)
         ):
             if optimizer is None:
                 opt_force = input_data.optimized_forces
@@ -908,7 +937,7 @@ def run_optimization_pipeline(
                 input_data.save(output_file)
 
 
-        if 'rigid-fmrds' in steps:
+        if 'rigid-fmrds' in steps and _check_step(force_steps, 'rigid-fmrds', None):
             if optimizer is None:
                 opt_force = input_data.optimized_forces
                 if opt_force is None:
@@ -928,7 +957,7 @@ def run_optimization_pipeline(
                 print(f"saving to {output_file}...")
                 input_data.save(output_file)
 
-        if 'internals' in steps:
+        if 'internals' in steps and _check_step(force_steps, 'internals', None):
             if optimizer is None:
                 opt_force = input_data.optimized_forces
                 if opt_force is None:
@@ -953,7 +982,7 @@ def run_optimization_pipeline(
                 print(f"saving to {output_file}...")
                 input_data.save(output_file)
 
-        if 'rigid-internals' in steps:
+        if 'rigid-internals' in steps and _check_step(force_steps, 'rigid-internals', None):
             if optimizer is None:
                 opt_force = input_data.optimized_forces
                 if opt_force is None:
@@ -980,7 +1009,7 @@ def run_optimization_pipeline(
                 print(f"saving to {output_file}...")
                 input_data.save(output_file)
 
-        if 'pressure' in steps:
+        if 'pressure' in steps and _check_step(force_steps, 'pressure', None):
             if optimizer is None:
                 opt_force = input_data.optimized_forces
                 if opt_force is None:
@@ -1005,7 +1034,7 @@ def run_optimization_pipeline(
                 print(f"saving to {output_file}...")
                 input_data.save(output_file)
 
-        if 'rigid-pressure' in steps:
+        if 'rigid-pressure' in steps and _check_step(force_steps, 'rigid-pressure', None):
             if optimizer is None:
                 opt_force = input_data.optimized_forces
                 if opt_force is None:
@@ -1041,7 +1070,9 @@ def run_optimization_pipeline(
         }
     if step_output_files is not None:
         for of, steps in step_output_files.items():
-            if not force_steps and os.path.isfile(of): continue
+            if not (
+                    _check_step(force_steps, steps[-1], True if os.path.isfile(of) else None)
+            ): continue
             run_optimization_pipeline(
                 input_data,
                 output_file=of,
@@ -1141,6 +1172,7 @@ def generate_from_product_library(
         active_sites=None,
         chiralities=None,
         output_dir=None,
+        update_dir=None,
         conf_gen_options=None,
         take_unique=True,
         num_structs=10,
@@ -1191,6 +1223,7 @@ def generate_from_product_library(
             active_sites,
             chiralities=chiralities,
             output_dir=output_dir,
+            update_dir=update_dir,
             conf_gen_options=conf_gen_options,
             take_unique=take_unique,
             num_structs=num_structs,
@@ -1206,8 +1239,10 @@ def generate_from_product_library(
             max_products=max_products,
             callback=None
         )
+        if update_dir is None:
+            update_dir = output_dir
         generate_from_directory(
-            output_dir,
+            update_dir,
             energy_evaluator=energy_evaluator,
             verbose=verbose,
             input_file=input_file,
@@ -1230,6 +1265,7 @@ def generate_from_product_library(
             active_sites,
             chiralities=chiralities,
             output_dir=output_dir,
+            update_dir=update_dir,
             conf_gen_options=conf_gen_options,
             take_unique=take_unique,
             num_structs=num_structs,
