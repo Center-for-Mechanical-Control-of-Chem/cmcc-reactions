@@ -680,6 +680,7 @@ def generate_products_and_optimize_from_iterator(
         batch_size=50,
         verbose=False,
         filter=None,
+        smiles_cache=None,
         callback=None
 ):
     base_iterator = enumerate(base_iterator)
@@ -702,7 +703,8 @@ def generate_products_and_optimize_from_iterator(
             info_file=info_file,
             verbose=verbose,
             filter=filter,
-            callback=callback
+            callback=callback,
+            smiles_cache=smiles_cache
         )
     else:
         if parallelizer is True:
@@ -732,7 +734,8 @@ def generate_products_and_optimize_from_iterator(
                     info_file=info_file,
                     verbose=verbose,
                     filter=filter,
-                    callback=callback
+                    callback=callback,
+                    smiles_cache=smiles_cache
                 ),
                 batches
             ):
@@ -779,6 +782,7 @@ def generate_products_and_optimize(
         max_products=None,
         substitution_filter=None,
         filter=None,
+        smiles_cache=None,
         **opt_args
 ):
     base_iterator = fragment_to_smiles_iterator(
@@ -804,6 +808,7 @@ def generate_products_and_optimize(
         output_dir=output_dir,
         update_dir=update_dir,
         filter=filter,
+        smiles_cache=smiles_cache,
         **opt_args
     )
 
