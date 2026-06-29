@@ -560,6 +560,14 @@ class OptimizedForceResults:
             self._tf = self.trajectory_analyzer(which='final')
         return self._tf
 
+
+    @property
+    def reactant(self):
+        r = self.refined_trajectory.reactant
+        if r.potential_derivatives is None and self.optimized_forces is not None:
+            r.potential_derivatives = [0, np.asanyarray(self.optimized_forces.reactant_hessian)]
+        return r
+
     @property
     def reactant(self):
         r = self.refined_trajectory.reactant
@@ -630,7 +638,7 @@ def run_refined_trajectory(traj, output_dir=None, **opts):
 def run_update_trajectory(traj, **opts):
     return rda.update_trajectory_data(traj, **opts)
 
-def run_force_optimization(trajectory,
+def prep_force_optimizer(trajectory,
                            internals='auto',
                            breakpoints=((0, 2), (1, 3)),
                            fragment_indices=1,
@@ -641,7 +649,8 @@ def run_force_optimization(trajectory,
                            allow_mode_mixing=True,
                            which='final',
                            **opts):
-    trajectory = rda.DielsAlderReactionTrajectory.from_trajectory_data(trajectory, which=which)
+    if not hasattr(trajectory, 'reactant'):
+        trajectory = rda.DielsAlderReactionTrajectory.from_trajectory_data(trajectory, which=which)
     ref = trajectory.reactant
     if dev.str_is(internals, 'auto'):
         if breakpoints is not None:
@@ -688,6 +697,33 @@ def run_force_optimization(trajectory,
                               internals=internals,
                               **opts
                               )
+
+    return opt
+
+def run_force_optimization(trajectory,
+                           internals='auto',
+                           breakpoints=((0, 2), (1, 3)),
+                           fragment_indices=1,
+                           fix_breakpoint_atoms=True,
+                           projection_internals='auto',
+                           remove_fragment_transrot=True,
+                           remove_local_transrot=True,
+                           allow_mode_mixing=True,
+                           which='final',
+                           **opts):
+    opt = prep_force_optimizer(
+        trajectory,
+        internals=internals,
+        breakpoints=breakpoints,
+        fragment_indices=fragment_indices,
+        fix_breakpoint_atoms=fix_breakpoint_atoms,
+        projection_internals=projection_internals,
+        remove_fragment_transrot=remove_fragment_transrot,
+        remove_local_transrot=remove_local_transrot,
+        allow_mode_mixing=allow_mode_mixing,
+        which=which,
+        **opts
+    )
     opt.optimize()
     return opt
 
@@ -1538,32 +1574,3 @@ def read_compressed_pipeline_data(pipeline_file, mode=None, decompression_functi
         decompression_function = utils.decompress_namedtuple_data
     base_data = utils.read_tree(pipeline_file, decompression_function=decompression_function)
     return _unwrap_nts(base_data, decompression_function, unwrap)
-
-# def submit_if_not_found(glob_pattern, target_file,
-#                         overwrite=False,
-#                         submission_function=run_python_script):
-#     import sys, os
-#     import subprocess
-#     import glob
-#     import shlex
-#
-#     target = sys.argv[1]
-#     prods = glob.glob(f"{target}/*/*/optimized_forces.json")
-#     overwrite = False
-#     overwrite = (
-#         (
-#             True
-#             if sys.argv[2].lower() == 'true' else
-#             False
-#             if sys.argv[2].lower() == 'false' else
-#             overwrite
-#         ) if len(sys.argv) > 2 else
-#         overwrite
-#     )
-#     for pfile in prods:
-#         pdir = os.path.dirname(pfile)
-#         if overwrite or not os.path.isfile(os.path.join(pdir, 'force_modified_0.json')):
-#             print(f"Submitting: {pfile}")
-#             subprocess.call(
-#                 shlex.split(f"sbatch --job-name=run_full_force_optimize run_python.sh '{pfile}' {overwrite}"))
-#             # raise Exception(pfile)

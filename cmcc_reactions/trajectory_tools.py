@@ -792,7 +792,14 @@ class DielsAlderReactionTrajectory:
                 self.atoms,
                 struct,
                 energy_evaluator=self.energy_evaluator,
-                spin=1
+                spin=1,
+                potential_derivatives=(
+                    [self._gradients[i] if self._gradients is not None else 0, self._hessians[i]]
+                        if self._hessians is not None else
+                    [self._gradients[i]]
+                        if self._gradients is not None else
+                    None
+                )
             )
         return self._mols[i]
 

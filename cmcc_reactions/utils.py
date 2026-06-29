@@ -508,3 +508,15 @@ def annotate_json_file_tree(top_dir, js_patterns, get_annotations=None, recursiv
             dev_tree.update(**get_annotations(f))
         dev.write_json(f, dev_tree)
     return tree
+
+def uncompress_file_tree(target_dir, tree, writer=None, sentinel='_type', prefix=None):
+    if prefix is None: prefix = ()
+    if writer is None:
+        writer = lambda file, data: write_json(file, data) if isinstance(data, dict) else write_namedtuple(file, data)
+    for k, v in tree.items():
+        if hasattr(v, '_asdict') or sentinel in v:
+            path = os.path.join(target_dir, *prefix, k)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            writer(path, v)
+        else:
+            uncompress_file_tree(target_dir, v, writer=writer, sentinel=sentinel, prefix=prefix + (k,))

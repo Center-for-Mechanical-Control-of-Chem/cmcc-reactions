@@ -386,6 +386,8 @@ def prep_optimization_modes(reactant, transition_state,
         new_modes_ts = new_modes_ts.localize(projections=[proj], allow_mode_mixing=allow_mode_mixing)
 
     if internals is not None:
+        if len(internals) == 0:
+            raise ValueError("no internals supplied")
         if isinstance(internals, dict):
             internals = internals['specs']
         elif all(len(internals) == 4 for internals in internals):
@@ -906,8 +908,8 @@ class ForceOptimizer:
         self.use_mode_space = use_mode_space
         if projection_internals is None:
             projection_internals = internals
-        if dev.str_is(projection_internals, 'auto'):
-            projection_internals = self.prep_projection_internals(internals)
+        # if dev.str_is(projection_internals, 'auto'):
+        #     projection_internals = self.prep_projection_internals(internals)
         if projection_internals is not None:
             determination_opts = determination_opts | dict(internals=projection_internals)
         self.opts = self.default_options | determination_opts
