@@ -434,6 +434,16 @@ def get_rmsd_pruned_structs(structs, rmsd_cutoff=.1):
     struct_inds = np.sort(_get_rmsd_groups(rmsds, np.arange(len(structs)), rmsd_cutoff))
     return [structs[i] for i in struct_inds]
 
+def canonical_smiles(smi, isomericSmiles=True, ignoreAtomMapNumbers=True, canonical=True, **etc):
+    mol = Chem.MolFromSmiles(smi)
+    if ignoreAtomMapNumbers:
+        for a in mol.GetAtoms():
+            a.SetAtomMapNum(0)
+    return Chem.MolToSmiles(mol,
+                            isomericSmiles=isomericSmiles,
+                            ignoreAtomMapNumbers=ignoreAtomMapNumbers,
+                            canonical=canonical,
+                            **etc)
 def smiles_hash(canonical_smiles):
     return hashlib.md5(canonical_smiles.encode()).hexdigest()
 conf_gen_defaults = dict(
@@ -478,7 +488,7 @@ def _generate_products_and_optimize(smiles_iterator,
     for smiles_index,smiles in smiles_iterator:
         u_smiles = None
         if take_unique:
-            u_smiles = Chem.CanonSmiles(smiles)
+            u_smiles = canonical_smiles(smiles)
             if u_smiles in smiles_cache: continue
             smiles_cache.add(u_smiles)
             if output_dir is not None:
@@ -523,7 +533,7 @@ def _generate_products_and_optimize(smiles_iterator,
 
         if filter is not None:
             if u_smiles is None:
-                u_smiles = Chem.CanonSmiles(smiles)
+                u_smiles = canonical_smiles(smiles)
             if smiles_label is None:
                 if smiles_hash_generator is not None:
                     smiles_label = smiles_hash_generator(u_smiles)
@@ -534,7 +544,7 @@ def _generate_products_and_optimize(smiles_iterator,
 
         if verbose:
             if smiles_label is None:
-                u_smiles = Chem.CanonSmiles(smiles)
+                u_smiles = canonical_smiles(smiles)
                 if smiles_hash_generator is not None:
                     smiles_label = smiles_hash_generator(u_smiles)
                 else:
@@ -591,7 +601,7 @@ def _generate_products_and_optimize(smiles_iterator,
                 struct = struct.optimize(**optimizer_settings)
             if output_dir is not None:
                 if smiles_hash_generator is not None:
-                    smiles_label = smiles_hash_generator(Chem.CanonSmiles(smiles))
+                    smiles_label = smiles_hash_generator(canonical_smiles(smiles))
                 else:
                     smiles_label = str(smiles_index)
                 product_data = write_product_structure(
@@ -626,7 +636,7 @@ def _generate_products_and_optimize(smiles_iterator,
 
         if output_dir is not None:
             if smiles_hash_generator is not None:
-                smiles_label = smiles_hash_generator(Chem.CanonSmiles(smiles))
+                smiles_label = smiles_hash_generator(canonical_smiles(smiles))
             else:
                 smiles_label = str(smiles_index)
             if hasattr(engs, 'tolist'):
