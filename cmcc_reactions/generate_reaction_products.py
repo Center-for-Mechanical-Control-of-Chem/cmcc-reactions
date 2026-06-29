@@ -491,17 +491,19 @@ def _generate_products_and_optimize(smiles_iterator,
                         target_dir = update_dir
                     elif os.path.isfile(os.path.join(output_dir, smiles_label, sentinel_file)):
                         os.makedirs(os.path.join(update_dir, smiles_label), exist_ok=True)
-                        shutil.copy(
-                            os.path.join(output_dir, smiles_label, sentinel_file),
-                            os.path.join(update_dir, smiles_label, sentinel_file)
-                        )
+                        if not os.path.exists(os.path.join(update_dir, smiles_label, sentinel_file)):
+                            shutil.copy(
+                                os.path.join(output_dir, smiles_label, sentinel_file),
+                                os.path.join(update_dir, smiles_label, sentinel_file)
+                            )
                         for f in glob.glob(os.path.join(output_dir, smiles_label, '*', info_file)):
                             root = os.path.dirname(f)
                             id = os.path.basename(root)
-                            shutil.copytree(
-                                root,
-                                os.path.join(update_dir, smiles_label, id)
-                            )
+                            targ = os.path.join(update_dir, smiles_label, id)
+                            for subf in glob.glob(os.path.join(root, '*.json')):
+                                subp = os.path.basename(subf)
+                                if not os.path.isfile(os.path.join(targ, subp)):
+                                    shutil.copy(subf, os.path.join(targ, subp))
                 elif os.path.isfile(os.path.join(output_dir, smiles_label, sentinel_file)):
                     target_dir = output_dir
 
