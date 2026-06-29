@@ -639,16 +639,16 @@ def run_update_trajectory(traj, **opts):
     return rda.update_trajectory_data(traj, **opts)
 
 def prep_force_optimizer(trajectory,
-                           internals='auto',
-                           breakpoints=((0, 2), (1, 3)),
-                           fragment_indices=1,
-                           fix_breakpoint_atoms=True,
-                           projection_internals='auto',
-                           remove_fragment_transrot=True,
-                           remove_local_transrot=True,
-                           allow_mode_mixing=True,
-                           which='final',
-                           **opts):
+                         internals='auto',
+                         breakpoints=((0, 2), (1, 3)),
+                         fragment_indices=1,
+                         fix_breakpoint_atoms=True,
+                         projection_internals='auto',
+                         remove_fragment_transrot=True,
+                         remove_local_transrot=True,
+                         allow_mode_mixing=True,
+                         which='final',
+                         **opts):
     if not hasattr(trajectory, 'reactant'):
         trajectory = rda.DielsAlderReactionTrajectory.from_trajectory_data(trajectory, which=which)
     ref = trajectory.reactant

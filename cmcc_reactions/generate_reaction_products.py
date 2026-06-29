@@ -545,12 +545,15 @@ def _generate_products_and_optimize(smiles_iterator,
         if hasattr(calc, 'process_output'):
             calc = {'method':'aimnet2', 'model':calc}
 
-        structs:list[Molecule] = Molecule.from_string(smiles, 'smi',
-                                                      num_confs=actual_num_confs,
-                                                      energy_evaluator=calc,
-                                                      conf_gen_options=conf_gen_options,
-                                                      spin=1
-                                                      )
+        try:
+            structs:list[Molecule] = Molecule.from_string(smiles, 'smi',
+                                                          num_confs=actual_num_confs,
+                                                          energy_evaluator=calc,
+                                                          conf_gen_options=conf_gen_options,
+                                                          spin=1
+                                                          )
+        except ValueError:
+            continue
         ref = structs[0].get_embedded_molecule()
         structs = [s.get_embedded_molecule(ref=ref) for s in structs]
         if rmsd_cutoff is not None:
