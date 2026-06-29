@@ -171,7 +171,7 @@ class OptimizedForceResults:
                 'force_modified_transition_state_energies': 'force_modified_transition_state_energy',
                 'force_vectors': 'force_vector',
                 'force_magnitudes': 'force_magnitude',
-                'predistortion_datasets': 'predistortion_data'
+                'predistortion_datasets': 'predistorted_data'
             }
         }
     }
