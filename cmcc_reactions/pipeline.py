@@ -1234,6 +1234,7 @@ def generate_from_product_library(
         sbatch_kwargs=None,
         submit=True,
         run_from_directory=False,
+        smiles_cache=None,
         **global_options
 ):
     callback = generator_callback(
@@ -1273,6 +1274,7 @@ def generate_from_product_library(
             batch_size=batch_size,
             verbose=verbose,
             max_products=max_products,
+            smiles_cache=smiles_cache,
             callback=None
         )
         if update_dir is None:
@@ -1315,6 +1317,7 @@ def generate_from_product_library(
             batch_size=batch_size,
             verbose=verbose,
             max_products=max_products,
+            smiles_cache=smiles_cache,
             callback=callback
         )
 
@@ -1390,12 +1393,16 @@ def generate_from_product_library_set(
         sbatch_kwargs=None,
         submit=True,
         run_from_directory=False,
+        smiles_cache=None,
         **global_options
 ):
     all_temps = []
     all_frags = []
     all_active_sites = []
     all_chiralities = []
+
+    if smiles_cache is None:
+        smiles_cache = set()
 
     for d in template_data:
         all_temps.append(d['template'])
@@ -1434,6 +1441,7 @@ def generate_from_product_library_set(
             sbatch_kwargs=sbatch_kwargs,
             submit=submit,
             run_from_directory=run_from_directory,
+            smiles_cache=smiles_cache,
             **global_options
         )
 

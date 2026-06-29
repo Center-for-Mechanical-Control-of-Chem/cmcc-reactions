@@ -459,6 +459,7 @@ def _generate_products_and_optimize(smiles_iterator,
                                     update_dir=None,
                                     filter=None,
                                     verbose=False,
+                                    smiles_cache=None,
                                     callback=None
                                     ):
     if update_dir is not None:
@@ -470,7 +471,8 @@ def _generate_products_and_optimize(smiles_iterator,
     final_structures = []
     products = []
 
-    smiles_cache = set()
+    if smiles_cache is None:
+        smiles_cache = set()
     if conf_gen_options is None:
         conf_gen_options = {}
     for smiles_index,smiles in smiles_iterator:
