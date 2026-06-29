@@ -812,7 +812,7 @@ default_step_ordering = {
 }
 def _check_step(force_steps, key, current):
     if dev.is_dict_like(force_steps):
-        return force_steps.get(key, False)
+        return force_steps.get(key, current is None)
     elif force_steps:
         return True
     elif current is None:
