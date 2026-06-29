@@ -494,6 +494,13 @@ def _generate_products_and_optimize(smiles_iterator,
                             os.path.join(output_dir, smiles_label, 'conformer_info.json'),
                             os.path.join(update_dir, smiles_label, 'conformer_info.json')
                         )
+                        for f in glob.glob(os.path.join(output_dir, smiles_label, '*', info_file)):
+                            root = os.path.dirname(f)
+                            id = os.path.basename(root)
+                            shutil.copytree(
+                                root,
+                                os.path.join(update_dir, smiles_label, id)
+                            )
                 elif os.path.isfile(os.path.join(output_dir, smiles_label, 'conformer_info.json')):
                     target_dir = output_dir
 
