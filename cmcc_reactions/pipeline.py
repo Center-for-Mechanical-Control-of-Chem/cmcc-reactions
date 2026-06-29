@@ -15,6 +15,7 @@ import McUtils.Coordinerds as coordops
 import McUtils.Iterators as itut
 import McUtils.Numputils as nput
 from McUtils.ExternalPrograms import sbatch_python_job
+from Psience.Molecools import Molecule
 
 from . import utils
 from . import generate_reaction_products as gen_prods
@@ -371,6 +372,7 @@ class OptimizedForceResults:
             return self._optimizer
 
     def trajectory_analyzer(self, **opts):
+        if self.trajectory is None: return None
         return rda.DielsAlderReactionTrajectory.from_trajectory_data(self.trajectory, **opts)
 
     def plot_fmrd_lines(self,
@@ -563,23 +565,35 @@ class OptimizedForceResults:
 
     @property
     def reactant(self):
-        r = self.refined_trajectory.reactant
-        if r.potential_derivatives is None and self.optimized_forces is not None:
-            r.potential_derivatives = [0, np.asanyarray(self.optimized_forces.reactant_hessian)]
-        return r
-
-    @property
-    def reactant(self):
-        r = self.refined_trajectory.reactant
-        if r.potential_derivatives is None and self.optimized_forces is not None:
-            r.potential_derivatives = [0, np.asanyarray(self.optimized_forces.reactant_hessian)]
+        if self.refined_trajectory is not None:
+            r = self.refined_trajectory.reactant
+            if r.potential_derivatives is None and self.optimized_forces is not None:
+                r.potential_derivatives = [0, np.asanyarray(self.optimized_forces.reactant_hessian)]
+        else:
+            r = None
         return r
     @property
     def transition_state(self):
-        ts = self.refined_trajectory.transition_state
-        if ts.potential_derivatives is None and self.optimized_forces is not None:
-            ts.potential_derivatives = [0, np.asanyarray(self.optimized_forces.transition_state_hessian)]
+        if self.refined_trajectory is not None:
+            ts = self.refined_trajectory.transition_state
+            if ts.potential_derivatives is None and self.optimized_forces is not None:
+                ts.potential_derivatives = [0, np.asanyarray(self.optimized_forces.transition_state_hessian)]
+        else:
+            ts = None
         return ts
+    @property
+    def product_molecule(self):
+        if self.refined_trajectory is not None:
+            prod = self.refined_trajectory.product
+        else:
+            prod = Molecule(
+                self.product.atoms,
+                self.product.coords,
+                bonds=self.product.bonds,
+                energy_evaluator=self.product.evaluator
+            )
+
+        return prod
 
     def animate_reactant_distortion(self, fmrd_index, embed=True, embedding_indices=None, **opts):
         coords = [

@@ -930,8 +930,22 @@ def generate_initial_reaction_sampling(mol,
     #     required_coordinates=driven_bonds)
     if extra_constraints is not None:
         extra_constraints = [tuple(b) for b in extra_constraints]
-    zm = mol.break_bonds(driven_bonds).get_bond_zmatrix(
-        required_coordinates=driven_bonds + (extra_constraints if extra_constraints is not None else [])
+    fragged = mol.break_bonds(driven_bonds)
+    finds = fragged.fragment_indices
+    atom_groups = [[] for _ in range(len(finds))]
+    for i,j in driven_bonds:
+        for n,f in enumerate(finds):
+            if i in f:
+                atom_groups[n].append(i)
+                break
+        for n,f in enumerate(finds):
+            if j in f:
+                atom_groups[n].append(j)
+                break
+    targ_group = next((g for g in atom_groups if 0 in g), None)
+    zm = fragged.get_bond_zmatrix(
+        required_coordinates=driven_bonds + (extra_constraints if extra_constraints is not None else []),
+        initial_backbone=fragged.find_path(*targ_group[:2])
     )
 
     int_mol = mol.modify(internals=zm)
