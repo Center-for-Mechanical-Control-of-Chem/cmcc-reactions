@@ -1189,10 +1189,23 @@ def generator_callback(
         sbatch_kwargs=None,
         submit=True,
         presubmission_filter=None,
+        presubmit_check_properties=None,
         energy_evaluator=None,
         verbose=True,
         **global_options
 ):
+    if presubmission_filter is None and presubmit_check_properties is not None:
+        if isinstance(presubmit_check_properties, str):
+            presubmit_check_properties = [presubmit_check_properties]
+        def presubmission_filter(product_data, input_file, out_file):
+            if out_file is None or not os.path.isfile(out_file):
+                return True
+            else:
+                data = utils.read_json(out_file)
+                return any(
+                    data.get(p) is None
+                    for p in presubmit_check_properties
+                )
     if sbatch_kwargs is None:
         sbatch_kwargs = {'mem':'15G', 'time':'8:00:00'}
     if 'nice' not in sbatch_kwargs:
