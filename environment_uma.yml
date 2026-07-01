@@ -8,6 +8,7 @@ dependencies:
   - jupyterlab
   - pip:
       - pysisyphus
+      - orjson
       - mccoygroup-mcutils
       - mccoygroup-psience
       - rdkit
