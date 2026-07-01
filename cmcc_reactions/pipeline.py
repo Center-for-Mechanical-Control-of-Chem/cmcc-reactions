@@ -655,7 +655,8 @@ def run_update_trajectory(traj, **opts):
 def prep_force_optimizer(trajectory,
                          internals='auto',
                          breakpoints=((0, 2), (1, 3)),
-                         fragment_indices=1,
+                         diene_bonds=((0, 4), (1, 5)),
+                         fragment_indices='auto',
                          fix_breakpoint_atoms=True,
                          projection_internals='auto',
                          remove_fragment_transrot=True,
@@ -666,6 +667,34 @@ def prep_force_optimizer(trajectory,
     if not hasattr(trajectory, 'reactant'):
         trajectory = rda.DielsAlderReactionTrajectory.from_trajectory_data(trajectory, which=which)
     ref = trajectory.reactant
+    if dev.str_is(fragment_indices, 'auto'):
+        # focus only on the more substituted fragment
+        # look for non-hydrogens at the key positions
+        ats = ref.atoms
+        bond_set = {frozenset(b[:2]) for b in ref.bonds}
+        flat_breaks = [i for b in breakpoints for i in b]
+        flat_dats = [i for b in diene_bonds for i in b]
+        diene_atoms = {i for i in flat_breaks if i in flat_dats}
+        diene_subs = len([
+            b for b in (bond_set - {frozenset(db) for db in diene_bonds})
+            if (
+                    len(b & diene_atoms) == 1
+                    and ats[next((i for i in b if i not in diene_atoms))] != "H"
+            )
+        ])
+        dio_atoms = {i for i in flat_breaks if not i in flat_dats}
+        dio_subs = len([
+            b for b in (bond_set - {frozenset(dio_atoms)})
+            if (
+                    len(b & dio_atoms) == 1
+                    and ats[next((i for i in b if i not in dio_atoms))] != "H"
+            )
+        ])
+        if (diene_subs > dio_subs) or (dio_subs == 0):
+            fragment_indices = 0
+        else:
+            fragment_indices = 1
+
     if dev.str_is(internals, 'auto'):
         if breakpoints is not None:
             inds = ref.fragment_indices
