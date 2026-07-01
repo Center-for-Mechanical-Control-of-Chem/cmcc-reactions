@@ -1188,6 +1188,7 @@ def generator_callback(
         nice=5,
         sbatch_kwargs=None,
         submit=True,
+        presubmission_filter=None,
         energy_evaluator=None,
         verbose=True,
         **global_options
@@ -1205,6 +1206,9 @@ def generator_callback(
         try:
             os.chdir(targ_dir)
             out_file = output_file
+            if presubmission_filter is not None and not presubmission_filter(product_data, input_file, out_file):
+                print(f"Skipping `{out_file}` (already complete)")
+                return
             if submit:
                 script, _ = sbatch_python_job(
                     run_optimization_pipeline,
@@ -1276,6 +1280,7 @@ def generate_from_product_library(
         tol=1e-8,
         sbatch_kwargs=None,
         submit=True,
+        presubmission_filter=None,
         run_from_directory=False,
         smiles_cache=None,
         **global_options
@@ -1291,6 +1296,7 @@ def generate_from_product_library(
         tol=tol,
         sbatch_kwargs=sbatch_kwargs,
         submit=submit,
+        presubmission_filter=presubmission_filter,
         energy_evaluator=energy_evaluator,
         step_output_files=step_output_files,
         verbose=verbose,
