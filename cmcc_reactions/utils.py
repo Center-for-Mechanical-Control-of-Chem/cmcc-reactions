@@ -15,7 +15,7 @@ __all__ = [
     "read_tree",
     "write_tree",
     "write_json",
-    "read_json",
+    "js_loader",
     "write_namedtuple",
     "dumps_namedtuple",
     "make_namedtuple",
@@ -224,13 +224,13 @@ class BaseEncoder(json.JSONEncoder):
             else:
                 return json.JSONEncoder.default(self, obj)
 
-def write_json(file, data, **opts):
-    if not hasattr(file, 'write'):
-        with open(file, 'w+') as fp:
-            json.dump(data, fp, cls=BaseEncoder, **opts)
-    else:
-        json.dump(data, file, cls=BaseEncoder, **opts)
-    return file
+def write_json(file, data, encoder=None, **opts):
+    if encoder is None: encoder = BaseEncoder
+    return dev.write_json(file, data, encoder=encoder, **opts)
+
+def read_json(file, loader=None, **opts):
+    if loader is None: loader = js_loader
+    return dev.read_json(file, loader=loader, **opts)
 
 
 def write_tree(file, data, compress=None, mode=None, encoder=None, writer=None, precompression_function=None,
