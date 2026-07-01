@@ -70,6 +70,11 @@ def compress_tree(tree_obj, top_level=True, prep_tree=True):
             except ValueError:
                 print(k, s, v)
                 raise
+            if np.issubdtype(v.dtype, np.dtype('object')):
+                if all(u is None for u in v.flatten()):
+                    v = np.full(v.shape, np.nan)
+                else:
+                    raise ValueError("mixed object arrays not supported")
             if v.shape == ():
                 subtrees[k] = ((0,-1), np.array([v]))
             else:
