@@ -1633,7 +1633,7 @@ def _unwrap_nts(pipeline_data, decompression_function, unwrap):
         }
     # for k,v in pipeline_data.items():
     #     if '_type' in v:
-def read_compressed_pipeline_data(pipeline_file, mode=None, decompression_function=None, unwrap=True):
+def read_compressed_pipeline_data(pipeline_file, mode=None, decompression_function=None, unwrap=True, **opts):
     if mode is None:
         if isinstance(pipeline_file, str):
             if os.path.splitext(pipeline_file)[1] == '.json':
@@ -1642,5 +1642,5 @@ def read_compressed_pipeline_data(pipeline_file, mode=None, decompression_functi
                 mode = 'npz'
     if decompression_function is None and mode == 'npz':
         decompression_function = utils.decompress_namedtuple_data
-    base_data = utils.read_tree(pipeline_file, decompression_function=decompression_function)
+    base_data = utils.read_tree(pipeline_file, decompression_function=decompression_function, **opts)
     return _unwrap_nts(base_data, decompression_function, unwrap)

@@ -314,7 +314,7 @@ def read_tree(file, decompress=None, mode=None, decompression_function=None, loa
         if decompress is None: decompress = True
         if not os.path.isfile(file):
             raise FileNotFoundError(f"npz loading requires a real file, got {file}")
-        zdata = np.load(file)
+        zdata = np.load(file, **opts)
         key_names = zdata['key_names']
         visited_keys = zdata['visited_keys']
         shapes = zdata['shapes']
