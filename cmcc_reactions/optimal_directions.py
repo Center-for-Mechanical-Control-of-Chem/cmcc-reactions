@@ -2501,6 +2501,11 @@ class ForceOptimizer:
             lookup_internals_index = True
         if not nput.is_int(which) and lookup_internals_index:
             which = coordops.zmatrix_indices(self.internals, which, strip_embedding=True)
+        if not nput.is_int(which) and len(which) == 0:
+            if return_gammas:
+                return which, []
+            else:
+                return which
         if max_internals is not None and not nput.is_int(which):
             which = np.asanyarray(which)
             gammas = self.compute_gammas(which,
