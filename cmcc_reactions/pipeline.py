@@ -94,9 +94,10 @@ OptimizedForcePipelineData = collections.namedtuple(
         'force_units',
         'mass_weight',
         'force_optimizer_settings',
-        'predistortion_datasets'
+        'predistortion_datasets',
+        'random_force_coeffs'
     ],
-    defaults=[None]
+    defaults=[None, None]
 )
 utils.register_namedtuple(OptimizedForcePipelineData,
                           defaults={
@@ -153,6 +154,7 @@ class OptimizedForceResults:
                 reactant_hessian='reactant_hessian',
                 transition_state_hessian='transition_state_hessian',
                 force_coeffs='force_coeffs',
+                random_force_coeffs='random_coeffs',
                 internals='internals',
                 use_mode_space='use_mode_space',
                 force_optimization_settings='optimizer_settings'
@@ -277,6 +279,7 @@ class OptimizedForceResults:
                 transition_state_hessian=data.transition_state_hessian,
                 energy_evaluator=data.energy_evaluator,
                 force_coeffs=data.force_coeffs,
+                random_coeffs=data.random_force_coeffs,
                 internals=data.internals,
                 use_mode_space=data.use_mode_space,
                 optimizer_settings=data.force_optimization_settings
@@ -370,6 +373,26 @@ class OptimizedForceResults:
                     reembed=False,
                 )
             return self._optimizer
+
+    def animate_fmrd_direction(self, fmrd_index, mass_weight=False, **etc):
+       return self.optimizer.animate_normed(
+           0,
+           displacements=[self.fmrds[fmrd_index].force_vector],
+           use_internals=len(self.fmrds[fmrd_index].force_vector) < len(self.product.atoms) * 3,
+           mass_weight=mass_weight,
+           **etc
+       )
+
+    def predicted_fmrd_distortion(self, fmrd_index, mass_weight=False, **etc):
+       return self.optimizer.predicted_delta_from_forces(
+           0,
+           self.fmrds[fmrd_index].force_magnitude,
+           units=("Hartrees", "BohrRadius"),
+           displacements=[self.fmrds[fmrd_index].force_vector],
+           use_internals=len(self.fmrds[fmrd_index].force_vector) < len(self.product.atoms) * 3,
+           mass_weight=mass_weight,
+           **etc
+       )
 
     def trajectory_analyzer(self, **opts):
         if self.trajectory is None: return None
@@ -666,82 +689,19 @@ def prep_force_optimizer(trajectory,
                          **opts):
     if not hasattr(trajectory, 'reactant'):
         trajectory = rda.DielsAlderReactionTrajectory.from_trajectory_data(trajectory, which=which)
-    ref = trajectory.reactant
-    if dev.str_is(fragment_indices, 'auto'):
-        # focus only on the more substituted fragment
-        # look for non-hydrogens at the key positions
-        ats = ref.atoms
-        bond_set = {frozenset(b[:2]) for b in ref.bonds}
-        flat_breaks = [i for b in breakpoints for i in b]
-        flat_dats = [i for b in diene_bonds for i in b]
-        diene_atoms = {i for i in flat_breaks if i in flat_dats}
-        diene_subs = len([
-            b for b in (bond_set - {frozenset(db) for db in diene_bonds})
-            if (
-                    len(b & diene_atoms) == 1
-                    and ats[next((i for i in b if i not in diene_atoms))] != "H"
-            )
-        ])
-        dio_atoms = {i for i in flat_breaks if not i in flat_dats}
-        dio_subs = len([
-            b for b in (bond_set - {frozenset(dio_atoms)})
-            if (
-                    len(b & dio_atoms) == 1
-                    and ats[next((i for i in b if i not in dio_atoms))] != "H"
-            )
-        ])
-        if (diene_subs > dio_subs) or (dio_subs == 0):
-            fragment_indices = 0
-        else:
-            fragment_indices = 1
-
-    if dev.str_is(internals, 'auto'):
-        if breakpoints is not None:
-            inds = ref.fragment_indices
-            internals = ref.get_bond_zmatrix(
-                connect_fragments=True,
-                fragment_ordering=list(range(len(inds))),
-                attachment_points={breakpoints[0][0]: breakpoints[0][1]}
-            )
-
-    if dev.str_is(projection_internals, 'auto'):
-        inds = ref.fragment_indices
-        projection_internals = [
-            coordops.extract_zmatrix_internals(z)
-            for z in ref.get_bond_zmatrix(connect_fragments=False,
-                                          fragment_ordering=list(range(len(inds))),
-                                          attachment_points={breakpoints[0][0]: breakpoints[0][1]}
-                                          )
-        ]
-        if nput.is_int(fragment_indices):
-            projection_internals = projection_internals[fragment_indices]
-        else:
-            projection_internals = sum(projection_internals, [])
-
-    if fix_breakpoint_atoms is not None:
-        if nput.is_int(fragment_indices):
-            fragment_indices = ref.fragment_indices[fragment_indices]
-        fragment_indices = np.setdiff1d(fragment_indices, list(itut.flatten(breakpoints)))
-
-    if projection_internals is not None and fragment_indices is not None:
-        if nput.is_int(fragment_indices):
-            fragment_indices = ref.fragment_indices[fragment_indices]
-        projection_internals = [
-            p for p in projection_internals
-            if any(pp in fragment_indices for pp in p)
-        ]
-
-    opt = fopt.ForceOptimizer(trajectory.reactant, trajectory.transition_state,
-                              fragment_indices=fragment_indices,
-                              remove_fragment_transrot=remove_fragment_transrot,
-                              remove_local_transrot=remove_local_transrot,
-                              allow_mode_mixing=allow_mode_mixing,
-                              projection_internals=projection_internals,
-                              internals=internals,
-                              **opts
-                              )
-
-    return opt
+    return fopt.ForceOptimizer.from_da_fragments(
+        trajectory.reactant, trajectory.transition_state,
+        internals=internals,
+        breakpoints=breakpoints,
+        diene_bonds=diene_bonds,
+        fragment_indices=fragment_indices,
+        fix_breakpoint_atoms=fix_breakpoint_atoms,
+        projection_internals=projection_internals,
+        remove_fragment_transrot=remove_fragment_transrot,
+        remove_local_transrot=remove_local_transrot,
+        allow_mode_mixing=allow_mode_mixing,
+        **opts
+    )
 
 def run_force_optimization(trajectory,
                            internals='auto',
@@ -840,6 +800,23 @@ def run_pressure_fmrds(optimizer,
         **opts
     )
 
+def run_random_fmrds(optimizer,
+                     nmodes=15,
+                     magnitude=(-200, -100, -50, 50, 100, 200),
+                     verbose=True,
+                     pool=None,
+                     split_magnitudes=True,
+                     **opts):
+    nmodes = min(optimizer.random_coeffs.shape[0], nmodes)
+    return optimizer.reoptimize_with_random_forces(
+        list(range(nmodes)),
+        magnitude=magnitude,
+        split_magnitudes=split_magnitudes,
+        pool=pool,
+        verbose=verbose,
+        **opts
+    )
+
 default_step_ordering = {
     'products': 0,
     'trajectory': 1,
@@ -851,7 +828,9 @@ default_step_ordering = {
     'internals':3,
     'rigid-internals':3,
     'pressure':3,
-    'rigid-pressure':3
+    'rigid-pressure':3,
+    'random':3,
+    'rigid-random':3
 }
 def _check_step(force_steps, key, current):
     if dev.is_dict_like(force_steps):
@@ -1133,6 +1112,45 @@ def run_optimization_pipeline(
                 input_data.fmrds = [f[2] for f in fmrds]
             else:
                 input_data.fmrds = input_data.fmrds + [f[2] for f in fmrds]
+
+            if output_file is not None:
+                print(f"saving to {output_file}...")
+                input_data.save(output_file)
+
+        if 'random' in steps and _check_step(force_steps, 'random', None):
+            if optimizer is None:
+                opt_force = input_data.optimized_forces
+                if opt_force is None:
+                    raise ValueError("optimized forces needed to get force modified reaction data")
+                optimizer = fopt.ForceOptimizer.from_data(opt_force)
+            if verbose:
+                print('running random fmrds')
+
+
+            if force_modification_settings is None:
+                force_modification_settings = {}
+            force_modification_settings = global_options | force_modification_settings
+            fmrds = run_random_fmrds(optimizer, **force_modification_settings)
+            input_data.fmrds = [f[2] for f in fmrds]
+
+            if output_file is not None:
+                print(f"saving to {output_file}...")
+                input_data.save(output_file)
+
+        if 'rigid-random' in steps and _check_step(force_steps, 'rigid-random', None):
+            if optimizer is None:
+                opt_force = input_data.optimized_forces
+                if opt_force is None:
+                    raise ValueError("optimized forces needed to get force modified reaction data")
+                optimizer = fopt.ForceOptimizer.from_data(opt_force)
+            if verbose:
+                print('running rigid random fmrds')
+
+            if force_modification_settings is None:
+                force_modification_settings = {}
+            force_modification_settings = global_options | force_modification_settings
+            fmrds = run_random_fmrds(optimizer, rigid=True, **force_modification_settings)
+            input_data.fmrds = [f[2] for f in fmrds]
 
             if output_file is not None:
                 print(f"saving to {output_file}...")

@@ -248,6 +248,7 @@ def construct_force_dirs(modes_gs, modes_ts,
                          internals=None,
                          max_iterations=None,
                          use_mode_space=True,
+                         force_dir_generator=None,
                          **opts
                          ):
 
@@ -283,7 +284,9 @@ def construct_force_dirs(modes_gs, modes_ts,
     # hess_gs_nms = nm_hess(modes_gs, L=modes_ts.inverse @ modes_gs.matrix)
 
     num_dirs = min(num_dirs, len(hess_gs_nms) - proj_dir.shape[1])
-    force_dirs, errors = get_force_dirs(hess_gs_nms, hess_ts_nms,
+    if force_dir_generator is None:
+        force_dirs = get_force_dirs
+    force_dirs, errors = force_dir_generator(hess_gs_nms, hess_ts_nms,
                                         proj_dir,
                                         # new_modes_ts.matrix[:, (0,)],
                                         num_dirs,
@@ -447,6 +450,183 @@ def reaction_force_dirs(reactant, transition_state,
         return dirs, (new_modes_gs, new_modes_ts)
     else:
         return dirs
+
+def get_random_displacement_coordinate(gs_hess, ts_hess, proj_dirs, *, rng=None):
+    """
+    Like `find_optimal_displacement_coordinate`, but instead of optimizing
+    gamma, draws a single random direction orthogonal to `proj_dirs`.
+    """
+    if not hasattr(rng, 'normal'):
+        rng = np.random.default_rng(rng)
+    proj = nput.orthogonal_projection_matrix(proj_dirs)
+    raw = rng.normal(size=proj_dirs.shape[0])
+    guess_dir = nput.vec_normalize(proj @ raw)
+    error = gamma(gs_hess, ts_hess, guess_dir)
+    return guess_dir, error
+
+
+def get_random_force_dirs(hess_gs, hess_ts, initial_dir, k, rng=None):
+    """
+    Like `get_force_dirs`, but each successive direction is a random draw
+    orthogonal to everything already selected (rather than an optimized one).
+    """
+    initial_dir = np.asanyarray(initial_dir)
+    if initial_dir.ndim == 1:
+        initial_dir = initial_dir[:, np.newaxis]
+    proj_dirs = initial_dir
+    errors = []
+    if not hasattr(rng, 'normal'):
+        rng = np.random.default_rng(rng)
+    for i in range(min(k, len(hess_gs) - proj_dirs.shape[-1])):
+        force_dir, error = get_random_displacement_coordinate(
+            hess_gs, hess_ts, proj_dirs, rng=rng
+        )
+        proj_dirs = np.concatenate([proj_dirs, force_dir[:, np.newaxis]], axis=1)
+        errors.append(error)
+
+    return proj_dirs, errors
+
+
+def construct_random_force_dirs(modes_gs, modes_ts,
+                                *,
+                                num_dirs,
+                                idx_start,
+                                mols=None,
+                                internals=None,
+                                use_mode_space=True,
+                                **opts
+                                ):
+    return construct_force_dirs(
+        modes_gs, modes_ts,
+        num_dirs=num_dirs,
+        idx_start=idx_start,
+        mols=mols,
+        internals=internals,
+        use_mode_space=use_mode_space,
+        force_dir_generator=get_random_force_dirs,
+        **opts
+    )
+
+
+def random_force_dirs(reactant, transition_state,
+                      *,
+                      num_dirs,
+                      prepped_modes=None,
+                      fragment_indices=None,
+                      low_frequency_cutoff=None,
+                      return_modes=True,
+                      extra_localization=None,
+                      remove_fragment_transrot=True,
+                      remove_local_transrot=True,
+                      allow_mode_mixing=True,
+                      internals=None,
+                      project_internals=True,
+                      **opts
+                      ):
+    return reaction_force_dirs(
+        reactant, transition_state,
+        num_dirs=num_dirs,
+        prepped_modes=prepped_modes,
+        fragment_indices=fragment_indices,
+        low_frequency_cutoff=low_frequency_cutoff,
+        return_modes=return_modes,
+        extra_localization=extra_localization,
+        remove_fragment_transrot=remove_fragment_transrot,
+        remove_local_transrot=remove_local_transrot,
+        allow_mode_mixing=allow_mode_mixing,
+        internals=internals,
+        project_internals=project_internals,
+        force_dir_constructor=construct_random_force_dirs,
+        **opts
+    )
+
+def get_target_displacement_coordinate(gs_hess, ts_hess, proj_dirs, dir):
+    """
+    Like `find_optimal_displacement_coordinate`, but instead of optimizing
+    gamma, draws a single random direction orthogonal to `proj_dirs`.
+    """
+    proj = nput.orthogonal_projection_matrix(proj_dirs)
+    raw = np.asanyarray(dir)
+    guess_dir = nput.vec_normalize(proj @ raw)
+    error = gamma(gs_hess, ts_hess, guess_dir)
+    return guess_dir, error
+
+
+def get_target_force_dirs(hess_gs, hess_ts, initial_dir, k, *, target_dirs):
+    """
+    Like `get_force_dirs`, but each successive direction is a random draw
+    orthogonal to everything already selected (rather than an optimized one).
+    """
+    initial_dir = np.asanyarray(initial_dir)
+    if initial_dir.ndim == 1:
+        initial_dir = initial_dir[:, np.newaxis]
+    proj_dirs = initial_dir
+    errors = []
+    for dir in target_dirs:
+        force_dir, error = get_target_displacement_coordinate(
+            hess_gs, hess_ts, proj_dirs, dir
+        )
+        proj_dirs = np.concatenate([proj_dirs, force_dir[:, np.newaxis]], axis=1)
+        errors.append(error)
+
+    return proj_dirs, errors
+
+
+def construct_target_force_dirs(modes_gs, modes_ts,
+                                *,
+                                target_dirs,
+                                idx_start,
+                                num_dirs=None,
+                                mols=None,
+                                internals=None,
+                                use_mode_space=True,
+                                **opts
+                                ):
+    return construct_force_dirs(
+        modes_gs, modes_ts,
+        num_dirs=num_dirs,
+        idx_start=idx_start,
+        mols=mols,
+        internals=internals,
+        use_mode_space=use_mode_space,
+        target_dirs=len(target_dirs),
+        force_dir_generator=get_target_force_dirs,
+        **opts
+    )
+
+
+def target_force_dirs(reactant, transition_state,
+                      *,
+                      target_dirs,
+                      prepped_modes=None,
+                      fragment_indices=None,
+                      low_frequency_cutoff=None,
+                      return_modes=True,
+                      extra_localization=None,
+                      remove_fragment_transrot=True,
+                      remove_local_transrot=True,
+                      allow_mode_mixing=True,
+                      internals=None,
+                      project_internals=True,
+                      **opts
+                      ):
+    return reaction_force_dirs(
+        reactant, transition_state,
+        num_dirs=len(target_dirs),
+        target_dirs=target_dirs,
+        prepped_modes=prepped_modes,
+        fragment_indices=fragment_indices,
+        low_frequency_cutoff=low_frequency_cutoff,
+        return_modes=return_modes,
+        extra_localization=extra_localization,
+        remove_fragment_transrot=remove_fragment_transrot,
+        remove_local_transrot=remove_local_transrot,
+        allow_mode_mixing=allow_mode_mixing,
+        internals=internals,
+        project_internals=project_internals,
+        force_dir_constructor=construct_target_force_dirs,
+        **opts
+    )
 
 def prep_gamma_hessians(
         reactant, transition_state, direction_gs,
@@ -839,9 +1019,10 @@ OptimizedForceData = collections.namedtuple(
         'force_coeffs',
         'internals',
         'use_mode_space',
-        'optimizer_settings'
+        'optimizer_settings',
+        'random_coeffs'
     ],
-    defaults=[None]
+    defaults=[None, None]
 )
 utils.register_namedtuple(OptimizedForceData)
 
@@ -890,6 +1071,8 @@ class ForceOptimizer:
                  transition_state_hessian=None,
                  precompute_modes=True,
                  force_coeffs=None,
+                 random_forces=None,
+                 random_coeffs=None,
                  **determination_opts):
         if reactant_hessian is not None:
             reactant_mol = reactant_mol.modify(potential_derivatives=[0, reactant_hessian])
@@ -917,6 +1100,9 @@ class ForceOptimizer:
         if optimal_forces is None and force_coeffs is not None:
             optimal_forces = {'force_coeffs':force_coeffs}
         self._optimal_forces = optimal_forces
+        if random_forces is None and random_coeffs is not None:
+            random_forces = {'force_coeffs':random_forces}
+        self._random_forces = random_forces
         self._inverse = inverse_forces
         self._internal_mols = None
         self._internal_modes = None
@@ -937,6 +1123,7 @@ class ForceOptimizer:
 
     def to_data(self) -> OptimizedForceData:
         fcs = self.force_coeffs
+        rcs = self.random_coeffs if self._random_forces is not None else None
         return OptimizedForceData(
             atoms=self.rs.atoms,
             reactant_geom=self.rs.coords,
@@ -945,6 +1132,7 @@ class ForceOptimizer:
             transition_state_hessian=self.ts.potential_derivatives[1],
             energy_evaluator=self.rs.energy_evaluator,
             force_coeffs=fcs,
+            random_coeffs=rcs,
             internals=self.internals,
             use_mode_space=self.use_mode_space,
             optimizer_settings=self.opts
@@ -1255,6 +1443,95 @@ class ForceOptimizer:
 
         return m
 
+    @classmethod
+    def from_da_fragments(cls,
+                          reactant,
+                          transition_state,
+                          internals='auto',
+                          breakpoints=((0, 2), (1, 3)),
+                          diene_bonds=((0, 4), (1, 5)),
+                          fragment_indices='auto',
+                          fix_breakpoint_atoms=True,
+                          projection_internals='auto',
+                          remove_fragment_transrot=True,
+                          remove_local_transrot=True,
+                          allow_mode_mixing=True,
+                          **opts):
+        ref = reactant
+        if dev.str_is(fragment_indices, 'auto'):
+            # focus only on the more substituted fragment
+            # look for non-hydrogens at the key positions
+            ats = ref.atoms
+            bond_set = {frozenset(b[:2]) for b in ref.bonds}
+            flat_breaks = [i for b in breakpoints for i in b]
+            flat_dats = [i for b in diene_bonds for i in b]
+            diene_atoms = {i for i in flat_breaks if i in flat_dats}
+            diene_subs = len([
+                b for b in (bond_set - {frozenset(db) for db in diene_bonds})
+                if (
+                        len(b & diene_atoms) == 1
+                        and ats[next((i for i in b if i not in diene_atoms))] != "H"
+                )
+            ])
+            dio_atoms = {i for i in flat_breaks if not i in flat_dats}
+            dio_subs = len([
+                b for b in (bond_set - {frozenset(dio_atoms)})
+                if (
+                        len(b & dio_atoms) == 1
+                        and ats[next((i for i in b if i not in dio_atoms))] != "H"
+                )
+            ])
+            if (diene_subs > dio_subs) or (dio_subs == 0):
+                fragment_indices = 0
+            else:
+                fragment_indices = 1
+
+        if dev.str_is(internals, 'auto'):
+            if breakpoints is not None:
+                inds = ref.fragment_indices
+                internals = ref.get_bond_zmatrix(
+                    connect_fragments=True,
+                    fragment_ordering=list(range(len(inds))),
+                    attachment_points={breakpoints[0][0]: breakpoints[0][1]}
+                )
+
+        if dev.str_is(projection_internals, 'auto'):
+            inds = ref.fragment_indices
+            projection_internals = [
+                coordops.extract_zmatrix_internals(z)
+                for z in ref.get_bond_zmatrix(connect_fragments=False,
+                                              fragment_ordering=list(range(len(inds))),
+                                              attachment_points={breakpoints[0][0]: breakpoints[0][1]}
+                                              )
+            ]
+            if nput.is_int(fragment_indices):
+                projection_internals = projection_internals[fragment_indices]
+            else:
+                projection_internals = sum(projection_internals, [])
+
+        if fix_breakpoint_atoms is not None:
+            if nput.is_int(fragment_indices):
+                fragment_indices = ref.fragment_indices[fragment_indices]
+            fragment_indices = np.setdiff1d(fragment_indices, list(itut.flatten(breakpoints)))
+
+        if projection_internals is not None and fragment_indices is not None:
+            if nput.is_int(fragment_indices):
+                fragment_indices = ref.fragment_indices[fragment_indices]
+            projection_internals = [
+                p for p in projection_internals
+                if any(pp in fragment_indices for pp in p)
+            ]
+
+        return cls(reactant, transition_state,
+                  fragment_indices=fragment_indices,
+                  remove_fragment_transrot=remove_fragment_transrot,
+                  remove_local_transrot=remove_local_transrot,
+                  allow_mode_mixing=allow_mode_mixing,
+                  projection_internals=projection_internals,
+                  internals=internals,
+                  **opts
+                  )
+
     @property
     def prepped_modes(self):
         if self._prepped_modes is None:
@@ -1358,6 +1635,13 @@ class ForceOptimizer:
             self._optimal_forces = self.get_forces_from_coeffs(self._optimal_forces['force_coeffs'])
         return self._optimal_forces
     @property
+    def random_force_data(self):
+        if self._optimal_forces is None:
+            self._optimal_forces = self.random_optimize()
+        elif isinstance(self._random_forces, dict):
+            self._random_forces = self.get_forces_from_coeffs(self._random_forces['force_coeffs'])
+        return self._random_forces
+    @property
     def gammas(self):
         return self.optimal_force_data[0][0]
     @property
@@ -1375,10 +1659,31 @@ class ForceOptimizer:
                     mass_weighted_displacement_inverse(self.ts, fds[1])
                 )
         return self._inverse
-
     @property
     def force_coeffs(self):
         return self.optimal_force_data[2]
+
+    @property
+    def random_gammas(self):
+        return self.random_force_data[0][0]
+    @property
+    def random_dirs(self):
+        return self.random_force_data[0][1]
+    @property
+    def random_dirs_inverse(self):
+        if self._inverse is None:
+            fds = self.random_force_data[0][1]
+            if isinstance(fds, np.ndarray):
+                self._inverse = mass_weighted_displacement_inverse(self.ts, fds)
+            else:
+                self._inverse = (
+                    mass_weighted_displacement_inverse(self.rs, fds[0]),
+                    mass_weighted_displacement_inverse(self.ts, fds[1])
+                )
+        return self._inverse
+    @property
+    def random_coeffs(self):
+        return self.random_force_data[2]
 
     @property
     def mass_weighted_force_dirs(self):
@@ -1408,6 +1713,36 @@ class ForceOptimizer:
         return UnitsData.convert("Hartrees", "Kilocalories/Mole") * (
             UnitsData.convert(("NanoJoules", "InverseMeters"), ("Hartrees", "InverseBohrRadius"))
         ) ** 2
+
+    def random_optimize(self):
+        """
+        Same as `optimize`, but draws a random force in the projected
+        (mode-space / internals) subspace instead of numerically
+        optimizing gamma from a Hessian-based initial guess.
+        """
+        if self.rs.potential_derivatives is None:
+            self.rs.potential_derivatives = self.rs.calculate_energy(order=2)[1:]
+        if self.ts.potential_derivatives is None:
+            self.ts.potential_derivatives = self.ts.calculate_energy(order=2)[1:]
+
+        opts = {
+            k: v for k, v in self.opts.items()
+            if k not in ('optimizer', 'method', 'max_iterations')
+        }
+
+        (dirs, coeffs), modes = random_force_dirs(self.rs, self.ts,
+                                                  prepped_modes=self.prepped_modes,
+                                                  use_mode_space=self.use_mode_space,
+                                                  **opts)
+        if self.reorder:
+            gammas, dirs, ord = reorder_force_dirs(self.rs, self.ts, dirs,
+                                                   use_mode_space=self.use_mode_space,
+                                                   return_ordering=True)
+            coeffs = coeffs[:, ord]
+        else:
+            gammas = compute_reaction_gamma(self.rs, self.ts, dirs, use_mode_space=self.use_mode_space)
+
+        return (gammas, dirs), modes, coeffs
 
     _debug_show_force_vectors = False
     def mode_force_function(self, mode, magnitude=1,
@@ -2462,6 +2797,30 @@ class ForceOptimizer:
             apply_constraints=apply_constraints,
             **etc
         )
+
+    def reoptimize_with_random_force(self,
+                                     which,
+                                     magnitude=50,
+                                     mass_weight=False,
+                                     units='PicoJoules/Meters',
+                                     displacements=None,
+                                     use_internals=True,
+                                     verbose=False,
+                                     **opts
+                                     ):
+        if displacements is None:
+            displacements = self.random_dirs
+        fmrds = self.reoptimize_with_force(
+            which,
+            mass_weight=mass_weight,
+            magnitude=magnitude,
+            units=units,
+            displacements=displacements,
+            use_internals=use_internals,
+            verbose=verbose,
+            **opts
+        )
+        return fmrds
 
     def get_distortion_steric_repulsions(self,
                                          mode=0,
