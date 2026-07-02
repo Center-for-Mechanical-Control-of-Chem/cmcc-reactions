@@ -11,6 +11,7 @@ from McUtils.Data import UnitsData
 from McUtils.Scaffolding import Logger
 import McUtils.Devutils as dev
 import McUtils.Numputils as nput
+import McUtils.Iterators as itut
 import McUtils.Coordinerds as coordops
 from Psience.Molecools import Molecule
 from Psience.Modes import MixtureModes
