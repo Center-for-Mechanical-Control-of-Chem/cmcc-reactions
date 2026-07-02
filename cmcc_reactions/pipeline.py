@@ -1164,6 +1164,8 @@ def run_optimization_pipeline(
             'pipeline_data_rigid.json':['rigid-fmrds'],
             'pipeline_data_internals.json':['internals'],
             'pipeline_data_internals_rigid.json':['internals-rigid'],
+            'pipeline_data_random.json':['random'],
+            'pipeline_data_random_rigid.json':['random-rigid'],
         }
     if step_output_files is not None:
         for of, steps in step_output_files.items():
