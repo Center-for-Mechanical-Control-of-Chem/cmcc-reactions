@@ -3305,16 +3305,26 @@ class ForceOptimizer:
         for f, d in zip(forces, dr_pos):
             if d == len(force_r):  # linear extrapolation
                 c = force_r[-1] - force_r[-2]
-                s = (f - force_r[-1]) / c
+                if abs(c) > 1e-12:
+                    s = (f - force_r[-1]) / c
+                else:
+                    s = 0
                 drs.append((d, s))
             elif d == 0:  # linear extrapolation
                 c = force_r[1] - force_r[0]
-                s = (f - force_r[0]) / c
+                if abs(c) > 1e-12:
+                    s = (f - force_r[0]) / c
+                else:
+                    s = 0
                 drs.append((d, s))
             else:
                 f0 = force_r[d]
                 f1 = force_r[d - 1]
-                s = (f0 - f) / (f0 - f1)
+                c = (f0 - f1)
+                if abs(c) > 1e-12:
+                    s = (f0 - f) / c
+                else:
+                    s = 0
                 drs.append((d, s))
         return drs
 
