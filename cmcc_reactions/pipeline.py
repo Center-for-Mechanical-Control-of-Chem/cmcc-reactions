@@ -808,7 +808,7 @@ def run_random_fmrds(optimizer,
                      split_magnitudes=True,
                      **opts):
     nmodes = min(optimizer.random_coeffs.shape[0], nmodes)
-    return optimizer.reoptimize_with_random_forces(
+    return optimizer.reoptimize_with_random_force(
         list(range(nmodes)),
         magnitude=magnitude,
         split_magnitudes=split_magnitudes,

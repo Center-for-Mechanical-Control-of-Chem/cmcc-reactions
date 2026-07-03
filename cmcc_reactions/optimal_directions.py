@@ -286,7 +286,7 @@ def construct_force_dirs(modes_gs, modes_ts,
 
     num_dirs = min(num_dirs, len(hess_gs_nms) - proj_dir.shape[1])
     if force_dir_generator is None:
-        force_dirs = get_force_dirs
+        force_dir_generator = get_force_dirs
     force_dirs, errors = force_dir_generator(hess_gs_nms, hess_ts_nms,
                                         proj_dir,
                                         # new_modes_ts.matrix[:, (0,)],
@@ -420,6 +420,7 @@ def reaction_force_dirs(reactant, transition_state,
                         allow_mode_mixing=True,
                         internals=None,
                         project_internals=True,
+                        force_dir_constructor=None,
                         **opts
                         ):
 
@@ -441,7 +442,10 @@ def reaction_force_dirs(reactant, transition_state,
     else:
         idx_start = 1
 
-    dirs = construct_force_dirs(new_modes_gs, new_modes_ts,
+    if force_dir_constructor is None:
+        force_dir_constructor = construct_force_dirs
+
+    dirs = force_dir_constructor(new_modes_gs, new_modes_ts,
                                 num_dirs=num_dirs,
                                 idx_start=idx_start,
                                 mols=(reactant, transition_state),
@@ -466,7 +470,7 @@ def get_random_displacement_coordinate(gs_hess, ts_hess, proj_dirs, *, rng=None)
     return guess_dir, error
 
 
-def get_random_force_dirs(hess_gs, hess_ts, initial_dir, k, rng=None):
+def get_random_force_dirs(hess_gs, hess_ts, initial_dir, k, rng=None, max_iterations=None):
     """
     Like `get_force_dirs`, but each successive direction is a random draw
     orthogonal to everything already selected (rather than an optimized one).
@@ -505,7 +509,7 @@ def construct_random_force_dirs(modes_gs, modes_ts,
         internals=internals,
         use_mode_space=use_mode_space,
         force_dir_generator=get_random_force_dirs,
-        **opts
+        # **opts
     )
 
 
@@ -553,7 +557,7 @@ def get_target_displacement_coordinate(gs_hess, ts_hess, proj_dirs, dir):
     return guess_dir, error
 
 
-def get_target_force_dirs(hess_gs, hess_ts, initial_dir, k, *, target_dirs):
+def get_target_force_dirs(hess_gs, hess_ts, initial_dir, k, *, target_dirs, max_iterations=None):
     """
     Like `get_force_dirs`, but each successive direction is a random draw
     orthogonal to everything already selected (rather than an optimized one).
@@ -592,7 +596,7 @@ def construct_target_force_dirs(modes_gs, modes_ts,
         use_mode_space=use_mode_space,
         target_dirs=len(target_dirs),
         force_dir_generator=get_target_force_dirs,
-        **opts
+        # **opts
     )
 
 
@@ -1637,8 +1641,8 @@ class ForceOptimizer:
         return self._optimal_forces
     @property
     def random_force_data(self):
-        if self._optimal_forces is None:
-            self._optimal_forces = self.random_optimize()
+        if self._random_forces is None:
+            self._random_forces = self.random_optimize()
         elif isinstance(self._random_forces, dict):
             self._random_forces = self.get_forces_from_coeffs(self._random_forces['force_coeffs'])
         return self._random_forces
@@ -1744,6 +1748,35 @@ class ForceOptimizer:
             gammas = compute_reaction_gamma(self.rs, self.ts, dirs, use_mode_space=self.use_mode_space)
 
         return (gammas, dirs), modes, coeffs
+
+    def prep_displacement(self, coords, displacement, remove_transrot=True, remove_orientation=True):
+        rot = np.asanyarray(displacement)
+        if remove_transrot:
+            ## try removing tranrot in
+            rot = rot.reshape(rot.shape[:-2] + (1, -1))
+            proj = nput.translation_rotation_projector(coords,
+                                                       self.ts.masses,
+                                                       mass_weighted=False,
+                                                       orthonormal=False)
+            # rot = rot @ proj
+            rot = rot @ np.moveaxis(proj, -1, -2)
+
+        if remove_orientation:
+            rot = rot.reshape(rot.shape[:-2] + (1, -1))
+            _, dx = nput.orientation_expansion(
+                coords,
+                *self.rs.fragment_indices,
+                masses=self.ts.masses
+            )
+            if dev.str_in(remove_orientation, ['translation', 'translations'], ignore_case=True):
+                dx = dx[..., (0, 1, 2), :]
+            elif dev.str_in(remove_orientation, ['rotation', 'rotations'], ignore_case=True):
+                dx = dx[..., (3, 4, 5), :]
+            proj = nput.frame_displacement_projector(np.moveaxis(dx, -1, -2), self.ts.masses, mass_weighted=False)
+            # rot = rot @ proj
+            rot = rot @ np.moveaxis(proj, -1, -2)
+
+        return rot
 
     _debug_show_force_vectors = False
     def mode_force_function(self, mode, magnitude=1,
@@ -1889,7 +1922,7 @@ class ForceOptimizer:
         else:
             mags = magnitude
 
-        if not rigid and split_magnitudes:
+        if (not rigid) and split_magnitudes:
             magnitude = np.asanyarray(magnitude)
             neg_mag = np.where(magnitude < 0)
             pos_mag = np.where(magnitude >= 0)
@@ -2810,7 +2843,7 @@ class ForceOptimizer:
                                      mass_weight=False,
                                      units='PicoJoules/Meters',
                                      displacements=None,
-                                     use_internals=True,
+                                     use_internals=False,
                                      verbose=False,
                                      **opts
                                      ):
