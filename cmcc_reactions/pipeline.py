@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import traceback as tb
 import glob
 
 import numpy as np
@@ -1168,30 +1169,38 @@ def run_optimization_pipeline(
             'pipeline_data_random_rigid.json':['random-rigid'],
         }
     if step_output_files is not None:
+        errors = []
         for of, steps in step_output_files.items():
             if not (
                     _check_step(force_steps, steps[-1], True if os.path.isfile(of) else None)
             ): continue
-            run_optimization_pipeline(
-                input_data,
-                output_file=of,
-                steps=steps,
-                **(
-                    global_options | dict(
-                        verbose=verbose,
-                        trajectory_optimization_settings=trajectory_optimization_settings,
-                        refined_trajectory_optimization_settings=refined_trajectory_optimization_settings,
-                        update_trajectory_settings=update_trajectory_settings,
-                        optimized_force_settings=optimized_force_settings,
-                        force_modification_settings=force_modification_settings,
-                        internal_force_modification_settings=internal_force_modification_settings,
-                        pressure_force_modification_settings=pressure_force_modification_settings,
-                        max_iterations=max_iterations,
-                        tol=tol,
-                        energy_evaluator=energy_evaluator
+            try:
+                run_optimization_pipeline(
+                    input_data,
+                    output_file=of,
+                    steps=steps,
+                    **(
+                        global_options | dict(
+                            verbose=verbose,
+                            trajectory_optimization_settings=trajectory_optimization_settings,
+                            refined_trajectory_optimization_settings=refined_trajectory_optimization_settings,
+                            update_trajectory_settings=update_trajectory_settings,
+                            optimized_force_settings=optimized_force_settings,
+                            force_modification_settings=force_modification_settings,
+                            internal_force_modification_settings=internal_force_modification_settings,
+                            pressure_force_modification_settings=pressure_force_modification_settings,
+                            max_iterations=max_iterations,
+                            tol=tol,
+                            energy_evaluator=energy_evaluator
+                        )
                     )
                 )
-            )
+            except Exception as e:
+                errors.append(e)
+        if len(errors) > 0:
+            for e in errors:
+                tb.print_exception(e)
+            raise errors[0]
 
     return input_data
 
