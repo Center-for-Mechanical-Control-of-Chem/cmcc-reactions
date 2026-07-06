@@ -10,6 +10,7 @@ import os
 import io
 
 import McUtils.Devutils as dev
+import McUtils.Scaffolding as scaff
 
 __all__ = [
     "read_tree",
@@ -186,8 +187,12 @@ def decompress_tree(serial_tree, unprep_tree=True):
                 tree = tree[s]
         else:
             if len(tree_stack) == 0:
-                prev = serial_tree[max(i-6, 0):i]
-                raise ValueError(f"exhausted tree stack, previous 6 tree entries: {prev}")
+                block = serial_tree['visited_keys'][max(i - 6, 0):i]
+                prev = [
+                    key_map[k] if k > 0 else "<reset>"
+                    for k in block
+                ]
+                raise ValueError(f"exhausted tree stack, previous tree entries (max 6): {prev}")
             tree = tree_stack.pop()
     if unprep_tree:
         tree = undictify_lists(tree)
@@ -240,6 +245,7 @@ def read_json(file, loader=None, **opts):
 
 def write_tree(file, data, compress=None, mode=None, encoder=None, writer=None, precompression_function=None,
                compress_npz=None,
+               tree_writer='new',
                **opts):
     if mode is None:
         if isinstance(file, str) and os.path.splitext(file)[-1] == '.json':
@@ -253,37 +259,47 @@ def write_tree(file, data, compress=None, mode=None, encoder=None, writer=None, 
     else:
         if compress is None:
             compress = True
-        if compress:
+        if dev.str_is(tree_writer, 'new'):
             if precompression_function is not None:
                 data = precompression_function(data)
-            compressed = compress_tree(data)
+            return scaff.write_flat_tree(file,
+                                         data,
+                                         flatten=True,
+                                         writer=writer,
+                                         compress=compress,
+                                         **opts)
         else:
-            compressed = data
-        key_names = list(compressed['key_map'].values())
-        index_remapping = {k:i for i,k in enumerate(compressed['key_map'].keys())}
-        visited_keys = [index_remapping[i] if i >= 0 else i for i in compressed['visited_keys']]
-        arrays = {}
-        shapes = []
-        array_keys = []
-        for k in compressed['key_map'].keys():
-            if k in compressed:
-                shape_data, array_data = compressed[k]
-                shapes.append(len(shape_data))
-                shapes.extend(shape_data)
-                i = index_remapping[k]
-                arrays[f'arr_{i}'] = array_data
-                array_keys.append(i)
-        if compress_npz is None:
-            compress_npz = compress
-        return np.savez(
-            file,
-            shapes=shapes,
-            key_names=key_names,
-            array_keys=array_keys,
-            visited_keys=visited_keys,
-            compress=compress_npz,
-            **arrays
-        )
+            if compress:
+                if precompression_function is not None:
+                    data = precompression_function(data)
+                compressed = compress_tree(data)
+            else:
+                compressed = data
+            key_names = list(compressed['key_map'].values())
+            index_remapping = {k:i for i,k in enumerate(compressed['key_map'].keys())}
+            visited_keys = [index_remapping[i] if i >= 0 else i for i in compressed['visited_keys']]
+            arrays = {}
+            shapes = []
+            array_keys = []
+            for k in compressed['key_map'].keys():
+                if k in compressed:
+                    shape_data, array_data = compressed[k]
+                    shapes.append(len(shape_data))
+                    shapes.extend(shape_data)
+                    i = index_remapping[k]
+                    arrays[f'arr_{i}'] = array_data
+                    array_keys.append(i)
+            if compress_npz is None:
+                compress_npz = compress
+            return np.savez(
+                file,
+                shapes=shapes,
+                key_names=key_names,
+                array_keys=array_keys,
+                visited_keys=visited_keys,
+                compress=compress_npz,
+                **arrays
+            )
 def dumps_tree(data, compress=None, mode='json', **opts):
     if compress is None:
         compress = mode != 'json'
@@ -301,7 +317,9 @@ def normalize_tree(data):
     else:
         return data
 
-def read_tree(file, decompress=None, mode=None, decompression_function=None, loader=None, **opts):
+def read_tree(file, decompress=None, mode=None,
+              tree_reader='new',
+              decompression_function=None, loader=None, **opts):
     if mode is None:
         if isinstance(file, str) and os.path.splitext(file)[-1] == '.json':
             mode = 'json'
@@ -311,37 +329,43 @@ def read_tree(file, decompress=None, mode=None, decompression_function=None, loa
         data = dev.read_json(file, loader=loader, **opts)
         return normalize_tree(data)
     else:
-        if decompress is None: decompress = True
-        if not os.path.isfile(file):
-            raise FileNotFoundError(f"npz loading requires a real file, got {file}")
-        zdata = np.load(file, **opts)
-        key_names = zdata['key_names']
-        visited_keys = zdata['visited_keys']
-        shapes = zdata['shapes']
-        array_keys = zdata['array_keys']
-        compressed = {
-            'visited_keys':visited_keys,
-            'key_map':{
-                i: k for i, k in enumerate(key_names)
-            }
-        }
-
-        shape_pointer = 0
-        for k in array_keys:
-            ls = shapes[shape_pointer]
-            new_pointer = shape_pointer+1+ls
-            shape = shapes[shape_pointer+1:new_pointer]
-            shape_pointer = new_pointer
-            array = zdata[f'arr_{k}']
-            compressed[k] = (shape, array)
-
-        if decompress:
-            data = decompress_tree(compressed)
+        if dev.str_is(tree_reader, 'new'):
+            data = scaff.read_flat_tree(file, reader=loader, **opts)
             if decompression_function is not None:
                 data = decompression_function(data)
             return data
         else:
-            return compressed
+            if decompress is None: decompress = True
+            if not os.path.isfile(file):
+                raise FileNotFoundError(f"npz loading requires a real file, got {file}")
+            zdata = np.load(file, **opts)
+            key_names = zdata['key_names']
+            visited_keys = zdata['visited_keys']
+            shapes = zdata['shapes']
+            array_keys = zdata['array_keys']
+            compressed = {
+                'visited_keys':visited_keys,
+                'key_map':{
+                    i: k for i, k in enumerate(key_names)
+                }
+            }
+
+            shape_pointer = 0
+            for k in array_keys:
+                ls = shapes[shape_pointer]
+                new_pointer = shape_pointer+1+ls
+                shape = shapes[shape_pointer+1:new_pointer]
+                shape_pointer = new_pointer
+                array = zdata[f'arr_{k}']
+                compressed[k] = (shape, array)
+
+            if decompress:
+                data = decompress_tree(compressed)
+                if decompression_function is not None:
+                    data = decompression_function(data)
+                return data
+            else:
+                return compressed
 def loads_tree(data, decompress=None, mode='npz', **opts):
     buf = io.StringIO() if isinstance(data, str) else io.BytesIO()
     buf.write(data)
