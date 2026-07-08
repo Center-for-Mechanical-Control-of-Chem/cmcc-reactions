@@ -3303,9 +3303,35 @@ class ForceOptimizer:
                                     force_unit=force_unit,
                                     **opts)
 
+    @staticmethod
+    def _find_insertion_spot(forces, magnitude, min_pos):
+        search_plus = (min_pos < len(forces) - 1) and (forces[min_pos + 1] > 0 and magnitude > 0)
+        m = magnitude
+        if search_plus:
+            for j, f in enumerate(forces[min_pos + 1:-1]):
+                if f > m:
+                    j = min_pos + j + 1
+                    break
+            else:
+                j = len(forces)
+        else:
+            for j, f in enumerate(reversed(forces[:min_pos])):
+                if f < m:
+                    j = min_pos - j
+                    break
+            else:
+                j = 0
+        return j
+
     @classmethod
-    def _extrap_solve_insertion(cls, forces, force_r):
-        dr_pos = np.searchsorted(force_r, forces)
+    def _extrap_solve_insertion(cls, forces, force_r, init_pos=None):
+        if init_pos is None:
+            init_pos = np.argmin(np.linalg.norm(force_r, axis=0))
+        # dr_pos0 = np.searchsorted(force_r, forces)
+        dr_pos = [
+            cls._find_insertion_spot(force_r, f, init_pos)
+            for f in forces
+        ]
         drs = []
         for f, d in zip(forces, dr_pos):
             if d == len(force_r):  # linear extrapolation
@@ -3402,9 +3428,10 @@ class ForceOptimizer:
             forces = conv * forces
 
         force_r = exp_r[1][:, mode]
-        extrap_pos_r = cls._extrap_solve_insertion(forces, force_r)
+        init_pos = np.argmin(np.abs(x))
+        extrap_pos_r = cls._extrap_solve_insertion(forces, force_r, init_pos=init_pos)
         force_t = exp_t[1][:, mode]
-        extrap_pos_t = cls._extrap_solve_insertion(forces, force_t)
+        extrap_pos_t = cls._extrap_solve_insertion(forces, force_t, init_pos=init_pos)
 
         conv = UnitsData.convert("Hartrees", energy_units)
         x_r, eng_r = cls._extrap_solve_energy(x, exp_r[0] - np.min(exp_r[0]), extrap_pos_r, nearest=nearest)

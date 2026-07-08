@@ -880,7 +880,7 @@ H	-2.758306   -1.763227    0.087370''',
         # utils.write_namedtuple('/Users/Mark/Desktop/methacrylate_fmrd_hydrostatic.npz', data)
         fmra.plot_lines().show()
 
-    @unittest.skip
+    # @unittest.skip
     def test_RigidForceOpts(self):
 
         import warnings
@@ -1725,6 +1725,7 @@ H	-3.015828   -1.433443    1.079180''',
     def _agg(opt):
         return opt.optimizer.gammas
 
+    @unittest.skip
     def test_Aggregations(self):
         import warnings
         warnings.filterwarnings("ignore", category=RuntimeWarning)

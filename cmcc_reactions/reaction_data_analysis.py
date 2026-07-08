@@ -158,7 +158,8 @@ class ForceModifiedReactionAnalyzer:
                  force_units=None,
                  mass_weight=None,
                  internals=None,
-                 optimizer_settings=None
+                 optimizer_settings=None,
+                 predistorted_data=None
                  ):
         self.reactant_energy = reactant_energy
         self.transition_state_energy = transition_state_energy
@@ -186,6 +187,7 @@ class ForceModifiedReactionAnalyzer:
         self.mass_weight = mass_weight
         self.internals = internals
         self.optimizer_settings = optimizer_settings
+        self.predistorted_data = predistorted_data
 
     @classmethod
     def from_data(cls, data):
