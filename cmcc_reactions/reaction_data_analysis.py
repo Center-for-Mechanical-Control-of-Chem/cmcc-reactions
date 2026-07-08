@@ -1,9 +1,11 @@
 
 import collections
+import functools
 import os.path
 import numpy as np
 import glob
 import itertools
+import multiprocessing
 
 import rdkit.Chem.AllChem as Chem
 from McUtils.ExternalPrograms import RDMolecule
@@ -384,6 +386,21 @@ class BarrierHeightDataset:
     def filter_by_mask(self, mask):
         mi = np.where(mask)[0]
         return self.filter_by_inds(mi)
+    def get_data_fields(self):
+        return {
+            'reactant_energies': self.reactant_energies,
+            'force_modified_reactant_energies':self.fm_reactant_energies,
+            'transition_state_energies': self.transition_state_energies,
+            'force_modified_transition_state_energies':self.fm_transition_state_energies
+        } | {
+                'atoms': self.atoms,
+                'force_magnitudes': self.force_magnitudes,
+                'force_vectors': self.force_vectors,
+                'reactant_geometries': self.reactant_geometries,
+                'transition_state_geometries': self.transition_state_geometries,
+                'force_modified_reactant_geometries': self.force_modified_reactant_geometries,
+                'force_modified_transition_state_geometries': self.force_modified_transition_state_geometries
+            } | self.meta_fields
     def filter_by_inds(self, mi):
         opts = {
             k: [fms[i] for i in mi] if fms is not None else None
@@ -523,12 +540,9 @@ class BarrierHeightDataset:
             res[ids] = subvals
         return res
 
-    def add_aggregation_fields(self, field_generator=None, input='optimizer', **opts):
+    def add_aggregation_fields(self, field_generator=None, input='optimizer', pool=True, **opts):
         if field_generator is not None:
-            subfields = [
-                field_generator(self.load_opt_res(i) if dev.str_is(input, 'optimizer') else self.get_tree_data(i))
-                for i in range(len(self))
-            ]
+            subfields = self.dispatch_over_dataset(field_generator, pool=pool, input=input)
             new_agg = {
                 f:[v]
                 for f,v in subfields[0].items()
@@ -545,6 +559,90 @@ class BarrierHeightDataset:
             dataset=self.dataset,
             **(self.meta_fields | opts)
         )
+
+    @staticmethod
+    def _partial_iter(block, *, generator, **opts):
+        return [generator(o, **opts) for o in block]
+
+    def dispatch_over_dataset(self, generator, pool=True, input='optimizer', **opts):
+        if self.dataset is None:
+            raise ValueError("`dataset` must be supplied")
+        managed_pool = False
+        if pool is True:
+            managed_pool = True
+            pool = multiprocessing.Pool()
+        elif nput.is_int(pool):
+            managed_pool = True
+            pool = multiprocessing.Pool(pool)
+        use_opt = dev.str_is(input, 'optimizer')
+        if pool:
+            max_size = len(self)
+            nproc = pool._processes
+            block_size = max_size // nproc
+            num_blocks = int(np.ceil(max_size / block_size))
+            blocks = [
+                [
+                    self.load_opt_res(j) if use_opt else self.get_tree_data(j)
+                    for j in range(block_size*i, min([block_size, max_size - (block_size*i+1) + 1]))
+                ]
+                for i in range(num_blocks)
+            ]
+            block_generator = functools.partial(self._partial_iter, generator=generator, **opts)
+            if managed_pool:
+                with pool:
+                    res = pool.map(block_generator, blocks)
+            else:
+                res = pool.map(block_generator, blocks)
+
+            return sum(res, [])
+        else:
+            return [
+                generator(self.load_opt_res(j) if use_opt else self.get_tree_data(j), **opts)
+                for j in range(len(self))
+            ]
+
+    @staticmethod
+    def compute_default_descriptors(opt, compute_gamma=True, compute_sterics=True,
+                                    compute_volumes=False,
+                                    compute_rigid=False):
+        res = {}
+        use_internals = len(opt.fmrds[0].force_vector) < len(opt.optimizer.rs.atoms) * 3
+        if compute_gamma:
+            res['gammas'] = opt.optimizer.compute_gammas(
+                0,
+                displacements=opt.fmrds[0].force_vector[np.newaxis],
+                use_internals=use_internals
+            )
+        if compute_sterics:
+            res['sterics'] = opt.optimizer.get_distortion_steric_repulsions(
+                0,
+                displacements=opt.fmrds[0].force_vector[np.newaxis],
+                use_internals=use_internals,
+                disp_min=0,
+                disp_max=1,
+                density=2
+            )[0]
+        if compute_rigid:
+            res['rigid'] = opt.optimizer.predicted_delta_from_forces(
+                0,
+                opt.fmrds[0].force_magnitude,
+                units=opt.fmrds[0].force_units,
+                displacements=opt.fmrds[0].force_vector[np.newaxis],
+                use_internals=use_internals,
+                disp_min=-5,
+                disp_max=5,
+                steps=25
+                # density=2
+            )
+        if compute_volumes:
+            res['volumes'] = opt.optimizer.get_distortion_volume_changes(
+                displacements=opt.fmrds[0].force_vector[np.newaxis],
+                use_internals=use_internals,
+                disp_min=-1,
+                disp_max=0,
+                only_endpoints=True
+            )
+        return res
 
     @classmethod
     def group_mask(cls, values, keys, filter, mode='any'):
@@ -891,6 +989,11 @@ class BarrierHeightDataset:
             dataset=tree,
             **opts
         )
+    def save_meta(self, file, mode=None, **etc):
+        ds = self.meta_fields | {
+
+        }
+        return utils.write_tree(file, ds, mode=mode, **etc)
     def save_dataset(self, file, mode=None, **etc):
         ds = self.get_reduced_dataset()
         return pipeline.write_compressed_pipeline_data(file, ds, mode=mode, **etc)

@@ -375,11 +375,13 @@ class OptimizedForceResults:
                 )
             return self._optimizer
 
-    def animate_fmrd_direction(self, fmrd_index, mass_weight=False, **etc):
-       return self.optimizer.animate_normed(
+    def animate_fmrd_direction(self, fmrd_index, mass_weight=False, use_internals=None, **etc):
+        if use_internals is None:
+            use_internals = len(self.fmrds[fmrd_index].force_vector) < len(self.product.atoms) * 3
+        return self.optimizer.animate_normed(
            0,
            displacements=[self.fmrds[fmrd_index].force_vector],
-           use_internals=len(self.fmrds[fmrd_index].force_vector) < len(self.product.atoms) * 3,
+           use_internals=use_internals,
            mass_weight=mass_weight,
            **etc
        )

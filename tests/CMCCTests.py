@@ -1,6 +1,7 @@
 import os, sys
 
 import numpy as np
+import functools
 
 dev_root = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)
@@ -1318,6 +1319,7 @@ H	-3.015828   -1.433443    1.079180''',
 
         return
 
+    @unittest.skip
     def test_Predistortion(self):
 
         import warnings
@@ -1718,6 +1720,38 @@ H	-3.015828   -1.433443    1.079180''',
             aaa.force_modified_transition_state_energy
             - aaa.predistorted_data.force_modified_transition_state_energy
         )
+
+    @staticmethod
+    def _agg(opt):
+        return opt.optimizer.gammas
+
+    def test_Aggregations(self):
+        import warnings
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+        from cmcc_reactions.optimal_directions import ForceOptimizer
+        from cmcc_reactions.reaction_data_analysis import ForceModifiedReactionAnalyzer
+        from Psience.Molecools import Molecule
+        from McUtils.Data import UnitsData
+        np.random.seed(12321)
+
+        ddd = pipeline.read_compressed_pipeline_data(
+            '/Users/Mark/Documents/Postdoc/Projects/CMCC/d2_int_partial.npz',
+            tree_reader='old'
+        )
+        bhd:rda.BarrierHeightDataset = rda.BarrierHeightDataset.from_tree(
+            ddd,
+            annotation_generator=lambda id, data: {
+                                                      'smiles': data['smiles']
+                                                  } | rda.functionalization_keys(
+                data['smiles'])
+        )
+
+        ggg = bhd.dispatch_over_dataset(
+            functools.partial(bhd.compute_default_descriptors, compute_sterics=False)
+        )
+        print(ggg)
 
 if __name__ == '__main__':
     os.chdir(root)

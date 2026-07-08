@@ -2594,11 +2594,11 @@ class ForceOptimizer:
                                         which,
                                         magnitude=50,
                                         mass_weight=False,
-                                        max_internals=None,
-                                        max_internals_ranks=None,
                                         units='PicoJoules/Meters',
                                         displacements=None,
                                         use_internals=True,
+                                        max_internals=None,
+                                        max_internals_ranks=None,
                                         lookup_internals_index=None,
                                         fragment_indices=None,
                                         verbose=False,
@@ -3230,20 +3230,24 @@ class ForceOptimizer:
             return x, eng_r, eng_ts
 
     @classmethod
-    def plot_eng_comp(cls, x, eng_r, eng_ts, **opts):
+    def plot_eng_comp(cls, x, eng_r, eng_ts, units="Kilocalories/Mole", energy_label='kcal mol$^{-1}$', **opts):
         if not nput.is_numeric(eng_r[0]):
             eng_r = eng_r[0]
         if not nput.is_numeric(eng_ts[0]):
             eng_ts = eng_ts[0]
+
+        if units is None:
+            units = "Kilocalories/Mole"
+
         return plt.plot_multi(
-            {'y': eng_r * UnitsData.convert("Hartrees", "Kilocalories/Mole"), 'label': 'gs'},
-            {'y': eng_ts * UnitsData.convert("Hartrees", "Kilocalories/Mole"), 'label': 'ts'},
+            {'y': eng_r * UnitsData.convert("Hartrees", units), 'label': 'gs'},
+            {'y': eng_ts * UnitsData.convert("Hartrees", units), 'label': 'ts'},
             x=x,
             **collections.ChainMap(
                 opts,
                 dict(
                     plot_legend=True,
-                    axes_labels=[r'x ($a_0\text{-ish}$)', r'$\Delta$E (kcal mol$^{-1})$'],
+                    axes_labels=[r'x ($a_0\text{-ish}$)', fr'$\Delta$E ({energy_label})'],
                     legend_style={
                         'frameon': False,
                         'fontsize': 13
@@ -3278,11 +3282,12 @@ class ForceOptimizer:
                                  )
     def plot_distortion_energies(self, mode, disp_min=None, disp_max=None, steps=50, mass_weight=True,
                                  use_internals=False, displacements=None,
+                                 units=None,
                                  **opts):
         x, eng_r, eng_ts = self.get_distortion_energies(mode, disp_min=disp_min, disp_max=disp_max, steps=steps,
                                                         use_internals=use_internals, displacements=displacements,
                                                         mass_weight=mass_weight)
-        return self.plot_eng_comp(x, eng_r, eng_ts, **opts)
+        return self.plot_eng_comp(x, eng_r, eng_ts, units=units, **opts)
 
     def plot_distortion_forces(self, mode, disp_min=None, disp_max=None, steps=50,
                                units=None, displacements=None,
@@ -3633,6 +3638,57 @@ class ForceOptimizer:
             **opts
         )
 
+    def plot_internal_distortion_energies(self,
+                                          which,
+                                          displacements=None,
+                                          use_internals=True,
+                                          max_internals=None,
+                                          max_internals_ranks=None,
+                                          lookup_internals_index=None,
+                                          fragment_indices=None,
+                                          **opts):
+        if displacements is None:
+            displacements = self.pure_internal_displacement_matrix
+        which = self.get_selected_internals(which,
+                                            lookup_internals_index=lookup_internals_index,
+                                            max_internals=max_internals,
+                                            max_internals_ranks=max_internals_ranks,
+                                            fragment_indices=fragment_indices,
+                                            displacements=displacements,
+                                            use_internals=use_internals,
+                                            return_gammas=False)[0]
+        return self.plot_distortion_energies(
+            which,
+            displacements=displacements,
+            use_internals=use_internals,
+            **opts
+        )
+
+    def plot_internal_distortion_forces(self,
+                                        which,
+                                        displacements=None,
+                                        use_internals=True,
+                                        max_internals=None,
+                                        max_internals_ranks=None,
+                                        lookup_internals_index=None,
+                                        fragment_indices=None,
+                                        **opts):
+        if displacements is None:
+            displacements = self.pure_internal_displacement_matrix
+        which = self.get_selected_internals(which,
+                                            lookup_internals_index=lookup_internals_index,
+                                            max_internals=max_internals,
+                                            max_internals_ranks=max_internals_ranks,
+                                            fragment_indices=fragment_indices,
+                                            displacements=displacements,
+                                            use_internals=use_internals,
+                                            return_gammas=False)[0]
+        return self.plot_distortion_forces(
+            which,
+            displacements=displacements,
+            use_internals=use_internals,
+            **opts
+        )
 
     def predicted_pressure_delta(self,
                                  magnitude,
@@ -3807,3 +3863,30 @@ class ForceOptimizer:
             return interactive.Grid([
                 [b.to_widget() for b in bits]
             ], dynamic=False)#.to_widget().display()
+
+    def plot_random_distortion_energies(self,
+                                        which,
+                                        displacements=None,
+                                        use_internals=False,
+                                        **opts):
+        if displacements is None:
+            displacements = self.random_dirs
+        return self.plot_distortion_energies(
+            which,
+            displacements=displacements,
+            use_internals=use_internals,
+            **opts
+        )
+
+    def plot_random_distortion_forces(self, which,
+                                        displacements=None,
+                                        use_internals=False,
+                                        **opts):
+        if displacements is None:
+            displacements = self.random_dirs
+        return self.plot_distortion_forces(
+            which,
+            displacements=displacements,
+            use_internals=use_internals,
+            **opts
+        )
