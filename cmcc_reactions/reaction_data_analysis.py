@@ -389,18 +389,17 @@ class BarrierHeightDataset:
     def get_data_fields(self):
         return {
             'reactant_energies': self.reactant_energies,
-            'force_modified_reactant_energies':self.fm_reactant_energies,
+            'force_modified_reactant_energies': self.fm_reactant_energies,
             'transition_state_energies': self.transition_state_energies,
-            'force_modified_transition_state_energies':self.fm_transition_state_energies
-        } | {
-                'atoms': self.atoms,
-                'force_magnitudes': self.force_magnitudes,
-                'force_vectors': self.force_vectors,
-                'reactant_geometries': self.reactant_geometries,
-                'transition_state_geometries': self.transition_state_geometries,
-                'force_modified_reactant_geometries': self.force_modified_reactant_geometries,
-                'force_modified_transition_state_geometries': self.force_modified_transition_state_geometries
-            } | self.meta_fields
+            'force_modified_transition_state_energies': self.fm_transition_state_energies,
+            'atoms': self.atoms,
+            'force_magnitudes': self.force_magnitudes,
+            'force_vectors': self.force_vectors,
+            'reactant_geometries': self.reactant_geometries,
+            'transition_state_geometries': self.transition_state_geometries,
+            'force_modified_reactant_geometries': self.force_modified_reactant_geometries,
+            'force_modified_transition_state_geometries': self.force_modified_transition_state_geometries
+        } | self.meta_fields
     def filter_by_inds(self, mi):
         opts = {
             k: [fms[i] for i in mi] if fms is not None else None
@@ -541,8 +540,10 @@ class BarrierHeightDataset:
         return res
 
     def add_aggregation_fields(self, field_generator=None, input='optimizer', pool=True, **opts):
+        base_fields = self.get_data_fields()
         if field_generator is not None:
             subfields = self.dispatch_over_dataset(field_generator, pool=pool, input=input)
+            print(subfields)
             new_agg = {
                 f:[v]
                 for f,v in subfields[0].items()
@@ -551,11 +552,8 @@ class BarrierHeightDataset:
                 for f,v in s.items():
                     new_agg[f].append(v)
             opts = opts | new_agg
+        opts = base_fields | opts
         return type(self)(
-            self.reactant_energies,
-            self.fm_reactant_energies,
-            self.transition_state_energies,
-            self.fm_transition_state_energies,
             dataset=self.dataset,
             **(self.meta_fields | opts)
         )
@@ -578,12 +576,12 @@ class BarrierHeightDataset:
         if pool:
             max_size = len(self)
             nproc = pool._processes
-            block_size = max_size // nproc
+            block_size = max(max_size // nproc, 1)
             num_blocks = int(np.ceil(max_size / block_size))
             blocks = [
                 [
                     self.load_opt_res(j) if use_opt else self.get_tree_data(j)
-                    for j in range(block_size*i, min([block_size, max_size - (block_size*i+1) + 1]))
+                    for j in range(block_size*i, min([(block_size*i+1), max_size]))
                 ]
                 for i in range(num_blocks)
             ]
@@ -990,10 +988,12 @@ class BarrierHeightDataset:
             **opts
         )
     def save_meta(self, file, mode=None, **etc):
-        ds = self.meta_fields | {
-
-        }
+        ds = self.get_data_fields()
         return utils.write_tree(file, ds, mode=mode, **etc)
+    def load_meta(self, file, mode=None, **etc):
+        return self.add_aggregation_fields(
+            **utils.read_tree(file, mode=mode, **etc)
+        )
     def save_dataset(self, file, mode=None, **etc):
         ds = self.get_reduced_dataset()
         return pipeline.write_compressed_pipeline_data(file, ds, mode=mode, **etc)

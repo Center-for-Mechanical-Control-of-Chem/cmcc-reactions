@@ -1748,10 +1748,19 @@ H	-3.015828   -1.433443    1.079180''',
                 data['smiles'])
         )
 
-        ggg = bhd.dispatch_over_dataset(
+        bhd = bhd[:10]
+
+        ggg = bhd.add_aggregation_fields(
             functools.partial(bhd.compute_default_descriptors, compute_sterics=False)
         )
+        print(ggg.gammas)
+
+        ggg.save_meta('/Users/Mark/Desktop/plop.npz')
+        ggg = bhd.load_meta('/Users/Mark/Desktop/plop.npz')
+
         print(ggg)
+        print(ggg.gammas)
+        ggg[lambda d:d['gammas'] < 1000000].plot()
 
 if __name__ == '__main__':
     os.chdir(root)
