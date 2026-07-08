@@ -543,7 +543,6 @@ class BarrierHeightDataset:
         base_fields = self.get_data_fields()
         if field_generator is not None:
             subfields = self.dispatch_over_dataset(field_generator, pool=pool, input=input)
-            print(subfields)
             new_agg = {
                 f:[v]
                 for f,v in subfields[0].items()
