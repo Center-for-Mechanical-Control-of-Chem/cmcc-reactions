@@ -484,13 +484,24 @@ class BarrierHeightDataset:
             yield ids, g
     @classmethod
     def aggregate_mask_values(cls, values, keys):
+        smol = False
         if isinstance(values, dict):
             values = {
                 k: np.asanyarray(v) if nput.is_array_like(v) else v
                 for k, v in values.items()
             }
-        elif nput.is_array_like(values):
-            values = np.asanyarray(values)
+        elif nput.is_atomic(values[0]):
+            smol = True
+            if nput.is_array_like(values): values = np.asanyarray(values)
+            values = [values]
+        else:
+            if nput.is_atomic(keys[0]):
+                keys = [keys]
+            smol = len(values) == len(keys[0])
+            if smol:
+                values = [values]
+            values = [np.asanyarray(v) if nput.is_array_like(v) else v for v in values]
+
         for ids, g in cls.aggregate_mask_inds(keys):
             if isinstance(values, dict):
                 subvals = {
@@ -498,7 +509,11 @@ class BarrierHeightDataset:
                     for k, v in values.items()
                 }
             else:
-                subvals = values[g,] if isinstance(values, np.ndarray) else [values[i] for i in g]
+                subvals = [
+                    v[g,] if isinstance(v, np.ndarray) else [v[i] for i in g]
+                    for v in values
+                ]
+            if smol: subvals = subvals[0]
             yield ids, g, subvals
 
     @classmethod
@@ -619,6 +634,20 @@ class BarrierHeightDataset:
         if isinstance(value_keys, str): value_keys = [value_keys]
         return self.aggregate_by_groups(tuple(filter_data[v] for v in value_keys),
                                         tuple(filter_data[k] for k in aggregation_keys))
+
+    def group_by_props(self, aggregation_keys,
+                           energy_units="Kilocalories/Mole",
+                           force_units="Picojoules/Meters"):
+        filter_data = self.get_filter_data(
+            energy_units=energy_units,
+            force_units=force_units
+        )
+        if isinstance(aggregation_keys, str): aggregation_keys = [aggregation_keys]
+        mask_data = self.aggregate_by_groups(
+            np.arange(len(self)),
+            tuple(filter_data[k] for k in aggregation_keys)
+        )
+        return {k:self.filter_by_inds(i) for k,i in mask_data.items()}
 
     def plot(self, color=None, force_units="Picojoules/Meters", figure=None, plot_baseline=None, baseline=0,
              baseline_styles=None,
