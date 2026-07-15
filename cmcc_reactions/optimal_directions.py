@@ -1749,7 +1749,11 @@ class ForceOptimizer:
 
         return (gammas, dirs), modes, coeffs
 
-    def prep_displacement(self, coords, displacement, remove_transrot=True, remove_orientation=True):
+    def prep_displacement(self, coords, displacement,
+                          remove_transrot=True,
+                          remove_orientation=True,
+                          preserve_norm=False
+                          ):
         rot = np.asanyarray(displacement)
         if remove_transrot:
             ## try removing tranrot in
@@ -1759,7 +1763,11 @@ class ForceOptimizer:
                                                        mass_weighted=False,
                                                        orthonormal=False)
             # rot = rot @ proj
+            if preserve_norm:
+                norms = nput.vec_norms(rot)
             rot = rot @ np.moveaxis(proj, -1, -2)
+            if preserve_norm:
+                rot = nput.vec_normalize(rot) * norms
 
         if remove_orientation:
             rot = rot.reshape(rot.shape[:-2] + (1, -1))
@@ -1774,7 +1782,12 @@ class ForceOptimizer:
                 dx = dx[..., (3, 4, 5), :]
             proj = nput.frame_displacement_projector(np.moveaxis(dx, -1, -2), self.ts.masses, mass_weighted=False)
             # rot = rot @ proj
+
+            if preserve_norm:
+                norms = nput.vec_norms(rot)
             rot = rot @ np.moveaxis(proj, -1, -2)
+            if preserve_norm:
+                rot = nput.vec_normalize(rot) * norms
 
         return rot
 
@@ -1785,7 +1798,8 @@ class ForceOptimizer:
                             displacements=None,
                             reembed_displacements=None,
                             remove_transrot=True,
-                            remove_orientation=True
+                            remove_orientation=True,
+                            preserve_norm=False
                             ):
         displacements = self.get_displacement_dirs(mass_weight=mass_weight,
                                                    use_internals=use_internals,
@@ -1844,7 +1858,11 @@ class ForceOptimizer:
                                                            mass_weighted=False,
                                                            orthonormal=False)
                 # rot = rot @ proj
+                if preserve_norm:
+                    norms = nput.vec_norms(rot)
                 rot = rot @ np.moveaxis(proj, -1, -2)
+                if preserve_norm:
+                    rot = nput.vec_normalize(rot) * norms
 
             if remove_orientation:
                 rot = rot.reshape(rot.shape[:-2] + (1, -1))
@@ -1859,7 +1877,11 @@ class ForceOptimizer:
                     dx = dx[..., (3, 4, 5), :]
                 proj = nput.frame_displacement_projector(np.moveaxis(dx, -1, -2), self.ts.masses, mass_weighted=False)
                 # rot = rot @ proj
+                if preserve_norm:
+                    norms = nput.vec_norms(rot)
                 rot = rot @ np.moveaxis(proj, -1, -2)
+                if preserve_norm:
+                    rot = nput.vec_normalize(rot) * norms
 
             rot = rot.reshape(base_grad.shape)
             return -rot
@@ -1891,6 +1913,7 @@ class ForceOptimizer:
                               reembed_displacements=None,
                               remove_transrot=True,
                               remove_orientation=None,
+                              preserve_projected_norm=False,
                               output_dir=None,
                               info_file='force_modified_{mode}_{mag}.json',
                               displacements=None,
@@ -1956,6 +1979,7 @@ class ForceOptimizer:
                     reembed_displacements=reembed_displacements,
                     remove_transrot=remove_transrot,
                     remove_orientation=remove_orientation,
+                    preserve_projected_norm=preserve_projected_norm,
                     output_dir=output_dir,
                     info_file='force_modified_{mode}_{mag}_neg.json',
                     displacements=displacements,
@@ -2001,6 +2025,7 @@ class ForceOptimizer:
                     reembed_displacements=reembed_displacements,
                     remove_transrot=remove_transrot,
                     remove_orientation=remove_orientation,
+                    preserve_projected_norm=preserve_projected_norm,
                     output_dir=output_dir,
                     info_file='force_modified_{mode}_{mag}_neg.json',
                     displacements=displacements,
@@ -2108,6 +2133,7 @@ class ForceOptimizer:
                                 reembed_displacements=reembed_displacements,
                                 remove_transrot=remove_transrot,
                                 remove_orientation=remove_orientation,
+                                preserve_projected_norm=preserve_projected_norm,
                                 output_dir=output_dir,
                                 info_file='force_modified_{mode}_{mag}_step.json',
                                 displacements=displacements,
@@ -2138,7 +2164,9 @@ class ForceOptimizer:
                                                                        mass_weight=mass_weight,
                                                                        reembed_displacements=reembed_displacements,
                                                                        remove_transrot=remove_transrot,
-                                                                       remove_orientation=remove_orientation)
+                                                                       remove_orientation=remove_orientation,
+                                                                       preserve_norm=preserve_projected_norm
+                                                                       )
                             if rigid_scan_options is None:
                                 rigid_scan_options = {}
                             if rigid_scan_steps is not None:
@@ -2186,6 +2214,7 @@ class ForceOptimizer:
                                     reembed_displacements=reembed_displacements,
                                     remove_transrot=remove_transrot,
                                     remove_orientation=remove_orientation,
+                                    preserve_projected_norm=preserve_projected_norm,
                                     output_dir=output_dir,
                                     info_file='force_modified_{mode}_{mag}_pre.json',
                                     displacements=displacements,
@@ -2226,6 +2255,7 @@ class ForceOptimizer:
                                     reembed_displacements=reembed_displacements,
                                     remove_transrot=remove_transrot,
                                     remove_orientation=remove_orientation,
+                                    preserve_projected_norm=preserve_projected_norm,
                                     output_dir=output_dir,
                                     info_file='force_modified_{mode}_{mag}_pre.json',
                                     displacements=displacements,
@@ -2264,7 +2294,8 @@ class ForceOptimizer:
                                                                                                         mass_weight=mass_weight,
                                                                                                         reembed_displacements=reembed_displacements,
                                                                                                         remove_transrot=remove_transrot,
-                                                                                                        remove_orientation=remove_orientation)
+                                                                                                        remove_orientation=remove_orientation,
+                                                                                                        preserve_norm=preserve_projected_norm)
                             else:
                                 gradient_modification_function, force_vector = None, None
 
