@@ -833,7 +833,9 @@ default_step_ordering = {
     'pressure':3,
     'rigid-pressure':3,
     'random':3,
-    'rigid-random':3
+    'rigid-random':3,
+    'fmrds-useint':3,
+    'rigid-fmrds-useint':3
 }
 def _check_step(force_steps, key, current):
     if dev.is_dict_like(force_steps):
@@ -1018,6 +1020,46 @@ def run_optimization_pipeline(
                 print(f"saving to {output_file}...")
                 input_data.save(output_file)
 
+        if 'fmrds-useint' in steps and _check_step(force_steps, 'fmrds-useints', None):
+            if optimizer is None:
+                opt_force = input_data.optimized_forces
+                if opt_force is None:
+                    raise ValueError("optimized forces needed to get force modified reaction data")
+                optimizer = fopt.ForceOptimizer.from_data(opt_force)
+            if verbose:
+                print('running fmrds with `use_internals=True')
+
+
+            if force_modification_settings is None:
+                force_modification_settings = {}
+            force_modification_settings = global_options | force_modification_settings
+            fmrds = run_fmrds(optimizer, use_internals=True, **force_modification_settings)
+            input_data.fmrds = [f[2] for f in fmrds]
+
+            if output_file is not None:
+                print(f"saving to {output_file}...")
+                input_data.save(output_file)
+
+        if 'rigid-fmrds-useint' in steps and _check_step(force_steps, 'fmrds-useints', None):
+            if optimizer is None:
+                opt_force = input_data.optimized_forces
+                if opt_force is None:
+                    raise ValueError("optimized forces needed to get force modified reaction data")
+                optimizer = fopt.ForceOptimizer.from_data(opt_force)
+            if verbose:
+                print('running rigid fmrds with `use_internals=True')
+
+
+            if force_modification_settings is None:
+                force_modification_settings = {}
+            force_modification_settings = global_options | force_modification_settings
+            fmrds = run_fmrds(optimizer, rigid=True, use_internals=True, **force_modification_settings)
+            input_data.fmrds = [f[2] for f in fmrds]
+
+            if output_file is not None:
+                print(f"saving to {output_file}...")
+                input_data.save(output_file)
+
         if 'internals' in steps and _check_step(force_steps, 'internals', None):
             if optimizer is None:
                 opt_force = input_data.optimized_forces
@@ -1168,7 +1210,7 @@ def run_optimization_pipeline(
             'pipeline_data_internals.json':['internals'],
             'pipeline_data_internals_rigid.json':['rigid-internals'],
             'pipeline_data_random.json':['random'],
-            'pipeline_data_random_rigid.json':['rigid-random'],
+            'pipeline_data_random_rigid.json':['rigid-random']
         }
     if step_output_files is not None:
         errors = []
