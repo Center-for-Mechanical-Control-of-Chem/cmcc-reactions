@@ -861,6 +861,7 @@ def run_optimization_pipeline(
         max_iterations=500,
         tol=1e-8,
         energy_evaluator=None,
+        no_output_is_nothing=False,
         **global_options
 ) -> OptimizedForceResults:
     if isinstance(input_data, str):
@@ -1201,7 +1202,7 @@ def run_optimization_pipeline(
                 print(f"saving to {output_file}...")
                 input_data.save(output_file)
     finally:
-        if output_file is not None:
+        if not no_output_is_nothing and output_file is not None:
             print(f"saving to {output_file}...")
             input_data.save(output_file)
     if dev.str_is(step_output_files, 'auto'):
@@ -1223,6 +1224,7 @@ def run_optimization_pipeline(
                     input_data,
                     output_file=of,
                     steps=steps,
+                    no_output_is_nothing=True,
                     **(
                         global_options | dict(
                             verbose=verbose,

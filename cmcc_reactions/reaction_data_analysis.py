@@ -10,9 +10,7 @@ import multiprocessing
 import rdkit.Chem.AllChem as Chem
 from McUtils.ExternalPrograms import RDMolecule
 
-from . import reaction_data_schema as schema
 from . import utils
-from . import generate_reaction_products as gen_prods
 from . import trajectory_tools as trajt
 from . import pipeline
 
@@ -21,6 +19,7 @@ from McUtils.Data import UnitsData, BondData
 import McUtils.Numputils as nput
 import McUtils.Plots as plt
 import McUtils.Iterators as itut
+import McUtils.Formatters as mfmt
 from Psience.Molecools import Molecule
 
 __all__ = [
@@ -1162,4 +1161,184 @@ def functionalization_keys(smiles):
         'functional_group_types': itut.counts(func1 + func2)
     }
 
+def fmrd_barrier(fmrd, return_bits=False):
+    if hasattr(fmrd, 'fmrds'):
+        fmrd = fmrd.fmrds[0]
+    bits = np.array([
+        fmrd.force_modified_transition_state_energy - fmrd.transition_state_energy,
+        fmrd.force_modified_reactant_energy - fmrd.reactant_energy
+    ]) * UnitsData.convert("Hartrees", "Kilocalories/Mole")
+    if return_bits:
+        return bits
+    else:
+        return bits[0] - bits[1]
+def pre_barrier(fmrd, return_bits=False):
+    if hasattr(fmrd, 'fmrds'):
+        fmrd = fmrd.fmrds[0]
+    return (
+        fmrd.transition_state_energy - fmrd.reactant_energy
+    ) * UnitsData.convert("Hartrees", "Kilocalories/Mole")
 
+def prep_ds(ddd):
+    return BarrierHeightDataset.from_tree(
+        ddd,
+        annotation_generator=lambda id, data: {
+            'smiles': data['smiles']
+        } | functionalization_keys(data['smiles'])
+    )
+filter_cache = {}
+def load_prep_filter(file):
+    if file not in filter_cache:
+        ddd_reg = pipeline.read_compressed_pipeline_data(file)
+        ds_reg = prep_ds(ddd_reg)
+        filter_cache[file] = ds_reg
+    else:
+        ds_reg = filter_cache[file]
+    d2_reg = filter_d2(ds_reg)
+    return ds_reg, d2_reg
+
+def filter_d2(ds, barrier_range=[5, 80], max_delta=50, ts_thresh=0, ts_max=25, rx_thresh=-.1, rx_max=25):
+    return ds.filter_by_props([
+        lambda d: d['delta_transition_state'] > ts_thresh,
+        lambda d: d['delta_transition_state'] < ts_max,
+        lambda d: d['delta_reactant'] > rx_thresh,
+        lambda d: d['delta_reactant'] < rx_max,
+        lambda d: d['barrier'] > barrier_range[0],
+        lambda d: d['barrier'] < barrier_range[1],
+        lambda d: np.abs(d['delta']) < max_delta
+    ])
+
+def animate_rx(opt, **etc):
+    return opt.animate_reactant_distortion(0, **(dict(embedding_indices=[0, 1, 2, 3, 4]) | etc))
+def animate_ts(opt, **etc):
+    return opt.animate_ts_distortion(0, **(dict(embedding_indices=[0, 1, 2, 3, 4]) | etc))
+def animate_fmrd(opt, **etc):
+    return opt.animate_fmrd_direction(0, **(dict(embedding_indices=[0, 1, 2, 3, 4]) | etc))
+
+
+eh2kcal = UnitsData.convert("Hartrees", "Kilocalories/Mole")
+def plot_dataset_histogram(ds, magnitudes=(50, 100, 200), use_abs=True,
+                           color_generator=None,
+                           figure=None,
+                           property='delta',
+                           conv=None,
+                           rx_max=100, ts_max=100,
+                           barrier_range=[5, 80],
+                           max_delta=50,
+                           ts_thresh=0,
+                           rx_thresh=-0.1,
+                           **etc):
+    if color_generator is None:
+        color_generator = lambda i: plt.prep_color(palette='default', index=i)+"aa"
+    figure = figure
+    base_styles = (dict(
+                # plot_label='rigid',
+                plot_legend=True,
+                legend_style={'frameon':False},
+                image_size=800,
+                axes_labels=[r'$\Delta\Delta E_\text{a}$', 'Counts']
+            ) | etc) if figure is None else etc
+    if conv is None:
+        conv = UnitsData.convert("Hartrees", "Kilocalories/Mole")
+    for i,m in enumerate(magnitudes):
+        subds = filter_d2(ds,
+                         rx_max=rx_max, ts_max=ts_max,
+                           barrier_range=barrier_range,
+                           max_delta=max_delta,
+                           ts_thresh=ts_thresh,
+                           rx_thresh=rx_thresh,
+                         )[
+                lambda d: (np.abs(d['force_magnitudes']) if use_abs else d['force_magnitudes']) < m+1,
+                lambda d: (np.abs(d['force_magnitudes']) if use_abs else d['force_magnitudes']) > m-1
+            ]
+        figure = plt.HistogramPlot(
+            getattr(subds, property) * conv,
+            bins=100,
+            figure=figure,
+            color=color_generator(i),
+            label=f"{m} pN",
+            **(base_styles if i == 0 else {})
+        )
+    return figure
+
+
+def plot_dataset_stereocomp(subd1, subd2, label1='', label2=''):
+    min_e1, min_e2 = np.min(subd1.reactant_energies), np.min(subd2.reactant_energies)
+    min_g1 = np.where(np.abs(subd1.reactant_energies - min_e1) < 1e-8)[0]
+    min_g2 = np.where(np.abs(subd2.reactant_energies - min_e2) < 1e-8)[0]
+    am1, am2 = np.argmin(subd1.barriers), np.argmin(subd2.barriers)
+    af1, af2 = np.argmin(subd1.reactant_energies + subd1.delta_r), np.argmin(subd2.reactant_energies + subd2.delta_r)
+
+    mb1, mb2 = np.min(subd1.barriers), np.min(subd2.barriers)
+    mbf1, mbf2 = np.min(subd1.barriers + subd1.deltas), np.min(subd2.barriers + subd2.deltas)
+
+    meb1, meb2 = subd1.barriers[min_g1[0]], subd2.barriers[min_g2[0]]
+    mef1, mef2 = subd1.barriers[af1] + subd1.deltas[af1], subd2.barriers[af2] + subd2.deltas[af2]
+
+    mebf1, mebf2 = (
+        np.min(subd1.barriers[min_g1,] + subd1.deltas[min_g1,]),
+        np.min(subd2.barriers[min_g2,] + subd2.deltas[min_g2,])
+    )
+
+    dat = [
+        ["Min Barrier Solvo:", mb1, mb2, mb1 - mb2],
+        ["Min Barrier Force:", mbf1, mbf2, mbf1 - mbf2],
+        # [subd1.barriers[am1] + subd1.deltas[am1], subd2.barriers[am2] + subd2.deltas[am2]],
+        ["Min Energy Solvo:", meb1, meb2, meb1 - meb2],
+        ["Min Energy Force:", mef1, mef2, mef1 - mef2],
+        ["Min Energy/Barrier:", mebf1, mebf2, mebf1 - mebf2]
+    ]
+    dat = [
+        [dd * UnitsData.convert("Hartrees", "Kilocalories/Mole") if nput.is_numeric(dd) else dd for dd in ddd]
+        for ddd in dat
+    ]
+    return mfmt.TableFormatter(".1f",
+                               headers=[
+                                   [label1, 'Endo', 'Exo', 'Delta'],
+                                   [label2, "kcal/mol", "kcal/mol", "kcal/mol"]
+                               ],
+                               column_alignments=['>', '^', '^']
+                               ).format(dat)
+
+def extract_group_means(dp_groups2, filters=None):
+    dist = []
+    labs = []
+    if filters is None:
+        filters = [
+                lambda d:d['delta'] > -10,
+                lambda d:np.abs(d['force_magnitudes']) > 199
+            ]
+    for key,ds in dp_groups2.items():
+        ds = ds.__getitem__(*filters)
+        if len(ds) > 0:
+            dist.append([
+                np.mean(ds.deltas * eh2kcal),
+                np.std(ds.deltas * eh2kcal)
+            ])
+            labs.append(key)
+    return labs, dist
+
+def format_group_table(labs, dists):
+    return mfmt.TableFormatter('.2f', headers=['Diene Funcs', 'Diop Funcs.', 'Mean', 'Std']).format([
+        list(k) + d
+        for k, d in zip(labs, dists)
+    ])
+def plot_group_means(labs, dist):
+    return plt.ScatterPlot(*np.array(dist).T, axes_labels=[r'$\Delta\Delta E_a$ (kcal mol$^{-1}$)', ' Standard Deviation'])
+def add_keys(d2_reg):
+    d2_reg_keyed = d2_reg.add_aggregation_fields(
+        diop_func=np.array([" ".join(d) for d in d2_reg.dienophile_functionalizations]),
+        dien_func=np.array([" ".join(d) for d in d2_reg.diene_functionalizations]),
+        d_path=np.array(["/".join(d) for d in d2_reg.data_ids])
+        # pool=None
+    )
+    return d2_reg_keyed
+
+def get_dienophile_groups(d2_reg):
+    d2_reg_keyed = add_keys(d2_reg)
+    dp_groups = {
+        k: d.group_by_props('smiles')
+        for k, d in d2_reg_keyed.group_by_props('diop_func').items()
+    }
+    dp_groups2 = d2_reg_keyed.group_by_props(['dien_func', 'diop_func'])
+    return d2_reg_keyed, dp_groups, dp_groups2
