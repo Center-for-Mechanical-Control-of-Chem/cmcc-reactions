@@ -3663,7 +3663,7 @@ class ForceOptimizer:
 
             (g_idx_t, g_perc_t) = ts_data[2]
             gl_t = g[1]
-            if g_perc_t >= 0:
+            if g_perc_t >= 0 and g_idx_t < len(gl_t) - 1:
                 g_t = gl_t[g_idx_t] * (1-g_perc_t) + gl_t[g_idx_t+1] * g_perc_t
             elif g_idx_t+1 == len(gl_t):
                 g_t = gl_t[g_idx_t] + (gl_t[g_idx_t] - gl_t[g_idx_t-1]) * g_perc_t
