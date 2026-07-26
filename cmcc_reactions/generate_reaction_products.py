@@ -90,23 +90,15 @@ def _get_atom_idx(mol, map_num):
     raise ValueError(f"Atom map number {map_num} not found in molecule.")
 def _pop_hydrogen(ref_mol, new_mol, idx1, idx2):
     a1 = ref_mol.GetAtomWithIdx(idx1)
-    is_aromatic = a1.GetIsAromatic()
     implicit_hs = a1.GetNumImplicitHs()
     explicit_hs = a1.GetNumExplicitHs()
-    if is_aromatic:
-        a1 = new_mol.GetAtomWithIdx(idx2)
-        a1.SetIsAromatic(False)
-        for b in a1.GetBonds():
-            if b.GetBondType() == Chem.BondType.AROMATIC:
-                b.SetBondType(Chem.BondType.SINGLE)
-        return False, True
-    elif implicit_hs > 0:
-        return False, False
+    if implicit_hs > 0:
+        return False
     elif explicit_hs > 0:
         a1 = new_mol.GetAtomWithIdx(idx2)
         explicit_hs = a1.GetNumExplicitHs()
         a1.SetNumExplicitHs(explicit_hs - 1)
-        return False, False
+        return False
     else:
         # Find one explicit neighbor on the new mol
         a1 = new_mol.GetAtomWithIdx(idx2)
@@ -114,32 +106,16 @@ def _pop_hydrogen(ref_mol, new_mol, idx1, idx2):
             if neighbor.GetAtomicNum() == 1:
                 h_idx = neighbor.GetIdx()
                 new_mol.RemoveAtom(h_idx)
-                return True, False
-        return False, False
-def _add_hydrogen(new_mol, idx1, allow_explicit=True):
-    a1 = new_mol.GetAtomWithIdx(idx1)
-    is_aromatic = a1.GetIsAromatic()
-    if is_aromatic:
-        a1.SetIsAromatic(False)
-        for b in a1.GetBonds():
-            if b.GetBondType() == Chem.BondType.AROMATIC:
-                b.SetBondType(Chem.BondType.SINGLE)
-        # return False, True
-    implicit_hs = not a1.GetNoImplicit()
-    explicit_hs = a1.GetNumExplicitHs()
-    if implicit_hs:
-        return False, is_aromatic
-    elif explicit_hs >= 0 and allow_explicit:
-        explicit_hs = a1.GetNumExplicitHs()
-        a1.SetNumExplicitHs(explicit_hs + 1)
-        return False, is_aromatic
-    else:
-        # Find one explicit neighbor on the new mol
-        a = Chem.Atom("H")
-        idx2 = new_mol.AddAtom(a)
-        new_mol.AddBond(idx2, idx1, Chem.BondType.SINGLE)
-        return True, is_aromatic
-def load_cached_mol(smiles1, cache, add_implicit_hydrogens=False):
+                return True
+        return False
+def join_fragments(smiles1: str, smiles2: str, new_bonds,
+                   cache=None,
+                   resanitize=True,
+                   add_implicit_hydrogens=False,
+                   fallback_to_ordering=False,
+                   decrement_hydrogens=True) -> str:
+    if cache is None:
+        cache = {}
     if smiles1 not in cache:
         mol = RDMolecule.parse_smiles(smiles1, remove_hydrogens=True, add_implicit_hydrogens=add_implicit_hydrogens)
         if mol is not None:
@@ -148,57 +124,24 @@ def load_cached_mol(smiles1, cache, add_implicit_hydrogens=False):
         else:
             map = None
         cache[smiles1] = {'mol': mol, 'map': map}
-    return cache[smiles1]
-def get_rdkit_bond_type(t, as_number=False):
-    if nput.is_numeric(t):
-        if as_number: return t
-        if t == 1:
-            t = Chem.BondType.SINGLE
-        elif t == 2:
-            t = Chem.BondType.DOUBLE
-        elif t == 3:
-            t = Chem.BondType.TRIPLE
-        elif 1 < t and t < 2:
-            t = Chem.BondType.AROMATIC
-        elif 2 < t and t < 3:
-            t = Chem.BondType.TWOANDAHALF
-        elif 3 < t and t < 4:
-            t = Chem.BondType.THREEANDAHALF
+    if smiles2 not in cache:
+        mol = RDMolecule.parse_smiles(smiles2, remove_hydrogens=True, add_implicit_hydrogens=add_implicit_hydrogens)
+        if mol is not None:
+            map = {a.GetAtomMapNum(): a.GetIdx() for a in mol.GetAtoms()}
+            map.pop(0, None)
         else:
-            raise ValueError(f"Bond type {t} is not supported.")
-    elif not as_number:
-        bond_type_map = {
-            Chem.BondType.SINGLE: 1.0,
-            Chem.BondType.DOUBLE: 2.0,
-            Chem.BondType.TRIPLE: 3.0,
-            Chem.BondType.AROMATIC: 1.5,
-            Chem.BondType.TWOANDAHALF: 2.5,
-            Chem.BondType.THREEANDAHALF: 3.5,
-            Chem.BondType.UNSPECIFIED: 0.0
-        }
-        return bond_type_map[t]
-    return t
-def join_fragments(smiles1: str, smiles2: str, new_bonds,
-                   cache=None,
-                   resanitize=True,
-                   add_implicit_hydrogens=False,
-                   fallback_to_ordering=False,
-                   decrement_hydrogens=True,
-                   return_mol=False) -> str:
-    if cache is None:
-        cache = {}
-    mol_data1 = load_cached_mol(smiles1, cache, add_implicit_hydrogens=add_implicit_hydrogens)
-    mol_data2 = load_cached_mol(smiles2, cache, add_implicit_hydrogens=add_implicit_hydrogens)
-    mol1 = mol_data1['mol']
-    mol2 = mol_data2['mol']
+            map = None
+        cache[smiles2] = {'mol': mol, 'map': map}
+    mol1 = cache[smiles1]['mol']
+    mol2 = cache[smiles2]['mol']
 
     if mol1 is None:
         raise ValueError(f"bad SMILES {smiles1}")
     if mol1 is None:
         raise ValueError(f"bad SMILES {smiles2}")
 
-    map1 = mol_data1['map']
-    map2 = mol_data2['map']
+    map1 = cache[smiles1]['map']
+    map2 = cache[smiles2]['map']
     offset = mol1.GetNumAtoms()
 
     map2 = {m+offset: i+offset for m,i in map2.items()}
@@ -207,7 +150,6 @@ def join_fragments(smiles1: str, smiles2: str, new_bonds,
     combined = Chem.CombineMols(mol1, mol2)
     editable = Chem.RWMol(combined)
 
-    dearomitized_atoms = []
     for b in new_bonds:
         if len(b) == 2:
             m1, m2 = b
@@ -235,139 +177,26 @@ def join_fragments(smiles1: str, smiles2: str, new_bonds,
 
         editable.AddBond(idx1, idx2, t)
         if decrement_hydrogens:
-            modified, dearomitized = _pop_hydrogen(mol1, editable, idx1, idx1)
-            # if dearomitized:
-            dearomitized_atoms.append(editable.GetAtomWithIdx(idx1))
+            success = _pop_hydrogen(mol1, editable, idx1, idx1)
             i2 = idx2 - offset
-            if modified:
+            if success:
                 offset = offset
                 idx2 = idx2 - 1
                 map2 = {m:i-1 for m,i in map2.items()}
-            _, dearomitized = _pop_hydrogen(mol2, editable, i2, idx2)
-            # if dearomitized:
-            dearomitized_atoms.append(editable.GetAtomWithIdx(idx2))
-    dearomitized_atoms = [a.GetIdx() for a in dearomitized_atoms]
+            _pop_hydrogen(mol2, editable, i2, idx2)
     joined = editable.GetMol()
 
     if resanitize:
         Chem.SanitizeMol(joined)
-
-    for idx in dearomitized_atoms:
-        joined.GetAtomWithIdx(idx).SetProp("dearomitized", "true")
 
     for m,i in map1.items():
         joined.GetAtomWithIdx(i).SetAtomMapNum(m)
     for m,i in map2.items():
         joined.GetAtomWithIdx(i).SetAtomMapNum(m - offset + len(map1))
 
-    if add_implicit_hydrogens:
-        joined = Chem.RemoveHs(joined)
-
-    for atom in joined.GetAtoms():
-        if atom.GetPropsAsDict().get('dearomitized'):
-            atom.SetIsAromatic(False)
-
-    if return_mol:
-        return joined
-    else:
-        return Chem.MolToSmiles(joined)
-def set_bond_order(smiles, start, end, order,
-                   cache=None,
-                   adjust_hydrogens=True,
-                   add_implicit_hydrogens=False,
-                   return_mol=False):
-    if cache is None:
-        cache = {}
-    mol_data = load_cached_mol(smiles, cache=cache, add_implicit_hydrogens=add_implicit_hydrogens)
-    start = mol_data['map'][start + 1]
-    end = mol_data['map'][end + 1]
-    editable = Chem.RWMol(mol_data['mol'])
-    b = editable.GetBondBetweenAtoms(start, end)
-    ext_type = b.GetBondTypeAsDouble()
-    order = get_rdkit_bond_type(order)
-    order_num = get_rdkit_bond_type(order, as_number=True)
-    if ext_type != order_num:
-        b.SetBondType(order)
-        if adjust_hydrogens:
-            if ext_type > order_num:
-                for i in range(int(np.ceil(ext_type - order_num))):
-                    _add_hydrogen(editable, start)
-                    _add_hydrogen(editable, end)
-            else:
-                for i in range(int(np.ceil(ext_type - order_num))):
-                    _pop_hydrogen(mol_data['mol'], editable, start, start)
-                    _pop_hydrogen(mol_data['mol'], editable, end, end)
-    mol = editable.GetMol()
     if add_implicit_hydrogens is not None:
-        mol = Chem.RemoveHs(mol)
-    if return_mol:
-        return mol
-    else:
-        return Chem.MolToSmiles(mol)
-def join_diels_alder_template(diene: str, dienophile: str,
-                              new_bonds=((0, 0), (1, 1)),
-                              cache=None,
-                              resanitize=False,
-                              add_implicit_hydrogens=False,
-                              fallback_to_ordering=False,
-                              decrement_hydrogens=True,
-                              renumber=True,
-                              return_mol=False):
-    if cache is None:
-        cache = {}
-    dienophile = set_bond_order(dienophile, 0, 1, 1, cache=cache)
-    frag = join_fragments(diene, dienophile, new_bonds,
-                          cache=cache,
-                          resanitize=resanitize,
-                          add_implicit_hydrogens=add_implicit_hydrogens,
-                          fallback_to_ordering=fallback_to_ordering,
-                          decrement_hydrogens=decrement_hydrogens,
-                          return_mol=return_mol)
-    if not return_mol and renumber:
-        map_data1 = load_cached_mol(diene, cache=cache, add_implicit_hydrogens=add_implicit_hydrogens)
-        offset = len(map_data1['map'])
-        frag = renumber_atom_map(frag, {offset:2, offset+1:3},
-                                 cache=cache,
-                                 add_implicit_hydrogens=add_implicit_hydrogens)
-    return frag
-def renumber_atom_map(smiles,
-                      remapping,
-                      cache=None,
-                      shift=True,
-                      add_implicit_hydrogens=False):
-    if cache is None:
-        cache = {}
-    mol_data = load_cached_mol(smiles, cache, add_implicit_hydrogens=add_implicit_hydrogens)
-    mol = mol_data['mol']
-    map = mol_data['map']
-
-    mol = Chem.Mol(mol)
-    map = map.copy()
-    for i,j in remapping.items():
-        i = i + 1
-        j = j + 1
-        cur_i = map[i]
-        cur_j = map.get(j)
-        del map[i]
-        map[j] = cur_i
-        if cur_j is not None:
-            if shift:
-                k = j+1
-                while k in map:
-                    tmp = map[k]
-                    map[k] = cur_j
-                    cur_j = tmp
-                    k = k + 1
-                else:
-                    map[k] = cur_j
-            else:
-                map[i] = cur_j
-    for i,a in map.items():
-        mol.GetAtomWithIdx(a).SetAtomMapNum(i)
-    if add_implicit_hydrogens:
-        mol = Chem.RemoveHs(mol)
-
-    return Chem.MolToSmiles(mol)
+        joined = Chem.RemoveHs(joined)
+    return Chem.MolToSmiles(joined)
 
 def set_chiralities(base_smiles, site_chirality_map):
     if not isinstance(base_smiles, str):
@@ -446,11 +275,8 @@ def fragment_to_smiles_iterator(
             continue
         temp = template
         for site,frag in zip(active_sites, frags):
-            if nput.is_int(site):
-                site = [site]
-            new_bonds = [[s, i] for i,s in enumerate(site)]
             try:
-                temp = join_fragments(temp, frag, new_bonds,
+                temp = join_fragments(temp, frag, [[site, 0]],
                                       cache=cache,
                                       add_implicit_hydrogens=add_implicit_hydrogens)
             except Chem.rdchem.AtomValenceException:

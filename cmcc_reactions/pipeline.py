@@ -8,6 +8,7 @@ import numpy as np
 from dataclasses import dataclass
 import collections
 import os
+import copy
 
 from McUtils.Data import UnitsData
 import McUtils.Plots as plt
@@ -356,6 +357,42 @@ class OptimizedForceResults:
            mass_weight=mass_weight,
            **etc
        )
+
+    def fmrd_vector(self, fmrd, mol='rs'):
+        rrr = self.reactant if mol == 'rs' else self.transition_state
+        if nput.is_int(fmrd):
+            fmrd = self.fmrds[fmrd]
+        fv = fmrd.force_vector
+        fv_func = self.optimizer.mode_force_function(
+            0,
+            magnitude=fmrd.force_magnitude,
+            use_internals=len(fv) < len(rrr.atoms) * 3,
+            displacements=[fv]
+            # displacements=opt.optimizer.pure_internal_displacement_matrix
+        )[0]
+        fv = -fv_func(rrr.coords, np.zeros(len(rrr.atoms) * 3))
+        return fv
+
+    def plot_fmrd_vector(self, fmrd, mol='rs',
+                         coord_preprocessor='center',
+                         scaling=10, normalize=True, processor=None, **etc):
+        rrr = self.reactant if mol == 'rs' else self.transition_state
+        fv = self.fmrd_vector(fmrd, mol=mol)
+        if normalize:
+            fv = nput.vec_normalize(fv).reshape(-1, 3)
+        fv = fv * scaling
+        if processor is not None:
+            fv = processor(fv)
+        coords = rrr.coords
+        if dev.str_is(coord_preprocessor, 'center'):
+            coord_preprocessor = lambda c: c - np.average(c[(2, 3), :], axis=0)[np.newaxis]
+        if coord_preprocessor is not None:
+            coords = coord_preprocessor(coords)
+        return rrr.plot(
+            coords,
+            mode_vectors=fv,
+            **etc
+        )
 
     def predicted_fmrd_distortion(self, fmrd_index, mass_weight=False, **etc):
        return self.optimizer.predicted_delta_from_forces(
@@ -708,6 +745,7 @@ def run_fmrds(optimizer,
               nmodes=15,
               magnitude=(-200, -100, -50, 50, 100, 200),
               split_magnitudes=True,
+              verbose=True,
               pool=None,
               **opts):
     nmodes = min(optimizer.force_coeffs.shape[0], nmodes)
@@ -715,6 +753,7 @@ def run_fmrds(optimizer,
         list(range(nmodes)),
         magnitude=magnitude,
         split_magnitudes=split_magnitudes,
+        verbose=verbose,
         pool=pool,
         **opts
     )
@@ -727,6 +766,7 @@ def run_internal_fmrds(optimizer,
                        pool=None,
                        memprof=None,
                        split_magnitudes=True,
+                       return_selected=False,
                        **opts):
     if memprof is not None:
         print(f"Writing memory profile to {memprof}")
@@ -755,6 +795,7 @@ def run_internal_fmrds(optimizer,
             max_internals=max_internals,
             verbose=verbose,
             split_magnitudes=split_magnitudes,
+            return_selected=return_selected,
             **opts
         )
 
@@ -1191,13 +1232,15 @@ def run_optimization_pipeline(
                     _check_step(force_steps, steps[-1], True if os.path.isfile(of) else None)
             ): continue
             try:
+                input_data = copy.copy(input_data)
+                input_data.fmrds = None
                 run_optimization_pipeline(
                     input_data,
                     output_file=of,
                     steps=steps,
                     no_output_is_nothing=True,
                     **(
-                        global_options | dict(
+                        dict(overwrite=True) | global_options | dict(
                             verbose=verbose,
                             trajectory_optimization_settings=trajectory_optimization_settings,
                             refined_trajectory_optimization_settings=refined_trajectory_optimization_settings,

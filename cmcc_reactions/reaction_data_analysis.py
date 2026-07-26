@@ -813,6 +813,8 @@ class BarrierHeightDataset:
                             loader,
                             field_map=None,
                             filter=None,
+                            data_preprocessor=None,
+                            fmrd_filter=None,
                             discarded_keys=None,
                             annotation_generator=None,
                             **etc):
@@ -847,6 +849,8 @@ class BarrierHeightDataset:
         direction_ids = []
         magnitude_ids = []
         for id,data in loader:
+            if data_preprocessor is not None:
+                data = data_preprocessor(data)
             check = field_map['vectors']['force_modified_transition_state_energies']
             fmres = data.get(check)
             if fmres is None: continue
@@ -860,15 +864,29 @@ class BarrierHeightDataset:
                         data = data.copy()
                         needs_copy = False
                     data.pop(k, None)
+            if fmrd_filter is not None:
+                allowed_fmrds: list[int] = fmrd_filter(data)
+                if len(allowed_fmrds) == 0: continue
+            else:
+                allowed_fmrds = None
 
-            nterms = len(fmres)
+            if allowed_fmrds is None:
+                nterms = len(fmres)
+            else:
+                nterms = len(allowed_fmrds)
             for k,f in field_map['vectors'].items():
-                results[k].extend(data[f])
+                subres = data[f]
+                if allowed_fmrds is not None:
+                    subres = [subres[i] for i in allowed_fmrds]
+                results[k].extend(subres)
             for k,f in field_map['scalars'].items():
                 results[k].extend([data[f]] * nterms)
 
             data_ids.extend([id] * nterms)
-            group_values, group_indices = nput.group_by(np.arange(nterms), data['force_magnitudes'])[0]
+            subres = data['force_magnitudes']
+            if allowed_fmrds is not None:
+                subres =  [subres[i] for i in allowed_fmrds]
+            group_values, group_indices = nput.group_by(np.arange(nterms), subres)[0]
             mag_ids = np.zeros(nterms, dtype=int)
             for i,f in enumerate(group_indices): mag_ids[f] = i
             magnitude_ids.extend(mag_ids)
@@ -885,7 +903,11 @@ class BarrierHeightDataset:
                 d_ids[old:] = i + 1
             direction_ids.extend(d_ids)
 
-            fmrd_ids.extend(np.arange(nterms))
+            if allowed_fmrds is None:
+                filt_ids = np.arange(nterms)
+            else:
+                filt_ids = allowed_fmrds
+            fmrd_ids.extend(filt_ids)
 
 
             if annotation_generator is not None:
@@ -1179,12 +1201,15 @@ def pre_barrier(fmrd, return_bits=False):
         fmrd.transition_state_energy - fmrd.reactant_energy
     ) * UnitsData.convert("Hartrees", "Kilocalories/Mole")
 
-def prep_ds(ddd):
+def prep_ds(ddd,
+            annotation_generator=None,
+            **etc):
+    if annotation_generator is None:
+        annotation_generator = lambda id, data: {'smiles': data['smiles']} | functionalization_keys(data['smiles'])
     return BarrierHeightDataset.from_tree(
         ddd,
-        annotation_generator=lambda id, data: {
-            'smiles': data['smiles']
-        } | functionalization_keys(data['smiles'])
+        annotation_generator=annotation_generator,
+        **etc
     )
 def uncompress_dataset(file, target=None):
     base, ext = os.path.splitext(file)
@@ -1196,7 +1221,13 @@ def uncompress_dataset(file, target=None):
     np.savez(target, **arrays)
     return target
 filter_cache = {}
-def load_prep_filter(file, use_cache=True, **reader_opts):
+def load_prep_filter(file, use_cache=True,
+                     update_cache=False,
+                     filter=None,
+                     data_preprocessor=None,
+                     annotation_generator=None,
+                     fmrd_filter=None,
+                     **reader_opts):
     if not os.path.exists(file):
         base, ext = os.path.splitext(file)
         if len(ext) == 0:
@@ -1206,7 +1237,10 @@ def load_prep_filter(file, use_cache=True, **reader_opts):
                 file = file + ".npz"
     if not use_cache or file not in filter_cache:
         ddd_reg = pipeline.read_compressed_pipeline_data(file, **reader_opts)
-        ds_reg = prep_ds(ddd_reg)
+        ds_reg = prep_ds(ddd_reg, filter=filter,
+                         data_preprocessor=data_preprocessor,
+                         fmrd_filter=fmrd_filter,
+                         annotation_generator=annotation_generator)
         filter_cache[file] = ds_reg
     else:
         ds_reg = filter_cache[file]
@@ -1235,6 +1269,7 @@ def animate_fmrd(opt, **etc):
 eh2kcal = UnitsData.convert("Hartrees", "Kilocalories/Mole")
 def plot_dataset_histogram(ds, magnitudes=(50, 100, 200), use_abs=True,
                            color_generator=None,
+                           bins=100,
                            figure=None,
                            property='deltas',
                            conv=None,
@@ -1269,7 +1304,7 @@ def plot_dataset_histogram(ds, magnitudes=(50, 100, 200), use_abs=True,
             ]
         figure = plt.HistogramPlot(
             getattr(subds, property) * conv,
-            bins=100,
+            bins=bins,
             figure=figure,
             color=color_generator(i),
             label=f"{m} pN",
