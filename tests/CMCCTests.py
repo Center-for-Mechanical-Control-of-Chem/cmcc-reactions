@@ -451,6 +451,25 @@ class CMCCTests(unittest.TestCase):
         #     )
         # )
 
+    def test_MultiFragment(self):
+        from Psience.Molecools import Molecule
+
+        diene = pipeline.BASE_DIENES['cyclopentadiene']
+        dioph = pipeline.BASE_DIENOPHILES['maleamide']
+
+        # dioph = gen_prods.set_bond_order(dioph, 0, 1, 1, add_implicit_hydrogens='full')
+        # dioph = gen_prods.set_bond_order(dioph, 0, 1, 2, add_implicit_hydrogens='full')
+        # raise Exception(dioph)
+        template = gen_prods.join_diels_alder_template(
+            diene,
+            dioph,
+            add_implicit_hydrogens='full'
+        )
+        print(template)
+
+        Molecule.from_string(template, add_implicit_hydrogens='full').plot(highlight_atoms=[0, 1, 2, 3]).show()
+        return
+
     @unittest.skip
     def test_NewEnumeration(self):
         from Psience.Molecools import Molecule
@@ -880,7 +899,7 @@ H	-2.758306   -1.763227    0.087370''',
         # utils.write_namedtuple('/Users/Mark/Desktop/methacrylate_fmrd_hydrostatic.npz', data)
         fmra.plot_lines().show()
 
-    # @unittest.skip
+    @unittest.skip
     def test_RigidForceOpts(self):
 
         import warnings

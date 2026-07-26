@@ -319,7 +319,10 @@ def normalize_tree(data):
 
 def read_tree(file, decompress=None, mode=None,
               tree_reader='new',
-              decompression_function=None, loader=None, **opts):
+              decompression_function=None, loader=None,
+              max_leaf_elements=None,
+              prefix_filter=None,
+              **opts):
     if mode is None:
         if isinstance(file, str) and os.path.splitext(file)[-1] == '.json':
             mode = 'json'
@@ -330,7 +333,10 @@ def read_tree(file, decompress=None, mode=None,
         return normalize_tree(data)
     else:
         if dev.str_is(tree_reader, 'new'):
-            data = scaff.read_flat_tree(file, reader=loader, **opts)
+            data = scaff.read_flat_tree(file, reader=loader,
+                                        max_leaf_elements=max_leaf_elements,
+                                        prefix_filter=prefix_filter,
+                                        **opts)
             if decompression_function is not None:
                 data = decompression_function(data)
             return data

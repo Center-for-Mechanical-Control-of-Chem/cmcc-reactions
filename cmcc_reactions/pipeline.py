@@ -24,35 +24,6 @@ from . import optimal_directions as fopt
 from . import trajectory_tools as rda
 
 
-def apply_distortion_library_distortions(
-        atoms:list[str],
-        reactant_coords:np.ndarray,
-        ts_coords:np.ndarray,
-        distortion_specs=None,
-        energy_evaluator='pyscf', 
-        path='gv_job', 
-        theory: dict|None =None, 
-        rxn_type='DielsAlder',
-        **other_options
-):
-    
-    from goodvibs.rxn import Reaction
-    
-    Reaction.import_xyzs(xyzs=[reactant_coords, ts_coords], ats=atoms, path=path, theory=theory)
-
-    rxn = Reaction.from_path(path, type=rxn_type, software=energy_evaluator) # Default is pySCF using lowest L.o.T.
-
-    if distortion_specs:
-        for coordinate in distortion_specs:
-            rxn.add_distortion(coordinate)
-
-    rxn.scan_by_coordinate()
-    rxn.read_coordinate_scan()
-
-    rxn.scan_by_force()
-    rxn.read_force_scan()
-
-    return rxn.export()
 
 OptimizedForcePipelineData = collections.namedtuple(
     'OptimizedForcePipelineData',
@@ -1582,6 +1553,26 @@ def generate_from_product_library_set(
             **global_options
         )
 
+BASE_DIENES = {
+    'cyclopentadiene':'[C:1]([C:5]2)[C:3]=[C:4][C:2]2',
+    'butadiene':'[C:1][C:5]=[C:6][C:2]',
+    '1-N-butadiene':'[C:1][C:5]=[N:6][C:2]',
+    '2-N-butadiene':'[C:1][C:5]=[C:6][N:2]',
+    '2-O-butadiene':'[C:1][C:5]=[C:6][O:2]',
+    'anthracene':'[c:1]3c1ccccc1[c:2]c2ccccc23',
+    'anthracene-side':'c12c(cc3ccccc3c1)[C:2]1[C:1]2C=C1',
+    # 'dp-ibf':'[C:1]12(c3ccccc3)[C:3][C:4][C:2](c3ccccc3)(c3c1cccc3)O2',
+    # 'dmfdc':'[C:1]12[C:3][C:4][C:2](C(C(OC)=O)=C1C(OC)=O)O2',
+    'naphthalene':'c1ccc2[c:1]cc[c:2]c2c1'
+}
+
+BASE_DIENOPHILES = {
+    'maleamide':'O=C1NC(=O)[C:2]=[C:1]1',
+    'ethene':'[C:1]=[C:2]',
+    'CN':'[C:1]=[N:2]',
+    'CO':'[C:1]=[O:2]',
+}
+
 BASE_TEMPLATES = {
     'cyclopentadiene':'[C:3]1[C:1]([C:7]2)[C:5]=[C:6][C:2]2[C:4]1',
     'butadiene':'[C:3]1[C:1][C:5]=[C:6][C:2][C:4]1',
@@ -1594,7 +1585,7 @@ BASE_TEMPLATES = {
     'anthracene-side':'c12c(cc3ccccc3c1)[C:2]1[C:4][C:3][C:1]2C=C1',
     'dp-ibf':'[C:1]12(c3ccccc3)[C:3][C:4][C:2](c3ccccc3)(c3c1cccc3)O2',
     'dmfdc':'[C:1]12[C:3][C:4][C:2](C(C(OC)=O)=C1C(OC)=O)O2',
-    'napthalene':'[C:1]12[C:3][C:4][C:2](C=C1)c1c2cccc1'
+    'naphthalene':'[C:1]12[C:3][C:4][C:2](C=C1)c1c2cccc1'
 }
 
 BASE_FRAGMENTS = {
@@ -1717,5 +1708,9 @@ def read_compressed_pipeline_data(pipeline_file, mode=None, decompression_functi
                 mode = 'npz'
     if decompression_function is None and mode == 'npz':
         decompression_function = utils.decompress_namedtuple_data
-    base_data = utils.read_tree(pipeline_file, decompression_function=decompression_function, **opts)
+    base_data = utils.read_tree(
+        pipeline_file,
+        decompression_function=decompression_function,
+        **opts
+    )
     return _unwrap_nts(base_data, decompression_function, unwrap)

@@ -1186,10 +1186,26 @@ def prep_ds(ddd):
             'smiles': data['smiles']
         } | functionalization_keys(data['smiles'])
     )
+def uncompress_dataset(file, target=None):
+    base, ext = os.path.splitext(file)
+    if target is None:
+        target = base + "_expanded.npz"
+    if os.path.exists(target): return target
+    ds = np.load(file)
+    arrays = {k: ds[k] for k in ds.files}
+    np.savez(target, **arrays)
+    return target
 filter_cache = {}
-def load_prep_filter(file):
-    if file not in filter_cache:
-        ddd_reg = pipeline.read_compressed_pipeline_data(file)
+def load_prep_filter(file, use_cache=True, **reader_opts):
+    if not os.path.exists(file):
+        base, ext = os.path.splitext(file)
+        if len(ext) == 0:
+            if os.path.exists(file + "_expanded.npz"):
+                file = file + "_expanded.npz"
+            else:
+                file = file + ".npz"
+    if not use_cache or file not in filter_cache:
+        ddd_reg = pipeline.read_compressed_pipeline_data(file, **reader_opts)
         ds_reg = prep_ds(ddd_reg)
         filter_cache[file] = ds_reg
     else:
@@ -1220,7 +1236,7 @@ eh2kcal = UnitsData.convert("Hartrees", "Kilocalories/Mole")
 def plot_dataset_histogram(ds, magnitudes=(50, 100, 200), use_abs=True,
                            color_generator=None,
                            figure=None,
-                           property='delta',
+                           property='deltas',
                            conv=None,
                            rx_max=100, ts_max=100,
                            barrier_range=[5, 80],
@@ -1309,7 +1325,7 @@ def extract_group_means(dp_groups2, filters=None):
                 lambda d:np.abs(d['force_magnitudes']) > 199
             ]
     for key,ds in dp_groups2.items():
-        ds = ds.__getitem__(*filters)
+        ds = ds.__getitem__(filters)
         if len(ds) > 0:
             dist.append([
                 np.mean(ds.deltas * eh2kcal),
@@ -1342,3 +1358,225 @@ def get_dienophile_groups(d2_reg):
     }
     dp_groups2 = d2_reg_keyed.group_by_props(['dien_func', 'diop_func'])
     return d2_reg_keyed, dp_groups, dp_groups2
+
+
+import scipy
+
+
+def kde_plot(data, filled=True, figure=None, color=None, plot_range=None, scaling=None, **opts):
+    kde = scipy.stats.gaussian_kde(data, bw_method=.1)
+    if plot_range is None:
+        if figure is None:
+            dm, DM = data.min(), data.max()
+            r = DM - dm
+            dm = dm - r * .2
+            DM = DM + r * .2
+        else:
+            plot_range = figure.plot_range
+            dm, DM = plot_range[0]
+    else:
+        dm, DM = plot_range[0]
+    x_grid = np.linspace(dm, DM, 500)
+    if scaling is None:
+        scaling = len(data)
+    y_density = kde(x_grid) * scaling
+    if filled:
+        if color is not None:
+            acolor = plt.prep_color(color, alpha=.1)
+        else:
+            acolor = plt.prep_color(palette='default', index=0, alpha=.1)
+        figure = plt.FilledPlot(x_grid, y_density, color=acolor, figure=figure,
+                                plot_range=plot_range,
+                                **(opts | dict(label=None)))
+    return plt.Plot(x_grid, y_density, figure=figure, color=color,
+                    plot_range=plot_range,
+                    **opts)
+
+def get_freqs(mol):
+    return mol.get_normal_modes().freqs * UnitsData.hartrees_to_wavenumbers
+def get_compliances(mol):
+    mol_int = mol.modify(
+        internals={'primitives': [tuple(x) for x in nput.combination_indices(len(mol.atoms), 2)]}
+    )
+    mol_int.potential_derivatives = [0, mol.potential_derivatives[1]]
+    H = mol_int.get_internal_potential_derivatives(order=2)[1]
+    return np.diag(nput.frac_powh(H, -1))
+_DEBUG_PRINT_KEYS = True
+def freq_data(mol, freq_filter=None, freq_gen=None, fcache=None):
+    if hasattr(mol, 'get_normal_modes'):
+        mol = [mol]
+    if fcache is None:
+        fcache = {}
+    freq_lists = []
+    for k, m in enumerate(mol):
+        ix = m.id if hasattr(m, 'id') else k
+        if ix not in fcache:
+            if _DEBUG_PRINT_KEYS:
+                print(ix)
+            if freq_gen is None:
+                freq_gen = get_freqs
+            fcache[ix] = freq_gen(m)
+        freq_lists.append(fcache[ix])
+    freqs = np.concatenate(freq_lists)
+    if freq_filter is not None:
+        freqs = freqs[freq_filter(freqs)]
+    return freqs
+def freq_plot(mol, freq_filter=None, freq_gen=None, **opts):
+    return kde_plot(freq_data(mol, freq_filter, freq_gen), **opts)
+def freq_comp_data(opt, freq_filter=None, freq_gen=None, fcache=None):
+    if hasattr(opt, 'deltas'):
+        ds = opt
+        opt = list(iter(opt))
+        for o, i in zip(opt, ds.data_ids):
+            o.data_id = i
+    if (
+            hasattr(opt, 'optimizer')
+            or hasattr(opt, 'rs')
+    ): opt = [opt]
+    if fcache is None:
+        fcache = {}
+    ids = [o.data_id if hasattr(o, 'data_id') else None for o in opt]
+    opt = [o.optimizer if hasattr(o, 'optimizer') else o for o in opt]
+    rs_mols = [o.rs for o in opt]
+    for m, i in zip(rs_mols, ids): m.id = (i, "rs")
+    ts_mols = [o.ts for o in opt]
+    for m, i in zip(ts_mols, ids): m.id = (i, "ts")
+    rs_data = freq_data(rs_mols,
+
+                        freq_filter=freq_filter,
+                        freq_gen=freq_gen,
+                        fcache=fcache
+                        )
+    ts_data = freq_data(ts_mols,
+                        freq_filter=freq_filter,
+                        freq_gen=freq_gen,
+                        fcache=fcache
+                        )
+    return rs_data, ts_data
+
+
+def freq_comp_plot(opt, freq_filter=None, figure=None, **opts):
+    if hasattr(opt, 'deltas'):
+        ds = opt
+        opt = list(iter(opt))
+        for o, i in zip(opt, ds.data_ids):
+            o.data_id = i
+    if (
+            hasattr(opt, 'optimizer')
+            or hasattr(opt, 'rs')
+    ): opt = [opt]
+    ids = [o.data_id if hasattr(o, 'data_id') else None for o in opt]
+    opt = [o.optimizer if hasattr(o, 'optimizer') else o for o in opt]
+    rs_mols = [o.rs for o in opt]
+    for m, i in zip(rs_mols, ids): m.id = (i, "rs")
+    figure = freq_plot(rs_mols,
+                       **dict(
+                           freq_filter=freq_filter,
+                           figure=figure,
+                           label='reactant',
+                           plot_legend=True,
+                           legend_style={'frameon': False},
+                           color=plt.prep_color(palette='default', index=0)
+                       ) | opts
+                       )
+    ts_mols = [o.ts for o in opt]
+    for m, i in zip(ts_mols, ids): m.id = (i, "ts")
+    figure = freq_plot(ts_mols,
+                       **dict(
+                           freq_filter=freq_filter,
+                           figure=figure,
+                           label='ts',
+                           color=plt.prep_color(palette='default', index=2)
+                       ) | opts
+                       )
+    return figure
+def plot_dataset_freq_comp(ds, wm=None, **etc):
+    opts = list(iter(ds))
+    for o, i in zip(opts, ds.data_ids):
+        o.data_id = i
+    return freq_comp_plot(
+        opts,
+        **(
+                dict(
+                    plot_label=(
+                                   f"Mean: {wm[0]:.2f} kcal/mol Std: {wm[1]:.2f} kcal/mol"
+                                   if wm is not None else None
+                    ),
+                    display_format='svg'
+                ) | etc
+        )
+    )
+
+def extract_group_compliances(groups, nmax=None):
+    fcache = {}
+    return {
+        ds.d_path[0]: freq_comp_data(ds, freq_gen=get_compliances, fcache=fcache)
+        for k, ds in (
+            itertools.islice(groups.items(), nmax)
+                if nmax is not None else
+            groups.items()
+        )
+    }
+
+def save_compliance_dataset(d2_reg, file, nmax=None):
+    wah = get_dienophile_groups(d2_reg)
+    dp_wah = wah[0].group_by_props('d_path')
+    data = extract_group_compliances(dp_wah, nmax)
+    return utils.write_tree(file, data)
+
+def get_compliance_groups(d2_groups, compliance_data):
+    means = extract_group_means(d2_groups)
+    rs_blocks = []
+    for k in means[0]:
+        rs_blocks.append(
+            np.concatenate([compliance_data[p][0] for p in d2_groups[k].d_path])
+        )
+    ts_blocks = []
+    for k in means[0]:
+        ts_blocks.append(
+            np.concatenate([compliance_data[p][1] for p in d2_groups[k].d_path])
+        )
+    return means, rs_blocks, ts_blocks
+
+def get_compliance_means(rs_blocks, ts_blocks, use_abs=True, thresh=2.5e4):
+    if use_abs:
+        rs_blocks = [np.abs(x) for x in rs_blocks]
+        ts_blocks = [np.abs(x) for x in ts_blocks]
+    rs_means2 = [
+        np.mean(r[np.abs(r) < thresh])
+        for r in rs_blocks
+    ]
+    ts_means2 = [
+        np.mean(r[np.abs(r) < thresh])
+        for r in ts_blocks
+    ]
+    return rs_means2, ts_means2
+
+def plot_compliance_means(
+        means, rs_means2, ts_means2,
+        rs_styles='auto',
+        ts_styles='auto',
+        figure=None,
+        **styles
+):
+    if dev.str_is(rs_styles, 'auto'):
+        rs_styles = {}
+    if rs_styles is not None:
+        rs_styles = rs_styles | styles
+        figure = plt.ScatterPlot(
+            np.array(means[1])[:, 0],
+            rs_means2,
+            figure=figure,
+            **rs_styles
+        )
+    if dev.str_is(ts_styles, 'auto'):
+        ts_styles = {'color':plt.prep_color(palette='default', alpha=.3, index=1)}
+    if ts_styles is not None:
+        ts_styles = ts_styles | styles
+        figure = plt.ScatterPlot(
+            np.array(means[1])[:, 0],
+            ts_means2,
+            figure=figure,
+            **ts_styles
+        )
+    return figure

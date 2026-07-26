@@ -3652,7 +3652,7 @@ class ForceOptimizer:
         if return_geometries:
             (g_idx_r, g_perc_r) = r_data[2]
             gl_r = g[0]
-            if g_perc_r >= 0:
+            if g_perc_r >= 0 and g_idx_r < len(gl_r) - 1:
                 g_r = gl_r[g_idx_r] * (1-g_perc_r) + gl_r[g_idx_r+1] * g_perc_r
             elif g_idx_r+1 == len(gl_r):
                 g_r = gl_r[g_idx_r] + (gl_r[g_idx_r] - gl_r[g_idx_r-1]) * g_perc_r
