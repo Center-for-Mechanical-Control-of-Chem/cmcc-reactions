@@ -1033,7 +1033,7 @@ def run_optimization_pipeline(
                 print(f"saving to {output_file}...")
                 input_data.save(output_file)
 
-        if 'fmrds-useint' in steps and _check_step(force_steps, 'rigid-fmrds-useint', None):
+        if 'fmrds-useint' in steps and _check_step(force_steps, 'fmrds-useint', None):
             if optimizer is None:
                 opt_force = input_data.optimized_forces
                 if opt_force is None:
