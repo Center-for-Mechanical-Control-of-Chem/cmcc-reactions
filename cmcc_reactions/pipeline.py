@@ -348,11 +348,15 @@ class OptimizedForceResults:
             return self._optimizer
 
     def animate_fmrd_direction(self, fmrd_index, mass_weight=False, use_internals=None, **etc):
+        if nput.is_int(fmrd_index):
+            fmrd = self.fmrds[fmrd_index]
+        else:
+            fmrd = fmrd_index
         if use_internals is None:
-            use_internals = len(self.fmrds[fmrd_index].force_vector) < len(self.product.atoms) * 3
+            use_internals = len(fmrd.force_vector) < len(self.product.atoms) * 3
         return self.optimizer.animate_normed(
            0,
-           displacements=[self.fmrds[fmrd_index].force_vector],
+           displacements=[fmrd.force_vector],
            use_internals=use_internals,
            mass_weight=mass_weight,
            **etc
@@ -630,9 +634,13 @@ class OptimizedForceResults:
         return prod
 
     def animate_reactant_distortion(self, fmrd_index, embed=True, embedding_indices=None, **opts):
+        if nput.is_int(fmrd_index):
+            fmrd = self.fmrds[fmrd_index]
+        else:
+            fmrd = fmrd_index
         coords = [
             self.reactant.coords,
-            self.fmrds[fmrd_index].force_modified_reactant_geom
+            fmrd.force_modified_reactant_geom
         ]
         if embed:
             if nput.is_int(embedding_indices):
@@ -641,9 +649,13 @@ class OptimizedForceResults:
         return self.reactant.plot(coords, **opts)
 
     def animate_ts_distortion(self, fmrd_index, embed=True, embedding_indices=None, **opts):
+        if nput.is_int(fmrd_index):
+            fmrd = self.fmrds[fmrd_index]
+        else:
+            fmrd = fmrd_index
         coords = [
             self.transition_state.coords,
-            self.fmrds[fmrd_index].force_modified_transition_state_geom
+            fmrd.force_modified_transition_state_geom
         ]
         if embed:
             if nput.is_int(embedding_indices):
@@ -1026,6 +1038,23 @@ def run_optimization_pipeline(
             if force_modification_settings is None:
                 force_modification_settings = {}
             force_modification_settings = global_options | force_modification_settings
+            reuse_force_dirs = force_modification_settings.get('reuse_force_dirs', True)
+            if reuse_force_dirs:
+                # a temporary workaround for localization degeneracies
+                if (
+                        'magnitudes' not in force_modification_settings
+                        and 'nmodes' not in force_modification_settings
+                        and input_data.fmrds is not None
+                ):
+                    mags = np.round([f.force_magnitude for f in input_data.fmrds], 8)
+                    min_mag = np.min(mags)
+                    cur_displacements = [
+                        f.force_vector
+                        for f in input_data.fmrds
+                        if abs(f.force_magnitude - min_mag) < 1e-6
+                    ]
+                    force_modification_settings['displacements'] = cur_displacements
+                    force_modification_settings['nmodes'] = len(cur_displacements)
             fmrds = run_fmrds(optimizer, rigid=True, **force_modification_settings)
             input_data.fmrds = [f[2] for f in fmrds]
 

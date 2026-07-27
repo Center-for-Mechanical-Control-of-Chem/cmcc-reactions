@@ -1259,12 +1259,12 @@ def filter_d2(ds, barrier_range=[5, 80], max_delta=50, ts_thresh=0, ts_max=25, r
         lambda d: np.abs(d['delta']) < max_delta
     ])
 
-def animate_rx(opt, **etc):
-    return opt.animate_reactant_distortion(0, **(dict(embedding_indices=[0, 1, 2, 3, 4]) | etc))
-def animate_ts(opt, **etc):
-    return opt.animate_ts_distortion(0, **(dict(embedding_indices=[0, 1, 2, 3, 4]) | etc))
-def animate_fmrd(opt, **etc):
-    return opt.animate_fmrd_direction(0, **(dict(embedding_indices=[0, 1, 2, 3, 4]) | etc))
+def animate_rx(opt, fmrd=0, **etc):
+    return opt.animate_reactant_distortion(fmrd, **(dict(embedding_indices=[0, 1, 2, 3, 4]) | etc))
+def animate_ts(opt, fmrd=0, **etc):
+    return opt.animate_ts_distortion(fmrd, **(dict(embedding_indices=[0, 1, 2, 3, 4]) | etc))
+def animate_fmrd(opt, fmrd=0, **etc):
+    return opt.animate_fmrd_direction(fmrd, **(dict(embedding_indices=[0, 1, 2, 3, 4]) | etc))
 
 
 eh2kcal = UnitsData.convert("Hartrees", "Kilocalories/Mole")
