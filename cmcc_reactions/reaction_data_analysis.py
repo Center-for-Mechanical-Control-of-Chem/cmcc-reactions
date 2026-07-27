@@ -6,6 +6,7 @@ import numpy as np
 import glob
 import itertools
 import multiprocessing
+from scipy.optimize import least_squares
 
 import rdkit.Chem.AllChem as Chem
 from McUtils.ExternalPrograms import RDMolecule
@@ -1559,33 +1560,79 @@ def save_compliance_dataset(d2_reg, file, nmax=None):
     data = extract_group_compliances(dp_wah, nmax)
     return utils.write_tree(file, data)
 
-def get_compliance_groups(d2_groups, compliance_data):
-    means = extract_group_means(d2_groups)
+def _flatten_weight_block(rs_blocks):
+    blocks = []
+    for r, w in rs_blocks.values():
+        blocks.append(
+            np.stack(
+                [r, np.repeat(w, len(r))],
+                axis=1
+            )
+        )
+    if len(blocks) == 0:
+        return None
+    else:
+        return np.concatenate(blocks, axis=0)
+def _get_group_blocks(ds_paths, compliance_data, idx, flatten=True):
+    subblocks = {}
+    for p in ds_paths:
+        if 'pipeline_data' in p:
+            for tag in [
+                'random',
+                'internals',
+                "useint",
+                'rigid',
+            ]:
+                p = p.replace(f"pipeline_data_{tag}", "pipeline_data")
+        if p not in subblocks:
+            if p in compliance_data:
+                    subblocks[p] = [compliance_data[p][idx], 1]
+        else:
+            subblocks[p][1] += 1
+    if flatten:
+        subblocks = _flatten_weight_block(subblocks)
+    return subblocks
+def get_compliance_groups(d2_groups, compliance_data, flatten=True):
+    keys, mean_data = extract_group_means(d2_groups)
+
     rs_blocks = []
-    for k in means[0]:
-        rs_blocks.append(
-            np.concatenate([compliance_data[p][0] for p in d2_groups[k].d_path])
-        )
+    subkeys = []
+    mask = np.full(len(keys), False)
+    for i,k in enumerate(keys):
+        block = _get_group_blocks(d2_groups[k].d_path, compliance_data, 0, flatten=flatten)
+        if block is not None:
+            rs_blocks.append(block)
+            mask[i] = True
+            subkeys.append(k)
     ts_blocks = []
-    for k in means[0]:
-        ts_blocks.append(
-            np.concatenate([compliance_data[p][1] for p in d2_groups[k].d_path])
-        )
-    return means, rs_blocks, ts_blocks
+    for i,k in enumerate(keys):
+        block = _get_group_blocks(d2_groups[k].d_path, compliance_data, 1, flatten=flatten)
+        if block is not None:
+            ts_blocks.append(block)
+            mask[i] = True
+            subkeys.append(k)
+    means = np.array([m[0] for i, m in enumerate(mean_data) if mask[i]])
+    stds = np.array([m[1] for i, m in enumerate(mean_data) if mask[i]])
+    return (subkeys, means, stds), rs_blocks, ts_blocks
 
 def get_compliance_means(rs_blocks, ts_blocks, use_abs=True, thresh=2.5e4):
     if use_abs:
         rs_blocks = [np.abs(x) for x in rs_blocks]
         ts_blocks = [np.abs(x) for x in ts_blocks]
+        mask_r = [r[:, 0] < thresh for r in rs_blocks]
+        mask_t = [t[:, 0] < thresh for t in ts_blocks]
+    else:
+        mask_r = [np.abs(r[:, 0]) < thresh for r in rs_blocks]
+        mask_t = [np.abs(t[:, 0]) < thresh for t in ts_blocks]
     rs_means2 = [
-        np.mean(r[np.abs(r) < thresh])
-        for r in rs_blocks
+        np.average(r[m][:, 0], weights=r[m][:, 1])
+        for r,m in zip(rs_blocks, mask_r)
     ]
     ts_means2 = [
-        np.mean(r[np.abs(r) < thresh])
-        for r in ts_blocks
+        np.average(r[m][:, 0], weights=r[m][:, 1])
+        for r, m in zip(ts_blocks, mask_t)
     ]
-    return rs_means2, ts_means2
+    return np.array(rs_means2), np.array(ts_means2)
 
 def plot_compliance_means(
         means, rs_means2, ts_means2,
@@ -1599,8 +1646,8 @@ def plot_compliance_means(
     if rs_styles is not None:
         rs_styles = rs_styles | styles
         figure = plt.ScatterPlot(
-            np.array(means[1])[:, 0],
             rs_means2,
+            means[1],
             figure=figure,
             **rs_styles
         )
@@ -1609,9 +1656,42 @@ def plot_compliance_means(
     if ts_styles is not None:
         ts_styles = ts_styles | styles
         figure = plt.ScatterPlot(
-            np.array(means[1])[:, 0],
             ts_means2,
+            means[1],
             figure=figure,
             **ts_styles
         )
     return figure
+
+def get_compliance_data(d2_reg, compliance_data):
+    wah = get_dienophile_groups(d2_reg)
+    means, rs_groups, ts_groups = get_compliance_groups(wah[2], compliance_data)
+    wop = get_compliance_means(rs_groups, ts_groups)
+    return means, wop[0], wop[1]
+
+def get_compliance_fit(compliances, barriers, include_intercept=True):
+    if include_intercept:
+        def model_func(slope, intercept, x):
+            return slope * x + intercept
+    else:
+        def model_func(slope, x):
+            return slope * x
+    def residual_func(params, x, y):
+        return model_func(*params, x) - y
+
+    if include_intercept:
+        initial_guess = np.array([-1000.0, 0])
+    else:
+        initial_guess = np.array([-1000.0])
+
+    result = least_squares(residual_func, initial_guess, args=(compliances, barriers))
+
+    optimized_params = result.x  # Array of best-fit [slope, intercept]
+    residuals = residual_func(optimized_params, compliances, barriers)
+
+    ss_res = np.sum(residuals ** 2)
+    ss_tot = np.sum((barriers - np.mean(barriers)) ** 2)
+    r_squared = 1 - (ss_res / ss_tot)
+
+    model = functools.partial(model_func, *optimized_params)
+    return optimized_params, model, r_squared

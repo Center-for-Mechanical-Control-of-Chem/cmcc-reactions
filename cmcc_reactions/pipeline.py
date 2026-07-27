@@ -1383,6 +1383,8 @@ def generate_from_product_library(
         sbatch_kwargs=None,
         submit=True,
         presubmission_filter=None,
+        smiles_filter=None,
+        substitution_filter=None,
         run_from_directory=False,
         smiles_cache=None,
         **global_options
@@ -1426,6 +1428,8 @@ def generate_from_product_library(
             verbose=verbose,
             max_products=max_products,
             smiles_cache=smiles_cache,
+            filter=smiles_filter,
+            substitution_filter=substitution_filter,
             callback=None
         )
         if update_dir is None:
@@ -1469,7 +1473,9 @@ def generate_from_product_library(
             verbose=verbose,
             max_products=max_products,
             smiles_cache=smiles_cache,
-            callback=callback
+            callback=callback,
+            filter=smiles_filter,
+            substitution_filter=substitution_filter,
         )
 
 def generate_from_directory(
