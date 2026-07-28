@@ -1313,8 +1313,9 @@ def plot_dataset_histogram(ds, magnitudes=(50, 100, 200), use_abs=True,
         )
     return figure
 
-
-def plot_dataset_stereocomp(subd1, subd2, label1='', label2=''):
+def get_dataset_sterodata(subd1, subd2, delta_thresh=10):
+    subd1 = subd1[lambda d: np.abs(d['delta']) < delta_thresh]
+    subd2 = subd2[lambda d: np.abs(d['delta']) < delta_thresh]
     min_e1, min_e2 = np.min(subd1.reactant_energies), np.min(subd2.reactant_energies)
     min_g1 = np.where(np.abs(subd1.reactant_energies - min_e1) < 1e-8)[0]
     min_g2 = np.where(np.abs(subd2.reactant_energies - min_e2) < 1e-8)[0]
@@ -1332,17 +1333,23 @@ def plot_dataset_stereocomp(subd1, subd2, label1='', label2=''):
         np.min(subd2.barriers[min_g2,] + subd2.deltas[min_g2,])
     )
 
-    dat = [
-        ["Min Barrier Solvo:", mb1, mb2, mb1 - mb2],
-        ["Min Barrier Force:", mbf1, mbf2, mbf1 - mbf2],
+    base_data = {
+        "Min Barrier Solvo": [mb1, mb2, mb1 - mb2],
+        "Min Barrier Force": [mbf1, mbf2, mbf1 - mbf2],
         # [subd1.barriers[am1] + subd1.deltas[am1], subd2.barriers[am2] + subd2.deltas[am2]],
-        ["Min Energy Solvo:", meb1, meb2, meb1 - meb2],
-        ["Min Energy Force:", mef1, mef2, mef1 - mef2],
-        ["Min Energy/Barrier:", mebf1, mebf2, mebf1 - mebf2]
-    ]
+        "Min Energy Solvo": [meb1, meb2, meb1 - meb2],
+        "Min Energy Force": [mef1, mef2, mef1 - mef2],
+        "Min Energy/Barrier": [mebf1, mebf2, mebf1 - mebf2]
+    }
+    return {
+        k:np.array(d) * UnitsData.convert("Hartrees", "Kilocalories/Mole")
+        for k,d in base_data.items()
+    }
+
+def plot_dataset_stereocomp(subd1, subd2, label1='', label2='', delta_thresh=10):
     dat = [
-        [dd * UnitsData.convert("Hartrees", "Kilocalories/Mole") if nput.is_numeric(dd) else dd for dd in ddd]
-        for ddd in dat
+        [k+":"] + list(ds)
+        for k,ds in get_dataset_sterodata(subd1, subd2, delta_thresh=delta_thresh).items()
     ]
     return mfmt.TableFormatter(".1f",
                                headers=[
@@ -1357,7 +1364,7 @@ def extract_group_means(dp_groups2, filters=None):
     labs = []
     if filters is None:
         filters = [
-                lambda d:d['delta'] > -10,
+                lambda d:d['delta'] > -20,
                 lambda d:np.abs(d['force_magnitudes']) > 199
             ]
     for key,ds in dp_groups2.items():
@@ -1365,16 +1372,47 @@ def extract_group_means(dp_groups2, filters=None):
         if len(ds) > 0:
             dist.append([
                 np.mean(ds.deltas * eh2kcal),
-                np.std(ds.deltas * eh2kcal)
+                np.std(ds.deltas * eh2kcal),
+                len(ds.deltas)
             ])
             labs.append(key)
     return labs, dist
 
-def format_group_table(labs, dists):
-    return mfmt.TableFormatter('.2f', headers=['Diene Funcs', 'Diop Funcs.', 'Mean', 'Std']).format([
-        list(k) + d
-        for k, d in zip(labs, dists)
-    ])
+def format_group_table(labs, dists, return_formatter=False,
+                       take_elems={0:'Mean', 1:'Std', 2:'Counts'},
+                       **formatter_opts):
+    if isinstance(dists, dict):
+        keys = list(dists.keys())
+        formatter = mfmt.TableFormatter('.2f',
+                                        headers=[
+                                            ['Diene Funcs', 'Diop Funcs.'] + list(take_elems.values()),
+                                            ['', ''] + len(take_elems) * keys
+                                        ],
+                                        header_spans=[
+                                            [1, 1] + [len(keys)] * len(take_elems),
+                                            [1, 1] + [1] * (len(take_elems)*len(keys))
+                                        ],
+                                        **formatter_opts)
+        dists = [
+            sum(([v[i] for v in d] for i in take_elems.keys()), [])
+            for d in zip(*dists.values())
+        ]
+        format_data = [
+            list(k) + d
+            for k, d in zip(labs, dists)
+        ]
+    else:
+        formatter = mfmt.TableFormatter('.2f',
+                                   headers=['Diene Funcs', 'Diop Funcs.'] + list(take_elems.values()),
+                                   **formatter_opts)
+        format_data = [
+            list(k) + [d[i] for i in take_elems.keys()]
+            for k, d in zip(labs, dists)
+        ]
+    if not return_formatter:
+        return formatter.format(format_data)
+    else:
+        return formatter, format_data
 def plot_group_means(labs, dist):
     return plt.ScatterPlot(*np.array(dist).T, axes_labels=[r'$\Delta\Delta E_a$ (kcal mol$^{-1}$)', ' Standard Deviation'])
 def add_keys(d2_reg):
@@ -1663,11 +1701,16 @@ def plot_compliance_means(
         )
     return figure
 
-def get_compliance_data(d2_reg, compliance_data):
+def get_compliance_data(d2_reg, compliance_data, distance_units="Angstroms", force_units=("PicoJoules", "Meters")):
     wah = get_dienophile_groups(d2_reg)
     means, rs_groups, ts_groups = get_compliance_groups(wah[2], compliance_data)
+
     wop = get_compliance_means(rs_groups, ts_groups)
-    return means, wop[0], wop[1]
+    conv = UnitsData.convert("BohrRadius", distance_units) / (
+        UnitsData.convert("Hartrees", force_units[0]) /
+        UnitsData.convert("BohrRadius", force_units[1])
+    )
+    return means, wop[0] * conv, wop[1] * conv
 
 def get_compliance_fit(compliances, barriers, include_intercept=True):
     if include_intercept:

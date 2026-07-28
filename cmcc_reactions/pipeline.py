@@ -535,6 +535,8 @@ class OptimizedForceResults:
                          bar_spacing=.2,
                          force_modified='both',
                          fmrd=None,
+                         line_styles=None,
+                         secondary_styles=None,
                          **opts):
         traj = rda.DielsAlderReactionTrajectory.from_trajectory_data(self.trajectory)
         figure, x = traj.compare_profiles(
@@ -546,7 +548,11 @@ class OptimizedForceResults:
         if force_modified and fmrd_index is None and fmrd is None and self.fmrds is not None:
             fmrd_index = 0
         if fmrd_index is not None or fmrd is not None:
+            if line_styles is None:
+                line_styles = {}
             if dev.str_is(force_modified, 'both'):
+                if secondary_styles is None:
+                    secondary_styles = {}
                 if isinstance(bar_color, str):
                     bar_color = [
                         plt.prep_color(bar_color, lighten=.5),
@@ -561,7 +567,8 @@ class OptimizedForceResults:
                     figure=figure,
                     force_modified=False,
                     traj=traj,
-                    fmrd=fmrd
+                    fmrd=fmrd,
+                    **line_styles
                 )
                 self.plot_fmrd_lines(
                     fmrd_index,
@@ -572,7 +579,8 @@ class OptimizedForceResults:
                     figure=figure,
                     force_modified=True,
                     traj=traj,
-                    fmrd=fmrd
+                    fmrd=fmrd,
+                    **(line_styles | secondary_styles)
                 )
             else:
                 self.plot_fmrd_lines(
@@ -584,7 +592,8 @@ class OptimizedForceResults:
                     figure=figure,
                     force_modified=force_modified,
                     traj=traj,
-                    fmrd=fmrd
+                    fmrd=fmrd,
+                    **line_styles
                 )
         return figure
 
