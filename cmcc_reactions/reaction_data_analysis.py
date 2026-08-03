@@ -559,6 +559,27 @@ class BarrierHeightDataset:
             **(self.meta_fields | opts)
         )
 
+    def merge_datasets(self, other, deduplicate=False):
+        if deduplicate:
+            raise NotImplementedError("too annoying")
+
+        if self.dataset is not other.dataset:
+            raise ValueError("can't merge across datasets")
+
+        base_df = self.get_data_fields() | self.meta_fields
+        other_df = other.get_data_fields()| other.meta_fields
+        fields = {}
+        for k,v in base_df.items():
+            if nput.is_array_like(v):
+                v = np.concatenate([v, other_df[k]], axis=0)
+            else:
+                v = list(v) + list(other_df[k])
+            fields[k] = v
+        return type(self)(
+            dataset=self.dataset,
+            **fields
+        )
+
     @staticmethod
     def _partial_iter(block, *, generator, **opts):
         return [generator(o, **opts) for o in block]
@@ -1273,12 +1294,18 @@ def plot_dataset_histogram(ds, magnitudes=(50, 100, 200), use_abs=True,
                            bins=100,
                            figure=None,
                            property='deltas',
+                           filter=None,
                            conv=None,
                            rx_max=100, ts_max=100,
                            barrier_range=[5, 80],
                            max_delta=50,
                            ts_thresh=0,
                            rx_thresh=-0.1,
+                           scaling=1,
+                           density=False,
+                           normalize=False,
+                           labels=True,
+                           return_histograms=False,
                            **etc):
     if color_generator is None:
         color_generator = lambda i: plt.prep_color(palette='default', index=i)+"aa"
@@ -1288,10 +1315,16 @@ def plot_dataset_histogram(ds, magnitudes=(50, 100, 200), use_abs=True,
                 plot_legend=True,
                 legend_style={'frameon':False},
                 image_size=800,
-                axes_labels=[r'$\Delta\Delta E_\text{a}$', 'Counts']
+                axes_labels=[r'$\Delta\Delta E_a$ (kcal mol$^{-1}$)', 'Counts']
             ) | etc) if figure is None else etc
     if conv is None:
         conv = UnitsData.convert("Hartrees", "Kilocalories/Mole")
+    if labels is True:
+        labels = [f"{m} pN" for m in magnitudes]
+    elif not labels:
+        labels = [None for m in magnitudes]
+    hists = {}
+    image_size, padding = base_styles.pop('image_size', None), base_styles.pop('padding', None)
     for i,m in enumerate(magnitudes):
         subds = filter_d2(ds,
                          rx_max=rx_max, ts_max=ts_max,
@@ -1303,15 +1336,90 @@ def plot_dataset_histogram(ds, magnitudes=(50, 100, 200), use_abs=True,
                 lambda d: (np.abs(d['force_magnitudes']) if use_abs else d['force_magnitudes']) < m+1,
                 lambda d: (np.abs(d['force_magnitudes']) if use_abs else d['force_magnitudes']) > m-1
             ]
+        prop = getattr(subds, property) * conv
+        if filter is not None:
+            prop = filter(prop)
         figure = plt.HistogramPlot(
-            getattr(subds, property) * conv,
+            prop,
             bins=bins,
             figure=figure,
             color=color_generator(i),
-            label=f"{m} pN",
+            weights=None if scaling is None else np.full(len(prop), scaling),
+            invert=(density and scaling is not None and scaling < 1),
+            normalize=normalize,
+            label=labels[i],
+            density=density,
+            image_size=image_size,
+            padding=padding,
             **(base_styles if i == 0 else {})
         )
-    return figure
+        hists[i] = figure.graphics
+    if return_histograms:
+        return figure, hists
+    else:
+        return figure
+
+def plot_dataset_density_comparison_histogram(
+        ds_reg,
+        property_1='delta_r',
+        property_2='delta_t',
+        line_style=None,
+        panel_labels=["Reactant Complex", "Transition State"],
+        panel_label_style=None,
+        panel_label_anchors=[(-1, .3), (-1, -.3)],
+        **etc
+):
+    fig, h1 = plot_dataset_histogram(ds_reg,
+                                     property=property_1,
+                                     return_histograms=True,
+                                     **(
+                                             dict(image_size=[440, 250], padding=[[100, 0], [50, 20]])
+                                             | etc
+                                     ))
+    _, h2 = plot_dataset_histogram(ds_reg,
+                                   property=property_2,
+                                   scaling=-1,
+                                   labels=None,
+                                   return_histograms=True,
+                                   figure=fig,
+                                   **etc)
+    offset_x = min(np.min(v[1]) for _, v in h1.items())
+    offset_xp = max(np.max(v[1]) for _, v in h1.items())
+    offset_y = min(
+        max(np.max(v[0]) for _, v in h1.items()),
+        abs(min(np.min(v[0]) for _, v in h2.items()))
+    )
+    if line_style is not False:
+        if line_style is None:
+            line_style = dict(
+                color='black',
+                linewidth=.5
+            )
+        plt.Plot([offset_x, offset_xp], [0, 0],
+                 figure=fig,
+                 **(dict(color='black', linewidth=.5, image_size=fig.image_size, padding=fig.padding) | line_style)
+                 )
+    if panel_label_style is None:
+        panel_label_style = dict(color='black', size=13)
+    if panel_labels[0]:
+        ax, ay = panel_label_anchors[0]
+        if ax < 0:
+            x = offset_x * abs(ax)
+        else:
+            x = offset_xp * ax
+        y = offset_y * ay
+        plt.Text(panel_labels[0], [x, y], **panel_label_style).plot(fig)
+    if panel_labels[1]:
+        ax, ay = panel_label_anchors[1]
+        if ax < 0:
+            x = offset_x * abs(ax)
+        else:
+            x = offset_xp * ax
+        y = offset_y * ay
+        plt.Text(panel_labels[1], [x, y],
+                 **(dict(va='bottom') | panel_label_style)
+                 ).plot(fig)
+    return fig
 
 def get_dataset_sterodata(subd1, subd2, delta_thresh=10):
     subd1 = subd1[lambda d: np.abs(d['delta']) < delta_thresh]
@@ -1468,13 +1576,22 @@ def kde_plot(data, filled=True, figure=None, color=None, plot_range=None, scalin
 
 def get_freqs(mol):
     return mol.get_normal_modes().freqs * UnitsData.hartrees_to_wavenumbers
-def get_compliances(mol):
+def get_compliances(mol, return_matrix=False, return_mol=False):
     mol_int = mol.modify(
         internals={'primitives': [tuple(x) for x in nput.combination_indices(len(mol.atoms), 2)]}
     )
     mol_int.potential_derivatives = [0, mol.potential_derivatives[1]]
     H = mol_int.get_internal_potential_derivatives(order=2)[1]
-    return np.diag(nput.frac_powh(H, -1))
+    inv_H = nput.frac_powh(H, -1)
+    if return_matrix:
+        compliances = inv_H
+    else:
+        compliances = np.diag(inv_H)
+
+    if return_mol:
+        return compliances, mol_int
+    else:
+        return compliances
 _DEBUG_PRINT_KEYS = True
 def freq_data(mol, freq_filter=None, freq_gen=None, fcache=None):
     if hasattr(mol, 'get_normal_modes'):
@@ -1738,3 +1855,225 @@ def get_compliance_fit(compliances, barriers, include_intercept=True):
 
     model = functools.partial(model_func, *optimized_params)
     return optimized_params, model, r_squared
+
+# just for cyclopd
+def get_pointing_vector(mol):
+    if isinstance(mol, np.ndarray):
+        coords = mol
+    elif isinstance(mol, tuple):
+        coords = mol.product_geometry
+    else:
+        coords = mol.coords
+    return nput.vec_normalize((coords[1] + coords[0]) - (coords[4] + coords[5]))
+def get_stereo_orientation(mol):
+    if isinstance(mol, tuple):
+        coords = mol.product_geometry
+    else:
+        coords = mol.coords
+    pv = get_pointing_vector(coords)
+    i_conn = None
+    j_conn = None
+    for b in mol.bonds:
+        i,j = sorted(b[:2])
+        if i in (2, 3):
+            if j == 7:
+                i_conn = int(i)
+            elif j == 8:
+                j_conn = int(i)
+    iv = coords[7] - coords[i_conn]
+    jv = coords[8] - coords[j_conn]
+    return (i_conn, int(np.sign(np.dot(pv, iv)))), (j_conn, int(np.sign(np.dot(pv, jv))))
+
+def merge_stereo_datasets(ds_vals):
+    d = ds_vals[0]
+    for d2 in ds_vals[1:]:
+        d = d.merge_datasets(d2)
+    return d
+
+
+def prep_stereo_subgroups(d2_groups, main_pair):
+    subwoof = d2_groups[main_pair]
+    submerge = merge_stereo_datasets(list(subwoof.values()))
+    orients = [
+        get_stereo_orientation(submerge.get_tree_data(i))
+        for i in range(len(submerge))
+    ]
+    ds = submerge.add_aggregation_fields(
+        orientations=orients,
+        o_keys=[f"{i}@{r}/{j}@{s}" for (i, r), (j, s) in orients]
+    )
+    return ds.group_by_props('o_keys')
+
+
+def get_real_sterodata(d2_groups, main_pair, return_data=False):
+    subgroups = prep_stereo_subgroups(d2_groups, main_pair)
+    l, r = main_pair.split(' ', 1)
+
+    bits = []
+    for ((s, b1), (s2, b2)) in [
+        [('2@-1/2@1', '2(+)'), ('2@1/2@-1', '2(-)')],
+        [('2@1/3@1', '2(+)'), ('2@-1/3@-1', '3(+)')],
+        [('2@1/3@-1', '2(+)'), ('2@-1/3@1', '3(-)')],
+
+    ]:
+        if s not in subgroups or s2 not in subgroups: continue
+        x = f"{l} | {b1}"
+        y = f"{r} | {b2}"
+        if return_data:
+            bits.append(get_dataset_sterodata(subgroups[s], subgroups[s2]))
+        else:
+            bits.append(plot_dataset_stereocomp(subgroups[s], subgroups[s2], x, y))
+
+    return bits
+
+def format_all_stereo_tables(d2_groups, join="\n"):
+    pairs = [k for k in d2_groups if ' ' in k]
+    return join.join(
+            "\n".join(get_real_sterodata(d2_groups, p))
+            for p in pairs
+        )
+
+def plot_stereo_barrier_data(sd, key, solvo_key='Min Barrier Solvo',
+                            solvo_exclude=.2,
+                            mech_exclude=.5,
+                            draw_mask=True,
+                            draw_panels=True,
+                            marker=None,
+                            **opts):
+    diffl = lambda x: x[0] - x[1]
+    diff_solv = np.array([diffl(d[solvo_key]) for d in sd])
+    diff_mech = np.array([diffl(d[key]) for d in sd])
+
+    figure = plt.ScatterPlot(
+        diff_solv,
+        # [diffl(d['Min Barrier Force']) for d in sd],
+        diff_mech,
+        **(
+                dict(
+                    plot_range=[[-2.05, 2.05], [-7.7, 7.7]],
+                    # color='white',
+                    ticks=[[-2, -1, 0, 1, 2], [-4, 0, 4]],
+                    # zorder=1000,
+                    image_size=[440, 300],
+                    marker=marker,
+                    axes_labels=[
+                        r'$\Delta \Delta E_a^{\text{solv.}}$ (kcal mol$^{-1}$)',
+                        r'$\Delta \Delta E_a^{\text{mech.}}$ (kcal mol$^{-1}$)'
+                    ]
+                ) | opts
+        )
+    )
+
+    (x, X), (y, Y) = figure.plot_range
+    # plt.Plot(
+    #     [0, 0],
+    #     [-10, 10],
+    #     figure=figure,
+    #     color='gray',
+    #     linestyle='dashed'
+    # )
+    # plt.Plot(
+    #     [-10, 10],
+    #     [0, 0],
+    #     figure=figure,
+    #     color='gray',
+    #     linestyle='dashed'
+    # )
+
+    # plt.FilledPlot(
+    #     [x, X],
+    #     [y, y],
+    #     [Y, Y],
+    #     figure=figure,
+    #     color=plt.prep_color('#AAAAAA', alpha=.2)
+    # )
+    # plt.FilledPlot(
+    #     [solvo_exclude, X],
+    #     [y, y],
+    #     [-mech_exclude, -mech_exclude],
+    #     figure=figure,
+    #     color='white'
+    # )
+    # plt.FilledPlot(
+    #     [x, -solvo_exclude],
+    #     [mech_exclude, mech_exclude],
+    #     [Y, Y],
+    #     figure=figure,
+    #     color='white'
+    # )
+    if draw_panels:
+        plt.Polygon(
+            [
+                [x, y], [x, mech_exclude],
+                [-solvo_exclude, mech_exclude],
+                [-solvo_exclude, Y],
+                [X, Y],
+                [X, -mech_exclude],
+                [solvo_exclude, -mech_exclude],
+                [solvo_exclude, y],
+            ],
+            color=plt.prep_color('#EEEEEE', alpha=.5)
+        ).plot(figure)
+
+        plt.Rectangle(
+            [
+                [x, mech_exclude],
+                [-solvo_exclude, Y]
+            ],
+            edgecolor=plt.prep_color('#0000FF', saturate=-.3),
+            facecolor='none'
+        ).plot(figure)
+
+        plt.Rectangle(
+            [
+                [solvo_exclude, y],
+                [X, -mech_exclude]
+            ],
+            edgecolor=plt.prep_color('#0000FF', saturate=-.3),
+            facecolor='none'
+        ).plot(figure)
+
+    if draw_mask:
+        mask = (
+                (diff_mech > mech_exclude) & (diff_solv < -solvo_exclude) |
+                (diff_mech < -mech_exclude) & (diff_solv > solvo_exclude)
+        )
+        plt.ScatterPlot(
+            diff_solv[mask],
+            # [diffl(d['Min Barrier Force']) for d in sd],
+            diff_mech[mask],
+            figure=figure,
+            marker=marker
+        )
+
+    # plt.FilledPlot(
+    #     [x, X],
+    #     [-mech_exclude, -mech_exclude],
+    #     [mech_exclude, mech_exclude],
+    #     figure=figure,
+    #     color=plt.prep_color('#CCC', alpha=.025)
+    # )
+    # plt.FilledPlot(
+    #     [-mech_exclude, X],
+    #     [solvo_exclude, solvo_exclude],
+    #     [Y, Y],
+    #     figure=figure,
+    #     # color=plt.prep_color('#AAAAAA', alpha=.025)
+    # )
+
+    # plt.Plot(
+    #     [-10, 10],
+    #     [-1, -1],
+    #     figure=figure,
+    #     color='#eee',
+    #     # linestyle='dashed'
+    # )
+    # plt.Plot(
+    #     [-10, 10],
+    #     [1, 1],
+    #     figure=figure,
+    #     color='#eee',
+    #     # linestyle='dashed'
+    # )
+    # figure.savefig('figs/stereodiffs.svg')
+    return figure

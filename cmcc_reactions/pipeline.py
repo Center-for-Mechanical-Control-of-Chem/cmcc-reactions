@@ -347,7 +347,7 @@ class OptimizedForceResults:
                 )
             return self._optimizer
 
-    def animate_fmrd_direction(self, fmrd_index, mass_weight=False, use_internals=None, **etc):
+    def animate_fmrd_direction(self, fmrd_index, mag=1, mass_weight=False, use_internals=None, **etc):
         if nput.is_int(fmrd_index):
             fmrd = self.fmrds[fmrd_index]
         else:
@@ -355,12 +355,13 @@ class OptimizedForceResults:
         if use_internals is None:
             use_internals = len(fmrd.force_vector) < len(self.product.atoms) * 3
         return self.optimizer.animate_normed(
-           0,
-           displacements=[fmrd.force_vector],
-           use_internals=use_internals,
-           mass_weight=mass_weight,
-           **etc
-       )
+            0,
+            mag=mag,
+            displacements=[fmrd.force_vector],
+            use_internals=use_internals,
+            mass_weight=mass_weight,
+            **etc
+        )
 
     def fmrd_vector(self, fmrd, mol='rs'):
         rrr = self.reactant if mol == 'rs' else self.transition_state

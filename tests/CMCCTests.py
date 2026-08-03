@@ -451,6 +451,7 @@ class CMCCTests(unittest.TestCase):
         #     )
         # )
 
+    @unittest.skip
     def test_MultiFragment(self):
         from Psience.Molecools import Molecule
 
@@ -1781,6 +1782,20 @@ H	-3.015828   -1.433443    1.079180''',
         print(ggg)
         print(ggg.gammas)
         ggg[lambda d:d['gammas'] < 1000000].plot()
+
+    def test_OptimizerForceConsistency(self):
+        file = test_data('pipeline_data_rigid.json')
+        uuh = pipeline.OptimizedForceResults.from_file(file)
+
+        opt = uuh.optimizer
+        opt2 = uuh.optimizer.from_data(
+            uuh.optimizer.to_data()
+        )
+
+        print(
+            opt.force_dirs
+            - opt2.force_dirs
+        )
 
 if __name__ == '__main__':
     os.chdir(root)

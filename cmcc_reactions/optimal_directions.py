@@ -3048,7 +3048,7 @@ class ForceOptimizer:
                                           )
         else:
             (x, sr, st) = self.get_displaced_geometries(0,
-                                                        disp_min=-1, disp_max=1,
+                                                        disp_min=-mag, disp_max=mag,
                                                         steps=3,
                                                         mass_weight=mass_weight, use_internals=use_internals,
                                                         displacements=displacements)
