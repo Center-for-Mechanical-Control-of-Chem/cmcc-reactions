@@ -1686,7 +1686,8 @@ BASE_FRAGMENTS = {
     'acetamide':'[C:1]C(=O)N',
     'methyl':'[C:1]',
     'carboxyl':'[C:1]C(=O)O',
-    'tBu':'[C:1]C(C)(C)(C)'
+    'tBu':'[C:1](C)(C)(C)',
+    'MetBu':'[C:1]C(C)(C)(C)'
 }
 
 def _prep_pipeline_tree(tree, precompression_function):
