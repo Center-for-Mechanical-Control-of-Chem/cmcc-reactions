@@ -17,6 +17,7 @@ from . import pipeline
 
 import McUtils.Devutils as dev
 from McUtils.Data import UnitsData, BondData
+import McUtils.Coordinerds as coordops
 import McUtils.Numputils as nput
 import McUtils.Plots as plt
 import McUtils.Iterators as itut
@@ -1576,22 +1577,113 @@ def kde_plot(data, filled=True, figure=None, color=None, plot_range=None, scalin
 
 def get_freqs(mol):
     return mol.get_normal_modes().freqs * UnitsData.hartrees_to_wavenumbers
-def get_compliances(mol, return_matrix=False, return_mol=False):
-    mol_int = mol.modify(
-        internals={'primitives': [tuple(x) for x in nput.combination_indices(len(mol.atoms), 2)]}
-    )
-    mol_int.potential_derivatives = [0, mol.potential_derivatives[1]]
-    H = mol_int.get_internal_potential_derivatives(order=2)[1]
-    inv_H = nput.frac_powh(H, -1)
+def get_compliances(mol,
+                    return_matrix=False,
+                    return_mol=False,
+                    distance_order=False,
+                    include_covalent_data=False,
+                    include_covalent_dihedrals=False,
+                    use_zmatrix=False,
+                    use_modes=False,
+                    internals=None,
+                    normalize=False,
+                    return_expansion=False,
+                    use_obliques=False,
+                    nonzero_cutoff=1e-14,
+                    distance_units=None,
+                    force_units=None,
+                    modes_filter=None):
+    if not use_modes:
+        if internals is not None:
+            mol_int = mol.modify(internals=internals)
+        elif use_zmatrix:
+            mol_int = mol.modify(internals=mol.get_bond_zmatrix())
+        else:
+            if include_covalent_data:
+                base_internals = mol.get_bond_graph_internals(
+                    include_fragments=False,
+                    include_dihedrals=include_covalent_dihedrals
+                )
+            else:
+                base_internals = []
+            enum_internals = [tuple(x) for x in nput.combination_indices(len(mol.atoms), 2)]
+            if distance_order:
+                dm = nput.distance_matrix(mol.coords)
+                bonds = {frozenset(b[:2]) for b in mol.bonds}
+                atoms = mol.atoms
+                enum_internals = sorted(enum_internals,
+                                        key=lambda i: (
+                                            i not in bonds,
+                                            (atoms[i[0]] == "H" or atoms[i[1]] == "H"),
+                                            dm[i[0], i[1]]
+                                        ))
+
+            base_internals = list(itut.delete_duplicates(
+                base_internals + enum_internals,
+                key=lambda x: coordops.canonicalize_internal(x)
+            ))
+            mol_int = mol.modify(
+                internals={'primitives': base_internals,
+                           'relocalize':True}
+            )
+    else:
+        mol_int = mol
+
+    modes = mol.get_normal_modes(use_internals=False, project_transrot=True)
+    if modes_filter is not None:
+        mask = modes_filter(modes.freqs * UnitsData.hartrees_to_wavenumbers)
+        modes = modes[np.where(mask)[0]]
+
+    if use_modes:
+        H = modes.compute_hessian('modes')
+        G = modes.compute_gmatrix('modes')
+        J = modes.coords_by_modes
+        if use_obliques:
+            from Psience.Modes import ObliqueModeGenerator
+            H, _, u, ui = ObliqueModeGenerator(H, G).run()
+            if return_expansion:
+                mol.oblique_transformation = (u, ui)
+                J = ui @ J
+    else:
+        H = modes.compute_hessian('coords')
+        J = mol_int.get_cartesians_by_internals(order=1, strip_embedding=True)[0]
+        H = J @ H @ J.T
+        if use_obliques:
+            from Psience.Modes import ObliqueModeGenerator
+            H, _, u, ui = ObliqueModeGenerator(H, mol_int.get_gmatrix()).run()
+            if return_expansion:
+                mol_int.internals['oblique_transformation'] = (u, ui)
+                J = ui @ J
+    if normalize:
+        norms = np.linalg.norm(J, axis=1)
+        H = np.diag(1/norms) @ H @ np.diag(1/norms)
+        J = np.diag(1/norms) @ J
+    inv_H = nput.frac_powh(H, -1, nonzero_cutoff=nonzero_cutoff)
     if return_matrix:
         compliances = inv_H
     else:
         compliances = np.diag(inv_H)
 
+    if distance_units is not None:
+        compliances = compliances * UnitsData.convert("BohrRadius", distance_units)
+    if force_units is not None:
+        force_units = force_units.replace("Newtons", "newtons")
+        force_units = force_units.replace("newtons", "Joules/Meters")
+        if isinstance(force_units, str):
+            force_units = force_units.split("/")
+        compliances = compliances / (
+            UnitsData.convert("Hartrees", force_units[0])
+            / UnitsData.convert("BohrRadius", force_units[1])
+        )
+
+    res = (compliances,)
     if return_mol:
-        return compliances, mol_int
-    else:
-        return compliances
+        res += (mol_int,)
+    if return_expansion:
+        res += (J,)
+    if len(res) == 1:
+        res = res[0]
+    return res
 _DEBUG_PRINT_KEYS = True
 def freq_data(mol, freq_filter=None, freq_gen=None, fcache=None):
     if hasattr(mol, 'get_normal_modes'):
@@ -1818,15 +1910,18 @@ def plot_compliance_means(
         )
     return figure
 
-def get_compliance_data(d2_reg, compliance_data, distance_units="Angstroms", force_units=("PicoJoules", "Meters")):
+def get_compliance_data(d2_reg, compliance_data, distance_units="Angstroms", force_units=("PicoJoules", "Meters"),
+                        thresh=0.15
+                        ):
     wah = get_dienophile_groups(d2_reg)
     means, rs_groups, ts_groups = get_compliance_groups(wah[2], compliance_data)
 
-    wop = get_compliance_means(rs_groups, ts_groups)
     conv = UnitsData.convert("BohrRadius", distance_units) / (
         UnitsData.convert("Hartrees", force_units[0]) /
         UnitsData.convert("BohrRadius", force_units[1])
     )
+    thresh = thresh / conv
+    wop = get_compliance_means(rs_groups, ts_groups, thresh=thresh)
     return means, wop[0] * conv, wop[1] * conv
 
 def get_compliance_fit(compliances, barriers, include_intercept=True):
